@@ -18,6 +18,8 @@ export class MemoryCompanyStore implements CompanyStore, CompanyBank {
   readonly servers: { companyId: string; id: string; tier: ServerTierId }[] = [];
   readonly ledger: Line[] = [];
   readonly payouts = new Map<string, { id: string; companyId: string; userId: string; workDay: number; amountCents: number; claimedAt: number | null }>();
+  /** Dividends a winning settlement booked; the memory investor store claims them. */
+  readonly dividendPayouts = new Map<string, { id: string; companyId: string; userId: string; workDay: number; amountCents: number; claimedAt: number | null }>();
   /** The work log a winning settlement marks counted, as D1 does in the same batch. */
   private readonly work: { markSettled(ids: readonly string[], workDay: number): void } | undefined;
 
@@ -169,8 +171,16 @@ export class MemoryCompanyStore implements CompanyStore, CompanyBank {
     for (const payout of day.payouts) {
       if (!this.payouts.has(payout.id)) this.payouts.set(payout.id, { ...payout, companyId: day.companyId, workDay: day.fromWorkDay + 1, claimedAt: null });
     }
+    for (const dividend of day.dividends) {
+      if (!this.dividendPayouts.has(dividend.id)) this.dividendPayouts.set(dividend.id, { ...dividend, companyId: day.companyId, workDay: day.fromWorkDay + 1, claimedAt: null });
+    }
     this.work?.markSettled(day.workIds, day.fromWorkDay + 1);
     return true;
+  }
+
+  /** Books a line written by another part of the books (an investment), once per ref. */
+  credit(companyId: string, line: Omit<Line, "companyId">): void {
+    this.book(companyId, line);
   }
 
   private book(companyId: string, line: Omit<Line, "companyId">): void {

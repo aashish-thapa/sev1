@@ -10,6 +10,8 @@ import {
   POSTINGS_PATH,
   TOP_COMPANIES_PATH,
   InviteRequestSchema,
+  OFFERS_PATH,
+  OfferRequestSchema,
   SetMemberRequestSchema,
   SettleRequestSchema,
   WORK_PATH,
@@ -20,6 +22,7 @@ import { failure, idempotencyKeyOf, isSameOrigin, json, readBody, sessionTokenOf
 import { CATEGORY_IDS, type CategoryId } from "../../src/domain/company/catalog.ts";
 import type { CompanyDirectory } from "./directory.ts";
 import type { HiringService } from "./hiring.ts";
+import type { InvestingService } from "./investing.ts";
 import type { WorkService } from "./work.ts";
 import type { CompanyOffice } from "./office.ts";
 
@@ -32,6 +35,8 @@ export const INVITATIONS_PATH = "/api/invitations";
 export const APPLY_PATH = "/api/postings";
 export const INTERVIEWS_PATH = "/api/interviews";
 export const APPLICATIONS_PATH = "/api/applications";
+/** An investor answers an offer from outside any company. */
+export const RECEIVED_OFFERS_PATH = "/api/offers";
 const ID = "([A-Za-z0-9-]{1,64})";
 const INVITATION_ACTION = new RegExp(`^${INVITATIONS_PATH}/${ID}/(accept|decline)$`);
 const POSTING_CLOSE = new RegExp(`^${POSTINGS_PATH}/${ID}/close$`);
@@ -39,6 +44,8 @@ const POSTING_APPLY = new RegExp(`^${APPLY_PATH}/${ID}/apply$`);
 const INTERVIEW_ANSWERS = new RegExp(`^${INTERVIEWS_PATH}/${ID}/answers$`);
 const APPLICATION_DECISION = new RegExp(`^${APPLICATIONS_PATH}/${ID}/(hire|reject)$`);
 const WORK_ANSWER = new RegExp(`^${WORK_PATH}/${ID}$`);
+const OFFER_CANCEL = new RegExp(`^${OFFERS_PATH}/${ID}/cancel$`);
+const OFFER_ANSWER = new RegExp(`^${RECEIVED_OFFERS_PATH}/${ID}/(accept|decline)$`);
 /** Public lists change once a work day; a minute of caching spares the database on every page view. */
 const PUBLIC_CACHE = { "cache-control": "public, max-age=60" } as const;
 const CategorySchema = z.enum(CATEGORY_IDS);
@@ -71,6 +78,12 @@ const STATUS: Readonly<Record<CompanyProblem, number>> = {
   not_on_board: 404,
   already_answered: 409,
   invalid: 400,
+  self_offer: 400,
+  below_minimum_investment: 400,
+  too_much_equity: 400,
+  founder_control: 409,
+  offer_not_found: 404,
+  not_enough_money: 409,
 };
 
 const MESSAGE: Readonly<Record<CompanyProblem, string>> = {
@@ -100,6 +113,12 @@ const MESSAGE: Readonly<Record<CompanyProblem, string>> = {
   not_on_board: "That task isn't on your board today.",
   already_answered: "You've already answered that task today.",
   invalid: "That answer doesn't fit the task.",
+  self_offer: "The founder can't invest in their own company.",
+  below_minimum_investment: "An investment starts at $500.",
+  too_much_equity: "One offer can't sell more than 49% of the company.",
+  founder_control: "That would leave the founder under 51%, counting the offers already out.",
+  offer_not_found: "That offer isn't open any more.",
+  not_enough_money: "Your saved wallet doesn't hold that much.",
 };
 
 function respond<Value>(outcome: Outcome<Value>, status = 200): Response {
@@ -114,6 +133,7 @@ export async function handleCompany(
   hiring: HiringService,
   office: CompanyOffice,
   work: WorkService,
+  investing: InvestingService,
 ): Promise<Response> {
   const url = new URL(request.url);
   const route = `${request.method} ${url.pathname}`;
@@ -141,6 +161,13 @@ export async function handleCompany(
     if (answeringWork) {
       const body = await readBody(request, WorkAnswerSchema);
       return body.ok ? respond(await work.answer(user, answeringWork[1], body.data)) : body.response;
+    }
+    const cancelling = OFFER_CANCEL.exec(url.pathname);
+    if (cancelling) return respond(await investing.cancel(user, cancelling[1]));
+    const answeringOffer = OFFER_ANSWER.exec(url.pathname);
+    if (answeringOffer) {
+      const [, id, answer] = answeringOffer;
+      return answer === "accept" ? respond(await investing.accept(user, id)) : respond(await investing.decline(user, id));
     }
     const deciding = APPLICATION_DECISION.exec(url.pathname);
     if (deciding) return respond(deciding[2] === "hire" ? await hiring.hire(user, deciding[1]) : await hiring.reject(user, deciding[1]));
@@ -174,6 +201,10 @@ export async function handleCompany(
     case `POST ${COMPANY_PATH}/members`: {
       const body = await readBody(request, SetMemberRequestSchema);
       return body.ok ? respond(await companies.setMember(user, body.data)) : body.response;
+    }
+    case `POST ${OFFERS_PATH}`: {
+      const body = await readBody(request, OfferRequestSchema);
+      return body.ok ? respond(await investing.offer(user, body.data, requestKey), 201) : body.response;
     }
     case `POST ${POSTINGS_PATH}`: {
       const body = await readBody(request, OpenPostingRequestSchema);

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Title } from "../../src/domain/career.ts";
 import { companyMoveStatements } from "../company/d1-store.ts";
+import { investorMoveStatements } from "../company/investor-d1-store.ts";
 import { grantClaimStatements } from "../grants/d1-store.ts";
 import { NO_SAVE_MOVES, type AccountStore, type SaveMoves, type LedgerRow, type RankedAccount, type SavedProgress, type Standing, type User } from "./store.ts";
 
@@ -81,6 +82,7 @@ export class D1AccountStore implements AccountStore {
       ),
       ...companyMoveStatements(this.db, userId, moves, progress.updatedAt),
       ...grantClaimStatements(this.db, userId, moves.grantIds, progress.updatedAt),
+      ...investorMoveStatements(this.db, userId, moves, progress.updatedAt),
     ]);
   }
 

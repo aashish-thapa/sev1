@@ -299,6 +299,11 @@ export class D1CompanyStore implements CompanyStore, CompanyBank {
           .prepare(`INSERT OR IGNORE INTO company_payouts (id, company_id, user_id, work_day, amount_cents, claimed_at, created_at) SELECT ?, ?, ?, ?, ?, NULL, ? WHERE ${claimed}`)
           .bind(payout.id, day.companyId, payout.userId, day.fromWorkDay + 1, payout.amountCents, day.at, day.companyId, token),
       ),
+      ...day.dividends.map((dividend) =>
+        this.db
+          .prepare(`INSERT OR IGNORE INTO dividend_payouts (id, company_id, user_id, work_day, amount_cents, claimed_at, created_at) SELECT ?, ?, ?, ?, ?, NULL, ? WHERE ${claimed}`)
+          .bind(dividend.id, day.companyId, dividend.userId, day.fromWorkDay + 1, dividend.amountCents, day.at, day.companyId, token),
+      ),
       ...day.workIds.map((id) =>
         this.db
           .prepare(`UPDATE work_log SET settled_work_day = ? WHERE id = ? AND company_id = ? AND settled_work_day IS NULL AND ${claimed}`)

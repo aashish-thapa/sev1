@@ -30,6 +30,13 @@ export const COMPANY_ERRORS = [
   // Daily work.
   "not_on_board",
   "already_answered",
+  // Investors.
+  "self_offer",
+  "below_minimum_investment",
+  "too_much_equity",
+  "founder_control",
+  "offer_not_found",
+  "not_enough_money",
 ] as const;
 
 export const API_ERRORS = [

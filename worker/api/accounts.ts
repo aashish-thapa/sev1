@@ -8,7 +8,7 @@ import { emptyProgress, ProgressSchema, type Progress } from "../../src/domain/p
 import type { Account, SyncedProgress } from "../../src/storage/account-protocol.ts";
 import { LEADERBOARD_SIZE, type Leaderboard } from "../../src/storage/leaderboard-protocol.ts";
 import { hashPassword, verifyPassword } from "./password.ts";
-import type { AccountStore, CompanyBank, GrantBank, LedgerRow, PendingGrant, SaveMoves, Standing, User } from "./store.ts";
+import type { AccountStore, CompanyBank, GrantBank, InvestorBank, LedgerRow, PendingGrant, SaveMoves, Standing, User } from "./store.ts";
 import { hashToken, newSessionToken } from "./tokens.ts";
 
 export const SESSION_SECONDS = 30 * 24 * 60 * 60;
@@ -43,11 +43,14 @@ function saveMovesOf(previous: Progress, next: Progress): SaveMoves {
     fundingRefs: fresh.filter((entry) => entry.reason === "company").map((entry) => entry.ref),
     payoutIds: fresh.filter((entry) => entry.reason === "payroll").map((entry) => entry.ref.slice(PAYROLL_REF_PREFIX.length)),
     grantIds: fresh.filter((entry) => entry.reason === "grant").map((entry) => entry.ref.slice(GRANT_REF_PREFIX.length)),
+    investRefs: fresh.filter((entry) => entry.reason === "invest").map((entry) => entry.ref),
+    dividendIds: fresh.filter((entry) => entry.reason === "dividend").map((entry) => entry.ref.slice(DIVIDEND_REF_PREFIX.length)),
   };
 }
 
 const PAYROLL_REF_PREFIX = payRef.payroll("");
 const GRANT_REF_PREFIX = payRef.grant("");
+const DIVIDEND_REF_PREFIX = payRef.dividend("");
 
 /** What the client may know about an account. */
 export function accountOf(user: User): Account {
@@ -70,13 +73,16 @@ export class AccountService {
   private readonly bank: CompanyBank | undefined;
   /** Admin grants issued to each player; without it, grant money in a save is refused. */
   private readonly grants: GrantBank | undefined;
+  /** Investments each player agreed to and dividends booked for them; without it, both are refused. */
+  private readonly investors: InvestorBank | undefined;
 
-  constructor(store: AccountStore, now: Clock, tierOf?: TierOf, bank?: CompanyBank, grants?: GrantBank) {
+  constructor(store: AccountStore, now: Clock, tierOf?: TierOf, bank?: CompanyBank, grants?: GrantBank, investors?: InvestorBank) {
     this.store = store;
     this.now = now;
     this.tierOf = tierOf;
     this.bank = bank;
     this.grants = grants;
+    this.investors = investors;
   }
 
   /** Creates the account and, when it's plausible, keeps the progress earned before signing up. */
@@ -144,14 +150,17 @@ export class AccountService {
 
   /** Everything the server has promised this player's wallet and not yet seen claimed. */
   private async promisedTo(user: User): Promise<PromisedMoney> {
-    const [company, grants] = await Promise.all([this.bank ? this.bank.claimsFor(user.id, this.now()) : NO_PROMISED_MONEY, this.pendingGrants(user)]);
+    const [company, grants, investing] = await Promise.all([
+      this.bank ? this.bank.claimsFor(user.id, this.now()) : NO_PROMISED_MONEY,
+      this.pendingGrants(user),
+      this.investors ? this.investors.claimsFor(user.id, this.now()) : NO_PROMISED_MONEY,
+    ]);
     return {
       fundings: company.fundings,
       payouts: company.payouts,
       grants: new Map(grants.map((grant) => [payRef.grant(grant.id), grant.amountCents])),
-      // Investments and dividends join once the company bank books them (startup mode, phase 4).
-      investments: new Map(),
-      dividends: new Map(),
+      investments: investing.investments,
+      dividends: investing.dividends,
     };
   }
 

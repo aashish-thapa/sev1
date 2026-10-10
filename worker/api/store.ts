@@ -13,10 +13,17 @@ export type LedgerRow = { readonly id: string; readonly amountCents: number; rea
 
 /**
  * Server-side money a save just moved, booked in the same batch as the save: seeds that fund a waiting
- * company (by funding ref), payouts the player claimed (by payout id), and admin grants claimed (by grant id).
+ * company (by funding ref), payouts the player claimed (by payout id), admin grants claimed (by grant id),
+ * investments paid for (by invest ref) and dividends claimed (by payout id).
  */
-export type SaveMoves = { readonly fundingRefs: readonly string[]; readonly payoutIds: readonly string[]; readonly grantIds: readonly string[] };
-export const NO_SAVE_MOVES: SaveMoves = { fundingRefs: [], payoutIds: [], grantIds: [] };
+export type SaveMoves = {
+  readonly fundingRefs: readonly string[];
+  readonly payoutIds: readonly string[];
+  readonly grantIds: readonly string[];
+  readonly investRefs: readonly string[];
+  readonly dividendIds: readonly string[];
+};
+export const NO_SAVE_MOVES: SaveMoves = { fundingRefs: [], payoutIds: [], grantIds: [], investRefs: [], dividendIds: [] };
 
 /** The company share of what the server promised a player's wallet. */
 export type CompanyPromises = Pick<PromisedMoney, "fundings" | "payouts">;
@@ -24,6 +31,11 @@ export type CompanyPromises = Pick<PromisedMoney, "fundings" | "payouts">;
 /** What companies are waiting for from, or owe to, a player's wallet; the save audit checks against it. */
 export interface CompanyBank {
   claimsFor(userId: string, now: number): Promise<CompanyPromises>;
+}
+
+/** What investing has promised a player's wallet: accepted offers to pay for, and dividends to claim. */
+export interface InvestorBank {
+  claimsFor(userId: string, now: number): Promise<Pick<PromisedMoney, "investments" | "dividends">>;
 }
 
 /** Admin grants issued to a player and not yet claimed, by wallet ref → amount. */

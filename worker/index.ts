@@ -11,7 +11,9 @@ import { DIRECTORY_NAME } from "./directory-object.ts";
 import type { Env } from "./env.ts";
 import { routeRoomSocket } from "./rooms.ts";
 import { D1CompanyStore } from "./company/d1-store.ts";
-import { APPLICATIONS_PATH, APPLY_PATH, handleCompany, handleDirectory, INTERVIEWS_PATH, INVITATIONS_PATH } from "./company/routes.ts";
+import { APPLICATIONS_PATH, APPLY_PATH, handleCompany, handleDirectory, INTERVIEWS_PATH, INVITATIONS_PATH, RECEIVED_OFFERS_PATH } from "./company/routes.ts";
+import { D1InvestorStore } from "./company/investor-d1-store.ts";
+import { InvestingService } from "./company/investing.ts";
 import { CompanyDirectory } from "./company/directory.ts";
 import { HiringService } from "./company/hiring.ts";
 import { WorkService } from "./company/work.ts";
@@ -93,14 +95,15 @@ export default {
       const companyStore = new D1CompanyStore(env.DB);
       const accountStore = new D1AccountStore(env.DB);
       const grantStore = new D1GrantStore(env.DB);
+      const investorStore = new D1InvestorStore(env.DB);
       const isOverLimit = (limit: number) => async (key: string) => {
         const windowStart = Math.floor(Date.now() / ATTEMPT_WINDOW_MS) * ATTEMPT_WINDOW_MS;
         return (await accountStore.countAttempt(key, windowStart)) > limit;
       };
-      const accounts = new AccountService(accountStore, Date.now, (id) => findScenario(id)?.tier, companyStore, grantStore);
+      const accounts = new AccountService(accountStore, Date.now, (id) => findScenario(id)?.tier, companyStore, grantStore, investorStore);
       const entitlements = new D1EntitlementStore(env.DB);
       if (pathname === COMPANIES_PATH || pathname === TOP_COMPANIES_PATH) return handleDirectory(request, new CompanyDirectory(new D1CompanyDirectory(env.DB)));
-      if (pathname === COMPANY_PATH || [COMPANY_PATH, INVITATIONS_PATH, APPLY_PATH, INTERVIEWS_PATH, APPLICATIONS_PATH].some((prefix) => pathname.startsWith(`${prefix}/`))) {
+      if (pathname === COMPANY_PATH || [COMPANY_PATH, INVITATIONS_PATH, APPLY_PATH, INTERVIEWS_PATH, APPLICATIONS_PATH, RECEIVED_OFFERS_PATH].some((prefix) => pathname.startsWith(`${prefix}/`))) {
         const hiringStore = new D1HiringStore(env.DB);
         const workStore = new D1WorkStore(env.DB);
         const companies = new CompanyService({
@@ -111,6 +114,7 @@ export default {
           hiring: hiringStore,
           work: workStore,
           pantryOf: async (userId, day) => pantryCostOn((await savedProgressOf(accountStore, userId)).pantry, day),
+          investors: investorStore,
         });
         const hiring = new HiringService({
           store: hiringStore,
@@ -130,7 +134,16 @@ export default {
           newId: () => crypto.randomUUID(),
           isOverLimit: isOverLimit(COMPANY_WRITES_PER_WINDOW),
         });
-        return handleCompany(request, accounts, companies, hiring, officeFor(env), work);
+        const investing = new InvestingService({
+          investors: investorStore,
+          companies: companyStore,
+          company: companies,
+          now: Date.now,
+          newId: () => crypto.randomUUID(),
+          isOverLimit: isOverLimit(COMPANY_WRITES_PER_WINDOW),
+          balanceOf: async (userId) => (await savedProgressOf(accountStore, userId)).wallet.balanceCents,
+        });
+        return handleCompany(request, accounts, companies, hiring, officeFor(env), work, investing);
       }
       if (pathname.startsWith(ADMIN_PREFIX)) {
         const store = new D1AccountStore(env.DB);

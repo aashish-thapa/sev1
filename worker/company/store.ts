@@ -1,6 +1,5 @@
 /** What the company service needs from storage: D1 in production, memory in tests. Money moves are conditional writes. */
 import type { CategoryId, RoomKindId, ServerTierId } from "../../src/domain/company/catalog.ts";
-import type { LedgerReason } from "../../src/domain/company/rules.ts";
 import type { Role } from "../../src/domain/incident.ts";
 import type { LEDGER_REASONS, PendingPayout, ReceivedInvitation } from "../../src/storage/company-protocol.ts";
 
@@ -70,8 +69,10 @@ export type SettledDay = {
   readonly fromWorkDay: number;
   readonly today: string;
   readonly at: number;
-  readonly lines: readonly { readonly ref: string; readonly reason: LedgerReason; readonly amountCents: number; readonly userId: string | null; readonly note: string | null }[];
+  readonly lines: readonly { readonly ref: string; readonly reason: BookReason; readonly amountCents: number; readonly userId: string | null; readonly note: string | null }[];
   readonly payouts: readonly { readonly id: string; readonly userId: string; readonly amountCents: number }[];
+  /** Investors' share of the week's profit, on the days that close a week. */
+  readonly dividends: readonly { readonly id: string; readonly userId: string; readonly amountCents: number }[];
   /** Shipped work rows this day counts; marked counted only if this settlement wins the day. */
   readonly workIds: readonly string[];
 };

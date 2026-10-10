@@ -9,6 +9,7 @@ import type { Role } from "../../src/domain/incident.ts";
 import type { Application, Company, FoundRequest, MyCompany, Posting, WorkDaySettlement } from "../../src/storage/company-protocol.ts";
 import type { ApplicationRow, HiringStore, PostingRow } from "./hiring-store.ts";
 import type { WorkStore } from "./work-store.ts";
+import { dividendsOn, myInvesting, NO_OWNERSHIP, ownershipOf, type InvestorReads, type Ownership } from "./ownership.ts";
 import type { CompanyStore, CompanyView } from "./store.ts";
 
 /** How long a founder has to put the seed in before the company is dropped. */
@@ -46,7 +47,13 @@ export type CompanyProblem =
   | "no_questions"
   | "not_on_board"
   | "already_answered"
-  | "invalid";
+  | "invalid"
+  | "self_offer"
+  | "below_minimum_investment"
+  | "too_much_equity"
+  | "founder_control"
+  | "offer_not_found"
+  | "not_enough_money";
 
 export type Outcome<Value> = { readonly ok: true; readonly value: Value } | { readonly ok: false; readonly problem: CompanyProblem };
 
@@ -71,6 +78,8 @@ export type CompanyDeps = {
   readonly isOverLimit: (key: string) => Promise<boolean>;
   /** Postings and applications to show in the HQ; without it the HQ lists none. */
   readonly hiring?: Pick<HiringStore, "postingsOf" | "applicationsOf" | "myApplications">;
+  /** Stakes, offers and dividends; without it a company has no investors. */
+  readonly investors?: InvestorReads;
 };
 
 const fail = (problem: CompanyProblem) => ({ ok: false as const, problem });
@@ -107,7 +116,7 @@ export function canHire(view: CompanyView, userId: string): boolean {
   return member !== undefined && (member.isFounder || member.canHire);
 }
 
-function companyOf(view: CompanyView, postings: readonly PostingRow[], applications: readonly ApplicationRow[]): Company {
+function companyOf(view: CompanyView, postings: readonly PostingRow[], applications: readonly ApplicationRow[], ownership: Ownership): Company {
   const { company } = view;
   const level = levelOf(view);
   return {
@@ -135,10 +144,7 @@ function companyOf(view: CompanyView, postings: readonly PostingRow[], applicati
     lifetimeRevenueCents: view.lifetimeRevenueCents,
     postings: postings.map(postingOf),
     applications: applications.map(applicationOf),
-    // Investors arrive with phase 4's server; until then a company shows none.
-    capTable: null,
-    investmentOffers: [],
-    trackers: null,
+    ...ownership,
   };
 }
 
@@ -152,13 +158,14 @@ export class CompanyService {
   /** Your company (with any expired, never-funded one dropped), the offers waiting for you and pay to claim. */
   async mine(caller: Caller): Promise<MyCompany> {
     const { store } = this.deps;
-    const [view, invitations, payouts, applications] = await Promise.all([
+    const [view, invitations, payouts, applications, investing] = await Promise.all([
       this.companyFor(caller.id),
       store.receivedInvitations(caller.id),
       store.pendingPayouts(caller.id),
       this.deps.hiring?.myApplications(caller.id) ?? [],
+      this.deps.investors ? myInvesting(caller.id, this.deps.investors) : { investmentOffers: [], holdings: [], dividends: [] },
     ]);
-    return { company: view ? await this.present(view, caller.id) : null, invitations, payouts, applications, investmentOffers: [], holdings: [], dividends: [] };
+    return { company: view ? await this.present(view, caller.id) : null, invitations, payouts, applications, ...investing };
   }
 
   async found(caller: Caller, request: FoundRequest): Promise<Outcome<{ companyId: string; fundingRef: string; seedCents: number }>> {
@@ -283,12 +290,23 @@ export class CompanyService {
     const payouts = settlement.payroll
       .filter((pay) => pay.amountCents > 0)
       .map((pay) => ({ id: `${view.company.id}:${workDay}:${pay.userId}`, userId: pay.userId, amountCents: pay.amountCents }));
-    const booked = await store.settle({ companyId: view.company.id, fromWorkDay: view.company.workDay, today, at, lines, payouts, workIds });
+    // A day that closes a week also pays investors their share of the week's profit, in the same batch.
+    const dividends = this.deps.investors ? await dividendsOn(view, workDay, lines, settlement.fundsAfter, this.deps.investors) : { lines: [], payouts: [] };
+    const booked = await store.settle({
+      companyId: view.company.id,
+      fromWorkDay: view.company.workDay,
+      today,
+      at,
+      lines: [...lines, ...dividends.lines],
+      payouts,
+      dividends: dividends.payouts,
+      workIds,
+    });
     if (!booked) return fail("already_settled_today");
     return ok({
       workDay,
-      lines: lines.map((line) => ({ at, workDay, reason: line.reason, amountCents: line.amountCents, note: line.note })),
-      fundsAfter: settlement.fundsAfter,
+      lines: [...lines, ...dividends.lines].map((line) => ({ at, workDay, reason: line.reason, amountCents: line.amountCents, note: line.note })),
+      fundsAfter: settlement.fundsAfter - dividends.payouts.reduce((sum, payout) => sum + payout.amountCents, 0),
       isPayrollShort: settlement.isPayrollShort,
     });
   }
@@ -303,7 +321,8 @@ export class CompanyService {
     return view;
   }
 
-  private async foundersCompany(caller: Caller): Promise<Outcome<CompanyView>> {
+  /** The caller's company when they founded it and it's running; rate-limited like every founder write. */
+  async foundersCompany(caller: Caller): Promise<Outcome<CompanyView>> {
     if (await this.deps.isOverLimit(`company:${caller.id}`)) return fail("rate_limited");
     const view = await this.companyFor(caller.id);
     if (!view) return fail("not_in_company");
@@ -335,10 +354,11 @@ export class CompanyService {
 
   /** The company as `viewerId` may see it: postings and applicants only for the founder and hiring managers. */
   async present(view: CompanyView, viewerId: string): Promise<Company> {
-    const { hiring } = this.deps;
-    if (!hiring || !canHire(view, viewerId)) return companyOf(view, [], []);
+    const { hiring, investors } = this.deps;
+    const ownership = investors && view.company.state === "active" ? await ownershipOf(view, viewerId, investors) : NO_OWNERSHIP;
+    if (!hiring || !canHire(view, viewerId)) return companyOf(view, [], [], ownership);
     const [postings, applications] = await Promise.all([hiring.postingsOf(view.company.id), hiring.applicationsOf(view.company.id)]);
-    return companyOf(view, postings, applications);
+    return companyOf(view, postings, applications, ownership);
   }
 
   async reloaded(companyId: string, viewerId: string): Promise<Outcome<Company>> {

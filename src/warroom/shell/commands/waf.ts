@@ -1,16 +1,33 @@
 import { addWafRule, deleteWafRule } from "../../sim/commerce-actions.ts";
 import type { Commerce, WafRule } from "../../sim/commerce.ts";
-import { cidrCustomerShare, DISTINCT_SOURCE_IPS, parseCidr, rateLimitCustomerShare, topTalkers, topTalkerShare, wafRuleId } from "../../sim/edge.ts";
+import {
+  attackRequestsPerSecond,
+  cidrReach,
+  distinctSourceIps,
+  parseCidr,
+  protectedPaths,
+  rateLimitReach,
+  topReach,
+  topRequestShare,
+  topSources,
+  wafRuleId,
+  type SourceKind,
+} from "../../sim/edge.ts";
 import { applied, commerceCommand, count, percent, stamp, WINDOW_SECONDS } from "../commerce-command.ts";
 import { operatorName, ssoRefusal } from "../identity.ts";
 import { takeFlag } from "../tokenize.ts";
 import { dim, err, out, table, type ShellContext, type ShellResult } from "../types.ts";
 
-const CHECKOUT_PATH = 'http.request.uri.path eq "/checkout"';
 const PERIOD_SECONDS: Record<string, number> = { "10s": 10, "1m": 60, "10m": 600, "1h": 3600 };
+const SOURCE_TYPES: Record<SourceKind, string> = { mobile: "mobile carrier (CGNAT)", residential: "residential ISP", hosting: "hosting / datacenter" };
 
-function matchedPerWindow(rule: WafRule, commerce: Commerce): string {
-  if (rule.expression.includes('"/checkout"')) return count(rule.customerShare * commerce.pulse.checkoutAttemptsPerSecond * WINDOW_SECONDS);
+/** Attack requests a rule stopped over the telemetry window. */
+function attackMatched(rule: WafRule, commerce: Commerce, t: number): number {
+  return commerce.attack ? (rule.attackShare ?? 0) * attackRequestsPerSecond(commerce.attack, t) * WINDOW_SECONDS : 0;
+}
+
+function matchedPerWindow(rule: WafRule, commerce: Commerce, t: number): string {
+  if (rule.expression.includes('"/checkout"')) return count(rule.customerShare * commerce.pulse.checkoutAttemptsPerSecond * WINDOW_SECONDS + attackMatched(rule, commerce, t));
   // Rules on other paths still see their usual background hits.
   let hash = 0;
   for (const char of rule.id) hash = (hash * 31 + char.charCodeAt(0)) % 997;
@@ -18,52 +35,68 @@ function matchedPerWindow(rule: WafRule, commerce: Commerce): string {
 }
 
 function rules(context: ShellContext, commerce: Commerce): ShellResult {
-  const rows = commerce.wafRules.map((rule) => [rule.id, rule.action, rule.expression, stamp(context, rule.createdAt), rule.createdBy, matchedPerWindow(rule, commerce)]);
+  const rows = commerce.wafRules.map((rule) => [rule.id, rule.action, rule.expression, stamp(context, rule.createdAt), rule.createdBy, matchedPerWindow(rule, commerce, context.cluster.t)]);
   return { output: out(...table([["ID", "ACTION", "EXPRESSION", "CREATED", "BY", "MATCHED/5M"], ...rows])) };
 }
 
-function top(args: readonly string[], commerce: Commerce): ShellResult {
+/** The request line(s) `waf top` covers: checkout, plus the attacked path when it isn't checkout. */
+function pathsLabel(commerce: Commerce): string {
+  const path = commerce.attack?.path;
+  return !path || path === "/checkout" ? "POST /checkout" : `POST /checkout, POST ${path}`;
+}
+
+function top(args: readonly string[], context: ShellContext, commerce: Commerce): ShellResult {
   const limit = Number(args[0] ?? 15);
   if (!Number.isInteger(limit) || limit < 1) return { output: err("usage: waf top [N]") };
-  const perMinute = commerce.pulse.checkoutAttemptsPerSecond * 60;
-  const rows = topTalkers(Math.min(limit, 100)).map((talker) => [
-    String(talker.rank),
-    talker.ip,
-    count(perMinute * talker.customerShare),
-    String(talker.asn),
-    talker.network,
-    talker.kind === "mobile" ? "mobile carrier (CGNAT)" : "residential ISP",
+  const { t } = context.cluster;
+  const rows = topSources(commerce, t, Math.min(limit, 100)).map((source) => [
+    String(source.rank),
+    source.ip,
+    count(source.requestsPerMinute),
+    String(source.asn),
+    source.network,
+    SOURCE_TYPES[source.kind],
   ]);
   return {
     output: [
-      ...out("Top source IPs · POST /checkout · last 5 min"),
+      ...out(`Top source IPs · ${pathsLabel(commerce)} · last 5 min`),
       ...out(...table([["RANK", "IP", "REQ/MIN", "ASN", "NETWORK", "TYPE"], ...rows])),
-      ...dim(`${count(DISTINCT_SOURCE_IPS)} distinct source IPs · top 100 carry ${percent(topTalkerShare(100))} of requests · top 500 carry ${percent(topTalkerShare(500))}`),
+      ...dim(
+        `${count(distinctSourceIps(commerce))} distinct source IPs · top 100 carry ${percent(topRequestShare(commerce, t, 100))} of requests · top 500 carry ${percent(topRequestShare(commerce, t, 500))}`,
+      ),
     ],
   };
 }
 
 function created(context: ShellContext, rule: Omit<WafRule, "id" | "createdAt">, commerce: Commerce): ShellResult {
   const id = wafRuleId(commerce);
+  const { attack } = commerce;
+  const attackPreview =
+    attack && rule.attackShare !== undefined
+      ? ` and ${percent(rule.attackShare)} of the ${attack.label} on POST ${attack.path} (${count(rule.attackShare * attackRequestsPerSecond(attack, context.cluster.t) * WINDOW_SECONDS)} requests)`
+      : "";
   return applied("waf", addWafRule(context.cluster, rule), () => [
     ...out(`rule ${id} created (${rule.action}): ${rule.expression}`),
-    ...dim(`Preview against the last 5 min: would have matched ${percent(rule.customerShare)} of POST /checkout (${count(rule.customerShare * commerce.pulse.checkoutAttemptsPerSecond * WINDOW_SECONDS)} requests). Live at the edge within ~5s.`),
+    ...dim(
+      `Preview against the last 5 min: would have matched ${percent(rule.customerShare)} of POST /checkout (${count(rule.customerShare * commerce.pulse.checkoutAttemptsPerSecond * WINDOW_SECONDS)} requests)${attackPreview}. Live at the edge within ~5s.`,
+    ),
   ]);
 }
 
 function block(args: readonly string[], context: ShellContext, commerce: Commerce): ShellResult {
   const { value: topCount, rest } = takeFlag(args, "--top");
   const createdBy = operatorName(context.role);
+  const paths = protectedPaths(commerce);
   if (topCount !== undefined) {
     const n = Number(topCount);
     if (!Number.isInteger(n) || n < 1) return { output: err("waf: error: --top needs a positive integer") };
-    return created(context, { action: "block", expression: `ip.src in $checkout_top${n} and ${CHECKOUT_PATH}`, createdBy, customerShare: topTalkerShare(n) }, commerce);
+    return created(context, { action: "block", expression: `ip.src in $checkout_top${n} and ${paths}`, createdBy, ...topReach(commerce, context.cluster.t, n) }, commerce);
   }
   const target = rest[0];
   const cidr = target ? parseCidr(target) : null;
   if (!target || !cidr) return { output: err("usage: waf block <ip|cidr> | waf block --top N") };
-  const expression = cidr.bits === 32 ? `ip.src eq ${target.split("/")[0]} and ${CHECKOUT_PATH}` : `ip.src in {${target}} and ${CHECKOUT_PATH}`;
-  return created(context, { action: "block", expression, createdBy, customerShare: cidrCustomerShare(cidr) }, commerce);
+  const expression = cidr.bits === 32 ? `ip.src eq ${target.split("/")[0]} and ${paths}` : `ip.src in {${target}} and ${paths}`;
+  return created(context, { action: "block", expression, createdBy, ...cidrReach(commerce, cidr) }, commerce);
 }
 
 function rateLimit(args: readonly string[], context: ShellContext, commerce: Commerce): ShellResult {
@@ -75,9 +108,9 @@ function rateLimit(args: readonly string[], context: ShellContext, commerce: Com
     context,
     {
       action: "rate_limit",
-      expression: `${CHECKOUT_PATH} (${requests}/${period} per ip.src)`,
+      expression: `${protectedPaths(commerce)} (${requests}/${period} per ip.src)`,
       createdBy: operatorName(context.role),
-      customerShare: rateLimitCustomerShare(perMinute, commerce.pulse.checkoutAttemptsPerSecond),
+      ...rateLimitReach(commerce, context.cluster.t, perMinute),
     },
     commerce,
   );
@@ -101,7 +134,7 @@ export const waf = commerceCommand({
       case "rules":
         return rules(context, commerce);
       case "top":
-        return top(rest, commerce);
+        return top(rest, context, commerce);
       case "block":
         return block(rest, context, commerce);
       case "ratelimit":
@@ -114,10 +147,10 @@ export const waf = commerceCommand({
         return { output: err(`waf: unknown command "${sub}"`, "Commands: rules, top, block, ratelimit, delete") };
     }
   },
-  complete(args, _partial, _context, commerce) {
+  complete(args, _partial, context, commerce) {
     if (args.length === 0) return ["rules", "top", "block", "ratelimit", "delete"];
     if (args.length === 1 && (args[0] === "delete" || args[0] === "rm")) return commerce.wafRules.map((rule) => rule.id);
-    if (args.length === 1 && args[0] === "block") return ["--top", ...topTalkers(5).map((talker) => talker.ip)];
+    if (args.length === 1 && args[0] === "block") return ["--top", ...topSources(commerce, context.cluster.t, 5).map((source) => source.ip)];
     if (args.length === 1 && args[0] === "ratelimit") return ["20/1m", "60/1m", "600/1m"];
     return [];
   },

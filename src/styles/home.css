@@ -818,3 +818,61 @@
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
+
+/* ── Pro in the profile ── */
+
+.pro {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  max-width: 48rem;
+  padding: var(--space-lg);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-lg);
+  background: var(--color-paper-2);
+}
+
+.pro__lede,
+.pro__status {
+  color: var(--color-ink-2);
+  font-size: var(--text-sm);
+}
+
+.pro__perks {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pro__perks li {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3xs);
+  padding-left: var(--space-sm);
+  border-left: 2px solid var(--color-accent);
+}
+
+.pro__perks strong {
+  font-weight: 600;
+}
+
+.pro__perks span {
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
+.pro__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+@media (min-width: 40rem) {
+  .pro__perks {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

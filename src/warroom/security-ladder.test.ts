@@ -7,6 +7,7 @@ import { AUTO_CONTAIN_AT, CARD_TESTING_ALERT, cardTestingSoar, TESTER_RANGE } fr
 import { checkoutCommerce } from "./scenarios/checkout-commerce.ts";
 import { credentialStuffingHosting, SIGN_IN_ALERT } from "./scenarios/credential-stuffing-hosting.ts";
 import { unlockedWarRooms } from "./scenarios/index.ts";
+import { BOT_JA4, PROXY_ALERT, residentialProxyStuffing } from "./scenarios/residential-proxy-stuffing.ts";
 import { scaledToZero } from "./scenarios/scaled-to-zero.ts";
 import { runLine } from "./shell/shell.ts";
 import { attackLoad } from "./sim/attack.ts";
@@ -214,7 +215,7 @@ describe("siem resolve --contained-by", () => {
 
 // ── The security ladder ─────────────────────────────────────────────────────────
 
-const LADDER: readonly Scenario[] = [botFloodSingleIp, credentialStuffingHosting, cardTestingSoar];
+const LADDER: readonly Scenario[] = [botFloodSingleIp, credentialStuffingHosting, cardTestingSoar, residentialProxyStuffing];
 /** Paced like solutions.test.ts: first move 20 s in, a command every 8 s, then time for the edge to settle. */
 const FIRST_MOVE_AT = 20;
 const THINKING_SECONDS = 8;
@@ -475,5 +476,57 @@ describe("card-testing-soar", () => {
     const after = playTo(scenario, AUTO_CONTAIN_AT + 1, before);
     expectTop500(after);
     expect(after.cluster.logs.waf?.at(-1)?.text).toContain("soar:playbook/auto-contain");
+  });
+});
+
+describe("residential-proxy-stuffing", () => {
+  const scenario = residentialProxyStuffing;
+  /** A wrong fix measured: the share of customers it turns away, of the stuffing it stops, and whether 5xx stay up. */
+  const measure = (...lines: readonly string[]) => {
+    const incident = trapped(scenario, ...lines);
+    return { customers: customersBlocked(incident), attack: attackBlocked(incident), errorRate: incident.cluster.errorRate };
+  };
+
+  it("gives no address away: every proxy sends less than the busiest customers, and one JA4 sends most sign-ins", () => {
+    const opened = openIncident(scenario);
+    expect(shellText(scenario, "waf top 100", opened)).not.toMatch(/hosting/);
+    expect(shellText(scenario, "waf top", opened)).toContain("43,140 distinct source IPs");
+    const fingerprints = shellText(scenario, "siem search tls-fingerprints", opened);
+    expect(fingerprints).toMatch(new RegExp(`^${BOT_JA4}\\s+Python\\s+Chrome/114\\.0\\.0\\.0 \\(Windows\\)\\s+19,800\\s+40,000`, "m"));
+    expect(fingerprints).toContain("t13d1517h2_8daaf6152771_cb7bf5808d99   Chromium Browser");
+  });
+
+  it("a rate limit any customer would pass misses every bot", () => {
+    expect(measure("waf ratelimit 20/1m")).toEqual({ customers: 0, attack: 0, errorRate: expect.closeTo(0.4, 1) });
+  });
+
+  it("a rate limit tight enough to touch the bots turns customers away first", () => {
+    const perMinute = measure("waf ratelimit 1/1m");
+    expect(perMinute.customers).toBeCloseTo(0.332, 3);
+    expect(perMinute.attack).toBe(0);
+    expect(perMinute.errorRate).toBeGreaterThan(0.2);
+    const perTenMinutes = measure("waf ratelimit 1/10m");
+    expect(perTenMinutes.customers).toBeCloseTo(0.439, 3);
+    expect(perTenMinutes.attack).toBeCloseTo(0.8, 2);
+  });
+
+  it("CIDR and top-N blocks mostly hit customers and leave the 5xx up", () => {
+    const comcast = measure("waf block 73.0.0.0/8");
+    expect(comcast.customers).toBeCloseTo(0.099, 3);
+    expect(comcast.attack).toBeCloseTo(0.25, 9);
+    expect(comcast.errorRate).toBeGreaterThan(0.2);
+    expect(measure("waf block --top 500")).toEqual({ customers: expect.closeTo(0.393, 3), attack: 0, errorRate: expect.closeTo(0.27, 2) });
+  });
+
+  it("blocking the fingerprint the User-Agent claims, Chrome's, blocks Chrome's customers instead", () => {
+    expect(measure("waf block --ja4 t13d1517h2_8daaf6152771_cb7bf5808d99")).toEqual({ customers: expect.closeTo(0.31, 9), attack: 0, errorRate: expect.closeTo(0.3, 1) });
+  });
+
+  it("the JA4 block alone stops every bot; the alert still wants closing", () => {
+    const blocked = trapped(scenario, `waf block --ja4 ${BOT_JA4}`);
+    expect(attackBlocked(blocked)).toBe(1);
+    expect(blocked.cluster.errorRate).toBe(0);
+    const { result } = closeOut(scenario, blocked);
+    expect(result.objectives?.find((objective) => objective.label.startsWith(PROXY_ALERT))?.isMet).toBe(false);
   });
 });

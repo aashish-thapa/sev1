@@ -1,6 +1,7 @@
 import { useContext, useEffect, useState } from "react";
 import { AccountContext } from "../app/useAccount.ts";
 import { featuredBadge } from "../domain/achievements.ts";
+import { careerLevel } from "../domain/career.ts";
 import { ROLE_IDS, type Role } from "../domain/incident.ts";
 import type { Progress } from "../domain/progress.ts";
 import { ROLE_INFO } from "../domain/roles.ts";
@@ -17,6 +18,8 @@ import { LeaderboardPanel } from "./LeaderboardPanel.tsx";
 import { Profile } from "./Profile.tsx";
 import type { ProSale } from "./ProPanel.tsx";
 import { WalletChip } from "./WalletChip.tsx";
+import type { Scenario } from "../warroom/scenario.ts";
+import { roomWarRooms } from "../warroom/scenarios/index.ts";
 
 type Props = {
   progress: Progress;
@@ -29,7 +32,7 @@ type Props = {
   rooms: {
     status: string;
     error: string | null;
-    onCreate: (name: string, visibility: RoomVisibility) => void;
+    onCreate: (name: string, visibility: RoomVisibility, scenarioId: string) => void;
     onJoin: (code: string, name: string) => void;
     listPublic: ListPublicRooms;
   };
@@ -180,7 +183,7 @@ export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, fetch
                   Enter the office
                 </button>
               </article>
-              <HostRoom name={name.trim()} rooms={rooms} />
+              <HostRoom name={name.trim()} rooms={rooms} incidents={roomWarRooms(role, careerLevel(progress).level)} />
               <JoinRoom name={name.trim()} rooms={rooms} />
             </div>
             <p className="home__status" role="status">
@@ -232,13 +235,28 @@ function RolePicker({ chosen, onChoose }: { chosen: Role; onChoose: (role: Role)
   );
 }
 
-function HostRoom({ name, rooms }: { name: string; rooms: Props["rooms"] }) {
+type RoomIncident = Pick<Scenario, "id" | "title" | "tier">;
+
+function HostRoom({ name, rooms, incidents }: { name: string; rooms: Props["rooms"]; incidents: readonly RoomIncident[] }) {
   const [visibility, setVisibility] = useState<RoomVisibility>("private");
+  // The list follows the chosen role and level, so a pick it no longer holds falls back to the first: the cross-team incident.
+  const [pickedId, setPickedId] = useState<string | null>(null);
+  const incident = incidents.find((candidate) => candidate.id === pickedId) ?? incidents[0];
   const isBusy = rooms.status === "connecting";
   return (
     <article className="mode">
       <h3 className="mode__title">Host a room</h3>
-      <p className="mode__body">One outage for up to five people, each in their own role. Nobody can fix it alone.</p>
+      <p className="mode__body">Pick an outage for up to five people, each in their own role. Colleagues cover any role nobody takes.</p>
+      <div className="mode__choice" role="radiogroup" aria-label="Incident">
+        {incidents.map((candidate) => (
+          <label key={candidate.id} className="mode__choice-option">
+            <input type="radio" name="incident" checked={candidate === incident} onChange={() => setPickedId(candidate.id)} />
+            <span>
+              <strong>{candidate.title}</strong> · tier {candidate.tier}
+            </span>
+          </label>
+        ))}
+      </div>
       <div className="mode__choice" role="radiogroup" aria-label="Who can join">
         <label className="mode__choice-option">
           <input type="radio" name="visibility" checked={visibility === "private"} onChange={() => setVisibility("private")} />
@@ -253,7 +271,7 @@ function HostRoom({ name, rooms }: { name: string; rooms: Props["rooms"] }) {
           </span>
         </label>
       </div>
-      <button type="button" className="button button--ghost mode__action" disabled={!name || isBusy} onClick={() => rooms.onCreate(name, visibility)}>
+      <button type="button" className="button button--ghost mode__action" disabled={!name || isBusy} onClick={() => rooms.onCreate(name, visibility, incident.id)}>
         Create room
       </button>
       {!name && <p className="mode__hint">Add your name above first.</p>}

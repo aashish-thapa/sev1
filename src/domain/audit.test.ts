@@ -6,6 +6,8 @@ import type { Tier } from "./tier.ts";
 
 const AT = Date.UTC(2026, 9, 10, 12);
 const tierOf: TierOf = (scenarioId) => (scenarioId === "scaled-to-zero" ? 1 : scenarioId === "checkout-meltdown" ? 5 : undefined);
+/** 140 correct cards is 1,400 experience: Staff Engineer. */
+const STAFF: Progress = { ...emptyProgress(), correctCards: 140 };
 
 /** A perfect run of `scenarioId` paid at `tier`: honest only when that is the scenario's own tier. */
 function perfectRun(progress: Progress, scenarioId: string, tier: Tier, startedAt = AT): Progress {
@@ -28,15 +30,20 @@ function bookedAsSalary(progress: Progress, cents: number): Progress {
 }
 
 describe("incident payouts on sync", () => {
-  it("accept a perfect tier-5 run paid at the tier-5 cap", () => {
-    const paid = perfectRun(emptyProgress(), "checkout-meltdown", 5);
+  it("accept a Staff save's perfect tier-5 run paid at the tier-5 cap", () => {
+    const paid = perfectRun(STAFF, "checkout-meltdown", 5);
     expect(paid.wallet.balanceCents).toBe(100 * INCIDENT_CENTS_PER_POINT_BY_TIER[5]);
-    expect(isPlausibleProgress(emptyProgress(), paid, 600, tierOf)).toBe(true);
+    expect(isPlausibleProgress(STAFF, paid, 600, tierOf)).toBe(true);
   });
 
   it("refuse the tier-5 amount for a tier-1 scenario", () => {
-    expect(isPlausibleProgress(emptyProgress(), perfectRun(emptyProgress(), "scaled-to-zero", 1), 600, tierOf)).toBe(true);
-    expect(isPlausibleProgress(emptyProgress(), perfectRun(emptyProgress(), "scaled-to-zero", 5), 600, tierOf)).toBe(false);
+    expect(isPlausibleProgress(STAFF, perfectRun(STAFF, "scaled-to-zero", 1), 600, tierOf)).toBe(true);
+    expect(isPlausibleProgress(STAFF, perfectRun(STAFF, "scaled-to-zero", 5), 600, tierOf)).toBe(false);
+  });
+
+  it("refuse the tier-5 amount from an Intern save, who is paid at the tier their level unlocks", () => {
+    expect(isPlausibleProgress(emptyProgress(), perfectRun(emptyProgress(), "checkout-meltdown", 1), 600, tierOf)).toBe(true);
+    expect(isPlausibleProgress(emptyProgress(), perfectRun(emptyProgress(), "checkout-meltdown", 5), 600, tierOf)).toBe(false);
   });
 
   it("refuse a payout for a scenario the catalogue doesn't know, or with no catalogue", () => {

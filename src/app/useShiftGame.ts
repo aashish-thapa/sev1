@@ -3,7 +3,7 @@ import type { IncidentLibrary } from "../content/library.ts";
 import type { LocalDate } from "../domain/calendar.ts";
 import { careerLevel } from "../domain/career.ts";
 import { ROLE_IDS, ROLES, roleOf, type IncidentCard, type Role } from "../domain/incident.ts";
-import { payRef } from "../domain/economy.ts";
+import { paidTier, payRef } from "../domain/economy.ts";
 import { hasBoughtSolution, spend, type SpendOutcome } from "../domain/purchases.ts";
 import type { Tier } from "../domain/tier.ts";
 import { hasEarned } from "../domain/achievements.ts";
@@ -153,7 +153,8 @@ export function useShiftGame({ library, store, today: clock, now = Date.now }: G
         return;
       }
       const recorded = recordWarRoomRun(progress, scenario.id, result.points, result.grade);
-      const bonus = { kind: "incident", ref: payRef.incident(scenario.id, run.startedAt), points: result.points, tier: scenario.tier, title: scenario.title, isTeam: run.isTeam } as const;
+      const tier = paidTier(scenario.tier, careerLevel(progress).level);
+      const bonus = { kind: "incident", ref: payRef.incident(scenario.id, run.startedAt), points: result.points, tier, title: scenario.title, isTeam: run.isTeam } as const;
       commit(earn(recorded, bonus, now()));
     },
     [commit, now, progress],

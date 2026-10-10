@@ -11,6 +11,7 @@ import {
   LEDGER_LIMIT,
   MIN_SECONDS_PER_CARD,
   MIN_SECONDS_PER_INCIDENT,
+  paidTier,
   SALARY_CENTS_PER_MINUTE,
   SPEND_REASONS,
   scenarioOfIncident,
@@ -35,7 +36,7 @@ export type TierOf = (scenarioId: string) => Tier | undefined;
 /** With no registry, no incident payout or purchase can be priced — every such line is rejected. */
 const NO_TIERS: TierOf = () => undefined;
 
-/** Is an incident line paid no more than a perfect run of its scenario's tier? */
+/** Is an incident line paid no more than a perfect run of its scenario, at the tier the player's level pays? */
 type FairIncidentPay = (entry: LedgerEntry) => boolean;
 /** Is a purchase line charged at least the price for its scenario at the buyer's level? */
 type FairPrice = (entry: LedgerEntry) => boolean;
@@ -95,10 +96,12 @@ export function isPlausibleProgress(previous: Progress, next: Progress, elapsedS
   const newPaidCards = next.wallet.paidUnits.card - previous.wallet.paidUnits.card;
   const newPaidIncidents = next.wallet.paidUnits.incident - previous.wallet.paidUnits.incident;
   const lowestLevel = careerLevel(previous).level;
+  const topLevel = careerLevel(next).level;
   const tierFrom = (scenarioId: string | null) => (scenarioId === null ? undefined : tierOf(scenarioId));
   const isFairIncidentPay: FairIncidentPay = (entry) => {
     const tier = tierFrom(scenarioOfIncident(entry.ref));
-    return tier !== undefined && entry.amountCents <= 100 * INCIDENT_CENTS_PER_POINT_BY_TIER[tier];
+    // A promotion can land mid-sync, so the level the save reaches sets the cap.
+    return tier !== undefined && entry.amountCents <= 100 * INCIDENT_CENTS_PER_POINT_BY_TIER[paidTier(tier, topLevel)];
   };
   const isFairPrice: FairPrice = (entry) => {
     const tier = tierFrom(scenarioOfPurchase(entry.ref));
@@ -109,7 +112,7 @@ export function isPlausibleProgress(previous: Progress, next: Progress, elapsedS
     newCorrect >= 0 &&
     newCorrect <= newPaidCards &&
     improvedPassingWarRooms(previous, next) <= newPaidIncidents &&
-    isPlausibleWallet(previous.wallet, next.wallet, elapsedSeconds, careerLevel(next).level, isFairIncidentPay, isFairPrice)
+    isPlausibleWallet(previous.wallet, next.wallet, elapsedSeconds, topLevel, isFairIncidentPay, isFairPrice)
   );
 }
 

@@ -6,6 +6,7 @@ import {
   INCIDENT_CENTS_PER_POINT_BY_TIER,
   INCIDENT_MIN_POINTS,
   LEDGER_LIMIT,
+  paidTier,
   pay,
   payRef,
   SALARY_CENTS_PER_MINUTE,
@@ -47,6 +48,13 @@ describe("pay rules", () => {
     expect(amountOf(incident(60, 3))).toBe(60 * INCIDENT_CENTS_PER_POINT_BY_TIER[3]);
     const samePoints = TIERS.map((tier) => amountOf(incident(80, tier)));
     expect(samePoints.every((cents, index) => index === 0 || cents > samePoints[index - 1])).toBe(true);
+  });
+
+  it("pays at most the tier the player's level unlocks", () => {
+    expect(paidTier(5, 0)).toBe(1);
+    expect(paidTier(5, 4)).toBe(5);
+    expect(paidTier(2, 4)).toBe(2);
+    expect(amountOf(incident(100, paidTier(5, 0)))).toBe(100 * INCIDENT_CENTS_PER_POINT_BY_TIER[1]);
   });
 
   it("pays nothing for a botched fix at any tier", () => {

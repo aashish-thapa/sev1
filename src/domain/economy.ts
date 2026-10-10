@@ -22,6 +22,11 @@ export const INCIDENT_CENTS_PER_POINT_BY_TIER: Readonly<Record<Tier, number>> = 
 /** Below this the fix did more harm than good (grade D): no bonus. */
 export const INCIDENT_MIN_POINTS = 35;
 
+/** The tier an incident pays at: never above what the player's level unlocks, so an Intern can't draw Staff pay from a meltdown room. */
+export function paidTier(tier: Tier, level: Level): Tier {
+  return Math.min(tier, level + 1) as Tier;
+}
+
 /** Fastest anyone can honestly read and answer a card, and close an incident; plausibility uses these. */
 export const MIN_SECONDS_PER_CARD = 4;
 export const MIN_SECONDS_PER_INCIDENT = 90;

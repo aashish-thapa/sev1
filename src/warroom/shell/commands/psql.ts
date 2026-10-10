@@ -1,15 +1,18 @@
 import { activeSessionCount, idleSessionCount, terminateIdleSessions } from "../../sim/actions.ts";
+import { checkoutQuerySeconds } from "../../sim/database.ts";
 import { holdsPool, type ClusterState } from "../../sim/model.ts";
 import { operatorName } from "../identity.ts";
 import { takeFlag } from "../tokenize.ts";
 import { sqlTable } from "../sql-table.ts";
+import { INDEX_QUERIES } from "./psql-indexes.ts";
 import { err, out, type Command, type ShellResult } from "../types.ts";
 
-type QueryHandler = { matches: (sql: string) => boolean; run: (cluster: ClusterState) => ShellResult };
+export type QueryHandler = { matches: (sql: string) => boolean; run: (cluster: ClusterState, sql: string) => ShellResult };
 
 const normalize = (sql: string) => sql.toLowerCase().replace(/\s+/g, " ").trim();
 
 const QUERIES: readonly QueryHandler[] = [
+  ...INDEX_QUERIES,
   {
     matches: (sql) => sql.includes("pg_terminate_backend"),
     run: (cluster) => {
@@ -69,6 +72,17 @@ const QUERIES: readonly QueryHandler[] = [
           rows.push([String(pid), deployment.name, "idle", `${minutes} min`, "SELECT payment_intent_id FROM orders WHERE id = $1"]);
         }
       }
+      // A seq-scanning checkout query reads as many active sessions running the same statement for seconds.
+      const index = cluster.database.hotIndex;
+      if (index && !index.isValid) {
+        const seconds = checkoutQuerySeconds(cluster.database);
+        for (const deployment of cluster.deployments) {
+          for (let session = 0; session < 6; session += 1) {
+            pid += 41;
+            rows.push([String(pid), deployment.name, "active", `00:00:0${Math.min(9, seconds * (0.4 + session * 0.12)).toFixed(1)}`, index.query]);
+          }
+        }
+      }
       rows.push(["61377", "psql", "active", "0 min", "SELECT pid, application_name, state, … FROM pg_stat_activity"]);
       return { output: out(...sqlTable(["pid", "application_name", "state", "since_state_change", "query"], rows.slice(0, 10)), "(showing first 10; add GROUP BY to aggregate)") };
     },
@@ -83,7 +97,7 @@ export const psql: Command = {
       `psql: error: connection to server at "${cluster.database.host}" (10.0.3.21), port 5432 failed: FATAL:  no pg_hba.conf entry for host "10.40.7.23", user "${operatorName(role)}", database "orders", SSL encryption`,
     ),
   usage: 'psql -c "<sql>"   e.g. psql -c "select state, count(*) from pg_stat_activity group by state"',
-  summary: "Query orders-db (read-only role, plus pg_terminate_backend)",
+  summary: "Query orders-db (read-only role, plus pg_terminate_backend and REINDEX)",
   run(args, { cluster }) {
     const { value: sql } = takeFlag(args, "-c", "--command");
     if (sql === undefined) {
@@ -91,7 +105,7 @@ export const psql: Command = {
     }
     const normalized = normalize(sql);
     const handler = QUERIES.find((query) => query.matches(normalized));
-    if (handler) return handler.run(cluster);
+    if (handler) return handler.run(cluster, normalized);
     const table = /from\s+([a-z_.]+)/.exec(normalized)?.[1];
     return { output: err(table ? `ERROR:  permission denied for table ${table}` : `ERROR:  syntax error at or near "${sql.split(/\s+/)[0] ?? ""}"`) };
   },
@@ -102,5 +116,7 @@ export const psql: Command = {
           "select state, count(*) from pg_stat_activity group by state",
           "select application_name, count(*) from pg_stat_activity group by application_name",
           "show max_connections",
+          "select query, calls, mean_exec_time from pg_stat_statements order by mean_exec_time desc limit 5",
+          "\\d orders",
         ],
 };

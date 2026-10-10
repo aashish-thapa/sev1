@@ -1,9 +1,9 @@
-import { clockAt } from "../../scenario.ts";
+import { clockAt, type Scenario } from "../../scenario.ts";
 import { deletePod, findDeployment, rolloutRestart, rolloutUndo, scale, type ActionResult } from "../../sim/actions.ts";
-import { currentTemplateHash, isLive, isServing, revisionOf, type ClusterState, type Deployment, type Pod } from "../../sim/model.ts";
+import { currentTemplateHash, isLive, isServing, revisionOf, type ClusterState, type Deployment, type LogEntry, type Pod } from "../../sim/model.ts";
 import { operatorEmail } from "../identity.ts";
 import { takeFlag } from "../tokenize.ts";
-import { age, dim, err, out, table, type Command, type ShellContext, type ShellResult } from "../types.ts";
+import { age, dim, err, out, table, type Command, type OutputLine, type ShellContext, type ShellResult } from "../types.ts";
 
 type Subcommand = (args: readonly string[], context: ShellContext) => ShellResult;
 
@@ -13,6 +13,7 @@ const IMAGE_REGISTRY = "registry.internal";
 const POD_WORDS = ["po", "pod", "pods"];
 const DEPLOY_WORDS = ["deploy", "deployment", "deployments"];
 const EVENT_WORDS = ["ev", "event", "events"];
+const JOB_WORDS = ["job", "jobs"];
 
 function allPods(cluster: ClusterState): { pod: Pod; deployment: Deployment }[] {
   return cluster.deployments.flatMap((deployment) => deployment.pods.map((pod) => ({ pod, deployment })));
@@ -80,6 +81,12 @@ const get: Subcommand = (args, context) => {
     return { output: out(...table([["NAME", "READY", "UP-TO-DATE", "AVAILABLE", "AGE"], ...rows])) };
   }
   if (EVENT_WORDS.includes(resource)) return events([], context);
+  if (JOB_WORDS.includes(resource)) {
+    const jobs = cluster.jobs ?? [];
+    if (jobs.length === 0) return { output: out(`No resources found in ${NAMESPACE} namespace.`) };
+    const rows = jobs.map((job) => [job.name, job.status, job.status === "Complete" ? "1/1" : "0/1", age(job.durationSeconds), age(cluster.t - job.finishedAt + job.durationSeconds)]);
+    return { output: out(...table([["NAME", "STATUS", "COMPLETIONS", "DURATION", "AGE"], ...rows])) };
+  }
   return { output: err(`error: the server doesn't have a resource type "${resource}"`) };
 };
 
@@ -159,6 +166,11 @@ const logs: Subcommand = (args, { cluster, scenario }) => {
   const { value: tail, rest } = takeFlag(args, "--tail");
   const target = rest.find((arg) => !arg.startsWith("-"));
   if (!target) return { output: err("error: expected 'logs [-f] [-p] (POD | TYPE/NAME) [-c CONTAINER]'.") };
+  const [kind, jobName] = target.split("/");
+  if (jobName !== undefined && JOB_WORDS.includes(kind)) {
+    if (!cluster.jobs?.some((job) => job.name === jobName)) return { output: err(`Error from server (NotFound): jobs.batch "${jobName}" not found`) };
+    return { output: printLogs(cluster.logs[jobName] ?? [], tail, scenario) };
+  }
   const deploymentName = deploymentTarget([target]);
   const podName = deploymentName
     ? findDeployment(cluster, deploymentName)?.pods.find(isServing)?.name
@@ -166,17 +178,19 @@ const logs: Subcommand = (args, { cluster, scenario }) => {
   if (!podName || !findPod(cluster, podName)) {
     return { output: err(`Error from server (NotFound): pods "${podName ?? target}" not found`) };
   }
-  const count = tail === undefined ? 20 : Number(tail);
-  if (!Number.isInteger(count)) return { output: err(`error: invalid argument "${tail}" for "--tail" flag`) };
-  const lines = (cluster.logs[podName] ?? []).slice(count < 0 ? 0 : -count || undefined);
-  if (lines.length === 0) return { output: dim("(no log lines yet)") };
-  return {
-    output: lines.map((line, index) => ({
-      text: `${clockAt(scenario, line.t, true, index)}  ${line.level.padEnd(5)} ${line.text}`,
-      tone: line.level === "ERROR" || line.level === "FATAL" ? "err" : "out",
-    })),
-  };
+  return { output: printLogs(cluster.logs[podName] ?? [], tail, scenario) };
 };
+
+function printLogs(entries: readonly LogEntry[], tail: string | undefined, scenario: Scenario): readonly OutputLine[] {
+  const count = tail === undefined ? 20 : Number(tail);
+  if (!Number.isInteger(count)) return err(`error: invalid argument "${tail}" for "--tail" flag`);
+  const lines = entries.slice(count < 0 ? 0 : -count || undefined);
+  if (lines.length === 0) return dim("(no log lines yet)");
+  return lines.map((line, index) => ({
+    text: `${clockAt(scenario, line.t, true, index)}  ${line.level.padEnd(5)} ${line.text}`,
+    tone: line.level === "ERROR" || line.level === "FATAL" ? "err" : "out",
+  }));
+}
 
 const top: Subcommand = (args, { cluster }) => {
   const [resource] = args;
@@ -301,8 +315,10 @@ export const kubectl: Command = {
     const [sub, second] = args;
     if (sub === "rollout" && args.length === 1) return Object.keys(ROLLOUT);
     if (sub === "rollout" || sub === "scale") return deployments;
-    if (sub === "get" || sub === "top") return args.length === 1 ? ["pods", "deployments", "events"] : [];
-    if (sub === "logs") return [...pods, ...deployments];
+    const jobs = (cluster.jobs ?? []).map((job) => `job/${job.name}`);
+    if (sub === "get") return args.length === 1 ? ["pods", "deployments", "events", ...(jobs.length > 0 ? ["jobs"] : [])] : [];
+    if (sub === "top") return args.length === 1 ? ["pods"] : [];
+    if (sub === "logs") return [...pods, ...deployments, ...jobs];
     if (sub === "describe" || sub === "delete") return args.length === 1 ? ["pod", "deployment"] : second === "deployment" ? cluster.deployments.map((d) => d.name) : pods;
     return [];
   },

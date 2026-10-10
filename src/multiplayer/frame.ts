@@ -69,7 +69,22 @@ const ClusterEventSchema = z.object({
 const ClusterFrameSchema = z.object({
   t: z.number(),
   deployments: z.array(DeploymentFrameSchema),
-  database: z.object({ name: z.string(), host: z.string(), maxConnections: z.int(), reservedConnections: z.int() }),
+  database: z.object({
+    name: z.string(),
+    host: z.string(),
+    maxConnections: z.int(),
+    reservedConnections: z.int(),
+    hotIndex: z
+      .object({
+        name: z.string(),
+        definition: z.string(),
+        query: z.string(),
+        isValid: z.boolean(),
+        cacheEviction: z.number(),
+        rebuild: z.object({ secondsLeft: z.number(), isLocking: z.boolean() }).nullable(),
+      })
+      .optional(),
+  }),
   traffic: z.object({ requestsPerSecond: z.number(), checkoutShare: z.number(), connectionHoldSeconds: z.number() }),
   /** Only sources that changed; `null` removes a source. */
   logs: z.record(z.string(), listDelta(LogEntrySchema).nullable()),
@@ -81,6 +96,10 @@ const ClusterFrameSchema = z.object({
   crashLoopsCaused: z.int(),
   sessionsTerminated: z.int(),
   nameCounter: z.int(),
+  jobs: z
+    .array(z.object({ name: z.string(), status: z.enum(["Complete", "Failed"]), finishedAt: z.number(), durationSeconds: z.number() }))
+    .readonly()
+    .optional(),
   /**
    * Cross-role scenarios' shop-floor state (flags, client builds, gateway, WAF, ledger).
    * Sent whole and only when it changed; the server is the trusted source of it.
@@ -156,6 +175,7 @@ export function encodeFrame(previous: Incident | null, next: Incident): Incident
       crashLoopsCaused: cluster.crashLoopsCaused,
       sessionsTerminated: cluster.sessionsTerminated,
       nameCounter: cluster.nameCounter,
+      ...(cluster.jobs ? { jobs: cluster.jobs } : {}),
       ...(cluster.commerce && cluster.commerce !== base?.commerce ? { commerce: cluster.commerce } : {}),
     },
   };

@@ -1,5 +1,6 @@
 import type { Random } from "../../domain/random.ts";
 import { commerceDemand, lostCheckouts, plainLoad, settleCommerce, type Load } from "./commerce-step.ts";
+import { checkoutQuerySeconds, stepHotIndex } from "./database.ts";
 import {
   appendCapped,
   currentTemplateHash,
@@ -14,6 +15,7 @@ import {
   type ClusterEvent,
   type ClusterState,
   type Deployment,
+  type HotIndex,
   type LogEntry,
   type LogLevel,
   type Pod,
@@ -67,7 +69,9 @@ export function step(state: ClusterState, random: Random): ClusterState {
   const demand = state.commerce ? commerceDemand(state, state.commerce) : null;
   const load = demand ?? plainLoad(state.traffic);
   const [front, ...rest] = reconciled;
-  const routed = front ? routeTraffic(front, load, state.traffic.connectionHoldSeconds, t, random, journal) : null;
+  const checkoutQuery = checkoutQuerySeconds(state.database);
+  const holdSeconds = state.traffic.connectionHoldSeconds + load.checkoutShare * checkoutQuery;
+  const routed = front ? routeTraffic(front, load, holdSeconds, t, random, journal) : null;
   const deployments = routed ? [routed.deployment, ...rest] : reconciled;
 
   const failedRps = routed?.failedRps ?? load.requestsPerSecond;
@@ -75,7 +79,10 @@ export function step(state: ClusterState, random: Random): ClusterState {
   const checkoutAttempts = load.requestsPerSecond * load.checkoutShare;
   const checkoutFailureRate = routed && checkoutAttempts > 0 ? Math.min(1, routed.checkoutFailedRps / checkoutAttempts) : 1;
   const dbConnections = openConnections(deployments);
-  const p99Ms = errorRate > HEALTHY_ERROR_RATE ? POOL_TIMEOUT_MS + random() * 900 : 38 + random() * 30;
+  const p99Ms = errorRate > HEALTHY_ERROR_RATE ? POOL_TIMEOUT_MS + random() * 900 : 38 + checkoutQuery * 1000 + random() * 30;
+  const hotIndex = state.database.hotIndex;
+  if (hotIndex) journal.indexActivity(state.database.name, hotIndex, checkoutQuery, random);
+  const database = hotIndex ? { ...state.database, hotIndex: stepHotIndex(hotIndex) } : state.database;
   const commerce =
     state.commerce && demand
       ? settleCommerce(state.commerce, demand, { t, gatewayCallsPerSecond: routed?.gatewayCallsPerSecond ?? 0, checkoutFailureRate }, (source, level, text) => journal.log(source, level, text))
@@ -85,6 +92,7 @@ export function step(state: ClusterState, random: Random): ClusterState {
     ...state,
     t,
     deployments,
+    database,
     nameCounter,
     logs: journal.logs(),
     events: journal.events(),
@@ -265,6 +273,20 @@ class Journal {
     this.log(pod.name, "FATAL", `org.postgresql.util.PSQLException: FATAL: sorry, too many clients already`);
     this.log(database.name, "FATAL", "sorry, too many clients already");
     this.event("Warning", "BackOff", `pod/${pod.name}`, `Back-off restarting failed container ${deployment.name} in pod ${pod.name}`);
+  }
+
+  /** What Postgres says about the hot index each second: slow seq scans, lock waits, a finished rebuild. */
+  indexActivity(source: string, index: HotIndex, checkoutQuery: number, random: Random) {
+    if (index.rebuild?.isLocking) {
+      if (this.t % 3 === 0) {
+        this.log(source, "INFO", `LOG:  process ${51_200 + Math.floor(random() * 700)} still waiting for RowExclusiveLock on relation 16421 of database 16384 after ${(1000 + random() * 400).toFixed(3)} ms`);
+      }
+    } else if (!index.isValid && this.t % 2 === 0) {
+      this.log(source, "INFO", `LOG:  duration: ${(checkoutQuery * 1000 * (0.85 + random() * 0.3)).toFixed(3)} ms  execute <unnamed>: ${index.query}`);
+    }
+    if (index.rebuild && index.rebuild.secondsLeft <= 1) {
+      this.log(source, "INFO", `LOG:  index "${index.name}" rebuilt; statement: REINDEX INDEX ${index.rebuild.isLocking ? "" : "CONCURRENTLY "}${index.name}`);
+    }
   }
 
   logs(): Record<string, readonly LogEntry[]> {

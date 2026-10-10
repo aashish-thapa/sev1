@@ -1,3 +1,4 @@
+import { checkoutQuerySeconds, REBUILD_SECONDS } from "./database.ts";
 import { holdsPool, isLive, TERMINATION_GRACE_SECONDS, type ClusterState, type Deployment } from "./model.ts";
 
 export type ActionResult =
@@ -81,5 +82,25 @@ export function idleSessionCount(state: ClusterState): number {
 }
 
 export function activeSessionCount(state: ClusterState): number {
-  return Math.max(1, Math.round(state.traffic.requestsPerSecond * (1 - state.errorRate) * state.traffic.connectionHoldSeconds));
+  const holdSeconds = state.traffic.connectionHoldSeconds + state.traffic.checkoutShare * checkoutQuerySeconds(state.database);
+  const pooled = state.deployments.reduce((sum, deployment) => sum + deployment.pods.filter(holdsPool).length * deployment.poolSize, 0);
+  return Math.max(1, Math.min(pooled, Math.round(state.traffic.requestsPerSecond * (1 - state.errorRate) * holdSeconds)));
+}
+
+/**
+ * `REINDEX INDEX [CONCURRENTLY] name` on the hot index. CONCURRENTLY builds alongside live
+ * traffic; without it Postgres locks the table against writes until the rebuild finishes.
+ */
+export function reindex(state: ClusterState, name: string, isConcurrent: boolean): ActionResult {
+  const index = state.database.hotIndex;
+  if (!index || index.name !== name) return { ok: false, output: [`ERROR:  relation "${name}" does not exist`] };
+  if (index.rebuild) return { ok: false, output: ["ERROR:  canceling statement due to lock timeout", `CONTEXT:  REINDEX of "${name}" is already running`] };
+  const rebuild = isConcurrent
+    ? { secondsLeft: REBUILD_SECONDS.concurrent, isLocking: false }
+    : { secondsLeft: REBUILD_SECONDS.locking, isLocking: true };
+  return {
+    ok: true,
+    state: { ...state, database: { ...state.database, hotIndex: { ...index, rebuild } } },
+    output: [isConcurrent ? "REINDEX (running concurrently; watch pg_stat_progress_create_index)" : "REINDEX (holding ShareLock on orders until it finishes)"],
+  };
 }

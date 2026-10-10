@@ -47,6 +47,26 @@ export type Database = {
   readonly host: string;
   readonly maxConnections: number;
   readonly reservedConnections: number;
+  /** The index checkout's hot query relies on; absent where the scenario never touches it. */
+  readonly hotIndex?: HotIndex;
+};
+
+/** How an index rebuild is running: CONCURRENTLY keeps the table writable, a plain REINDEX locks it. */
+export type IndexRebuild = { readonly secondsLeft: number; readonly isLocking: boolean };
+
+/**
+ * An index on `orders` the checkout query needs. While it's invalid Postgres ignores it and
+ * every checkout seq-scans the table; the longer that goes on, the more the scans evict the
+ * hot set from shared_buffers (`cacheEviction`, 0…1) and the slower each one gets.
+ */
+export type HotIndex = {
+  readonly name: string;
+  readonly definition: string;
+  /** The checkout query that needs this index. */
+  readonly query: string;
+  readonly isValid: boolean;
+  readonly cacheEviction: number;
+  readonly rebuild: IndexRebuild | null;
 };
 
 export type Traffic = {
@@ -54,6 +74,15 @@ export type Traffic = {
   /** Share of requests that are checkouts (and call the dependency). */
   readonly checkoutShare: number;
   readonly connectionHoldSeconds: number;
+};
+
+/** A finished Kubernetes Job (a migration, a backfill); its output is in `logs` under its name. */
+export type Job = {
+  readonly name: string;
+  readonly status: "Complete" | "Failed";
+  /** Simulated second it finished; negative when that was before the page. */
+  readonly finishedAt: number;
+  readonly durationSeconds: number;
 };
 
 export type LogLevel = "DEBUG" | "INFO" | "WARN" | "ERROR" | "FATAL";
@@ -91,6 +120,8 @@ export type ClusterState = {
   readonly sessionsTerminated: number;
   /** Monotonic counter feeding deterministic pod names. */
   readonly nameCounter: number;
+  /** Jobs that ran recently; absent where the scenario has none. */
+  readonly jobs?: readonly Job[];
   /** Clients, edge, payment gateway and ledger around the cluster; absent in cluster-only scenarios. */
   readonly commerce?: Commerce;
 };

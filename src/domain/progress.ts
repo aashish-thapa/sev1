@@ -105,6 +105,16 @@ export function recordWarRoomRun(progress: Progress, scenarioId: string, points:
   };
 }
 
+/**
+ * A run closed with a bought solution: it counts as played (so solo incidents still rotate) but
+ * never improves the best score — so it earns no experience and can't buy a promotion.
+ */
+export function recordAssistedRun(progress: Progress, scenarioId: string): Progress {
+  const previous = progress.warRoom[scenarioId];
+  const record = previous ? { ...previous, plays: previous.plays + 1 } : { bestPoints: 0, bestGrade: "D" as const, plays: 1 };
+  return { ...progress, warRoom: { ...progress.warRoom, [scenarioId]: record } };
+}
+
 /** War Rooms finished across every scenario; picks which solo incident pages you next. */
 export function warRoomPlays(progress: Progress): number {
   return Object.values(progress.warRoom).reduce((sum, record) => sum + record.plays, 0);

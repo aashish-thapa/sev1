@@ -3,15 +3,13 @@
  * can use to tell an earned wallet from a forged one. All money is integer cents.
  */
 import { z } from "zod";
-import { careerLevel, type Level } from "./career.ts";
-import type { Progress } from "./progress.ts";
+import type { Level } from "./career.ts";
 
 /**
  * Paid per minute of active play, by career level, at real time: an intern's $24/h up to staff's
  * $114/h. Engineer ($60/h) is the middle of the ladder.
  */
 export const SALARY_CENTS_PER_MINUTE: Readonly<Record<Level, number>> = { 0: 40, 1: 70, 2: 100, 3: 140, 4: 190 };
-const TOP_LEVEL: Level = 4;
 
 /** A correct call at a wall screen, by card difficulty. Today's rated problems pay full. */
 export const CARD_BONUS_CENTS: Readonly<Record<1 | 2 | 3, number>> = { 1: 1_500, 2: 2_500, 3: 4_000 };
@@ -50,6 +48,9 @@ export const payRef = {
 
 const REASONS = ["salary", "card", "incident"] as const satisfies readonly Payment["kind"][];
 export type PayReason = (typeof REASONS)[number];
+/** What money can be spent on; purchases are negative ledger lines (see purchases.ts). */
+export const SPEND_REASONS = ["solution"] as const;
+export type SpendReason = (typeof SPEND_REASONS)[number];
 
 const Cents = z.int().nonnegative();
 
@@ -57,23 +58,28 @@ const LedgerEntrySchema = z.object({
   seq: z.int().nonnegative(),
   /** Epoch milliseconds. */
   at: z.int().nonnegative(),
-  reason: z.enum(REASONS),
-  /** Unique per earning; the server deduplicates on it. */
+  reason: z.enum([...REASONS, ...SPEND_REASONS]),
+  /** Unique per earning or purchase; the server deduplicates on it. */
   ref: z.string().min(1).max(160),
-  amountCents: z.int().positive(),
+  /** Positive for pay, negative for a purchase. */
+  amountCents: z.int().refine((cents) => cents !== 0, "a ledger line moves money"),
   /** What was paid for: active minutes for salary, one card or incident otherwise. Older entries predate it. */
   units: z.int().positive().default(1),
   note: z.string().max(120),
 });
 
 const PerReason = z.object({ salary: Cents, card: Cents, incident: Cents });
+const PerSpend = z.object({ solution: Cents });
 
 export const WalletSchema = z.object({
   balanceCents: Cents,
-  /** Lifetime cents earned per reason; the balance is their sum until spending exists. */
+  /** Lifetime cents earned per reason; the balance is earned minus spent. */
   earnedCents: PerReason,
   /** Lifetime count of paid units per reason: active minutes, correct cards, incidents. */
   paidUnits: PerReason,
+  /** Lifetime cents spent per purchase kind; saves from before spending start at zero. */
+  spentCents: PerSpend.default({ solution: 0 }),
+  boughtUnits: PerSpend.default({ solution: 0 }),
   /** The seq the next ledger entry gets; entries at or past a previous wallet's value are new to it. */
   nextSeq: z.int().nonnegative(),
   /** Newest last, capped at LEDGER_LIMIT. */
@@ -84,7 +90,15 @@ export type LedgerEntry = z.output<typeof LedgerEntrySchema>;
 export type Wallet = z.output<typeof WalletSchema>;
 
 export function emptyWallet(): Wallet {
-  return { balanceCents: 0, earnedCents: { salary: 0, card: 0, incident: 0 }, paidUnits: { salary: 0, card: 0, incident: 0 }, nextSeq: 0, ledger: [] };
+  return {
+    balanceCents: 0,
+    earnedCents: { salary: 0, card: 0, incident: 0 },
+    paidUnits: { salary: 0, card: 0, incident: 0 },
+    spentCents: { solution: 0 },
+    boughtUnits: { solution: 0 },
+    nextSeq: 0,
+    ledger: [],
+  };
 }
 
 /** What a payment is worth; zero means it earns nothing (a wrong-but-recorded incident, a zero-minute tick). */
@@ -123,91 +137,13 @@ export function pay(wallet: Wallet, payment: Payment, at: number): Wallet {
   const reason = payment.kind;
   const entry: LedgerEntry = { seq: wallet.nextSeq, at, reason, ref: payment.ref, amountCents, units: unitsOf(payment), note: noteOf(payment) };
   return {
+    ...wallet,
     balanceCents: wallet.balanceCents + amountCents,
     earnedCents: { ...wallet.earnedCents, [reason]: wallet.earnedCents[reason] + amountCents },
     paidUnits: { ...wallet.paidUnits, [reason]: wallet.paidUnits[reason] + unitsOf(payment) },
     nextSeq: wallet.nextSeq + 1,
     ledger: [...wallet.ledger, entry].slice(-LEDGER_LIMIT),
   };
-}
-
-/** Network and timer jitter between syncs: allow this much extra time and a couple of extra events. */
-const TIME_SLACK = 1.25;
-const EVENT_ALLOWANCE = 2;
-const MAX_INCIDENT_CENTS = 100 * INCIDENT_CENTS_PER_POINT;
-const MAX_CARD_CENTS = Math.max(...Object.values(CARD_BONUS_CENTS));
-
-/**
- * Could `next` have been earned from `previous` in `elapsedSeconds` of play? Generous by design —
- * it stops forged wallets, not honest players on a laggy connection.
- */
-export function isPlausibleWallet(previous: Wallet, next: Wallet, elapsedSeconds: number, topLevel: Level = TOP_LEVEL): boolean {
-  if (!(elapsedSeconds >= 0)) return false;
-  const seconds = elapsedSeconds * TIME_SLACK;
-  const delta = (reason: PayReason, of: "earnedCents" | "paidUnits") => next[of][reason] - previous[of][reason];
-
-  for (const reason of REASONS) {
-    if (delta(reason, "earnedCents") < 0 || delta(reason, "paidUnits") < 0) return false;
-  }
-  const earned = REASONS.reduce((sum, reason) => sum + next.earnedCents[reason], 0);
-  if (next.balanceCents !== earned) return false;
-  if (next.nextSeq < previous.nextSeq) return false;
-
-  const minutes = delta("salary", "paidUnits");
-  if (minutes > seconds / 60 + 1) return false;
-  // A promotion can land mid-sync, so any rate from intern up to the level reached is honest.
-  const salary = delta("salary", "earnedCents");
-  if (salary < minutes * SALARY_CENTS_PER_MINUTE[0] || salary > minutes * SALARY_CENTS_PER_MINUTE[topLevel]) return false;
-
-  const cards = delta("card", "paidUnits");
-  if (cards > seconds / MIN_SECONDS_PER_CARD + EVENT_ALLOWANCE) return false;
-  if (delta("card", "earnedCents") > cards * MAX_CARD_CENTS) return false;
-
-  const incidents = delta("incident", "paidUnits");
-  if (incidents > seconds / MIN_SECONDS_PER_INCIDENT + EVENT_ALLOWANCE) return false;
-  if (delta("incident", "earnedCents") > incidents * MAX_INCIDENT_CENTS) return false;
-
-  return isLedgerConsistent(previous, next);
-}
-
-/** The server-side gate for a synced save: is the wallet growth honest? */
-export function isPlausibleProgress(previous: Progress, next: Progress, elapsedSeconds: number): boolean {
-  // Career level reads correctCards and passed War Rooms, so each may only grow by work that was also paid for.
-  const newCorrect = next.correctCards - previous.correctCards;
-  const newPaidCards = next.wallet.paidUnits.card - previous.wallet.paidUnits.card;
-  const newPaidIncidents = next.wallet.paidUnits.incident - previous.wallet.paidUnits.incident;
-  return (
-    newCorrect >= 0 &&
-    newCorrect <= newPaidCards &&
-    improvedPassingWarRooms(previous, next) <= newPaidIncidents &&
-    isPlausibleWallet(previous.wallet, next.wallet, elapsedSeconds, careerLevel(next).level)
-  );
-}
-
-/** War Rooms whose best run newly reached a paying score; each needs its own incident payout. */
-function improvedPassingWarRooms(previous: Progress, next: Progress): number {
-  return Object.entries(next.warRoom).filter(([id, record]) => {
-    const before = previous.warRoom[id]?.bestPoints ?? 0;
-    return record.bestPoints >= INCIDENT_MIN_POINTS && record.bestPoints > before;
-  }).length;
-}
-
-/** New ledger lines must account for the balance change exactly — unless the cap pushed some out. */
-function isLedgerConsistent(previous: Wallet, next: Wallet): boolean {
-  const fresh = next.ledger.filter((entry) => entry.seq >= previous.nextSeq);
-  if (fresh.some((entry) => entry.seq >= next.nextSeq)) return false;
-  // The same earning can't be paid twice, within this sync or against what was already stored.
-  const refs = new Set(previous.ledger.map((entry) => entry.ref));
-  for (const entry of fresh) {
-    if (refs.has(entry.ref)) return false;
-    refs.add(entry.ref);
-  }
-  const total = fresh.reduce((sum, entry) => sum + entry.amountCents, 0);
-  const balanceDelta = next.balanceCents - previous.balanceCents;
-  if (fresh.length === next.nextSeq - previous.nextSeq) return total === balanceDelta;
-  // Lines go missing only when the cap evicts them oldest-first — so the whole ledger must then be new.
-  const isEvictedByCap = next.ledger.length === LEDGER_LIMIT && fresh.length === LEDGER_LIMIT;
-  return isEvictedByCap && total <= balanceDelta;
 }
 
 const dollars = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });

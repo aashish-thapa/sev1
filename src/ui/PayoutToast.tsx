@@ -23,7 +23,7 @@ export function PayoutToast() {
     <p className="payout" role="status" aria-live="polite">
       {shown && (
         <span key={shown.seq} className="payout__line" data-reason={shown.reason}>
-          <strong>+{formatCents(shown.amountCents)}</strong> {shown.note}
+          <strong>{shown.amountCents > 0 ? "+" : "−"}{formatCents(Math.abs(shown.amountCents))}</strong> {shown.note}
         </span>
       )}
     </p>

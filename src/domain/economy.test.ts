@@ -4,14 +4,13 @@ import {
   CARD_BONUS_CENTS,
   emptyWallet,
   INCIDENT_CENTS_PER_POINT,
-  isPlausibleProgress,
-  isPlausibleWallet,
   LEDGER_LIMIT,
   pay,
   payRef,
   SALARY_CENTS_PER_MINUTE,
   type Wallet,
 } from "./economy.ts";
+import { isPlausibleProgress, isPlausibleWallet } from "./audit.ts";
 import { earn, emptyProgress, ProgressSchema } from "./progress.ts";
 
 const T0 = 1_760_000_000_000;

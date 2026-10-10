@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { isPlausibleProgress } from "../../src/domain/economy.ts";
+import { isPlausibleProgress, type TierOf } from "../../src/domain/audit.ts";
 import { emptyProgress, ProgressSchema, type Progress } from "../../src/domain/progress.ts";
 import type { Account, SyncedProgress } from "../../src/storage/account-protocol.ts";
 import { hashPassword, verifyPassword } from "./password.ts";
@@ -35,10 +35,13 @@ type Clock = () => number;
 export class AccountService {
   private readonly store: AccountStore;
   private readonly now: Clock;
+  /** Prices solutions bought in a synced save; without it, purchases are refused. */
+  private readonly tierOf: TierOf | undefined;
 
-  constructor(store: AccountStore, now: Clock) {
+  constructor(store: AccountStore, now: Clock, tierOf?: TierOf) {
     this.store = store;
     this.now = now;
+    this.tierOf = tierOf;
   }
 
   /** Creates the account and, when it's plausible, keeps the progress earned before signing up. */
@@ -48,7 +51,7 @@ export class AccountService {
     if (!(await this.store.createUser(user))) return { ok: false, failure: "username_taken" };
 
     let progress: SyncedProgress | null = null;
-    if (anonymous && isPlausibleProgress(emptyProgress(), anonymous, this.anonymousSeconds(anonymous))) {
+    if (anonymous && isPlausibleProgress(emptyProgress(), anonymous, this.anonymousSeconds(anonymous), this.tierOf)) {
       progress = { progress: anonymous, updatedAt: this.now() };
       await this.store.saveProgress(user.id, { body: JSON.stringify(anonymous), updatedAt: progress.updatedAt }, this.creditsSince(emptyProgress(), anonymous));
     }
@@ -91,7 +94,7 @@ export class AccountService {
     const current = await this.progressOf(user);
     const since = current?.updatedAt ?? user.createdAt;
     const elapsedSeconds = Math.max(0, (this.now() - since) / 1000);
-    if (!isPlausibleProgress(current?.progress ?? emptyProgress(), next, elapsedSeconds)) return { ok: false, current };
+    if (!isPlausibleProgress(current?.progress ?? emptyProgress(), next, elapsedSeconds, this.tierOf)) return { ok: false, current };
     const updatedAt = this.now();
     await this.store.saveProgress(user.id, { body: JSON.stringify(next), updatedAt }, this.creditsSince(current?.progress ?? emptyProgress(), next));
     return { ok: true, updatedAt };

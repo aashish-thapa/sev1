@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { parseLocalDate } from "./calendar.ts";
-import { isPlausibleProgress, payRef } from "./economy.ts";
-import { earn, emptyProgress, ProgressSchema, recordAttempt, recordWarRoomRun, startShift, warRoomPlays, type Attempt } from "./progress.ts";
+import { isPlausibleProgress } from "./audit.ts";
+import { payRef } from "./economy.ts";
+import { earn, emptyProgress, ProgressSchema, recordAssistedRun, recordAttempt, recordWarRoomRun, startShift, warRoomPlays, type Attempt } from "./progress.ts";
 
 const DAY = parseLocalDate("2026-10-10");
 const attempt = (incidentId: string, isCorrect: boolean): Attempt => ({ incidentId, topic: "database", difficulty: 1, isCorrect, elapsedMs: 9000 });
@@ -57,5 +58,14 @@ describe("salary by level", () => {
   it("rejects a forged War Room record that would promote without an incident payout", () => {
     const forged = { ...emptyProgress(), warRoom: { "checkout-pool-leak": { bestPoints: 100, bestGrade: "S" as const, plays: 1 } } };
     expect(isPlausibleProgress(emptyProgress(), forged, 600)).toBe(false);
+  });
+});
+
+describe("recordAssistedRun", () => {
+  it("counts the play but never raises the best score, so it earns no experience", () => {
+    const passed = recordWarRoomRun(emptyProgress(), "scaled-to-zero", 70, "B");
+    const assisted = recordAssistedRun(passed, "scaled-to-zero");
+    expect(assisted.warRoom["scaled-to-zero"]).toEqual({ bestPoints: 70, bestGrade: "B", plays: 2 });
+    expect(recordAssistedRun(emptyProgress(), "x").warRoom.x?.bestPoints).toBe(0);
   });
 });

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useWallet } from "../../app/wallet-context.ts";
 import { INCIDENT_MIN_POINTS } from "../../domain/economy.ts";
+import { hasBoughtSolution, type SpendOutcome } from "../../domain/purchases.ts";
 import { AnswerPad } from "../../ui/AnswerPad.tsx";
 import { Payslip } from "../../ui/Payslip.tsx";
 import { debrief, type Debrief, type Incident } from "../incident.ts";
@@ -10,6 +11,7 @@ import type { Scenario } from "../scenario.ts";
 import type { WallScreen } from "../floor/office.ts";
 import type { useRoom } from "../../multiplayer/useRoom.ts";
 import { SoloIncident } from "./LiveIncident.tsx";
+import { IncidentHelpContext, type IncidentHelp } from "./incident-help.ts";
 import { TeamIncident } from "./TeamIncident.tsx";
 
 /** One stint in the office: when it began (names the incident's bonus) and where its payslip starts in the ledger. */
@@ -25,6 +27,8 @@ type Props = {
   role: Role;
   /** `startedAt`: epoch ms this incident run began — a stable name for its bonus. */
   onFinish: (result: Debrief, startedAt: number) => void;
+  /** Buys this run's worked solution (identified by its `startedAt`). */
+  onBuySolution: (startedAt: number) => SpendOutcome;
   onLeave: () => void;
   onUseScreen: (screen: WallScreen) => void;
   /** Called when the pager goes off, so whatever the player was doing can be interrupted. */
@@ -40,12 +44,14 @@ const countFormat = new Intl.NumberFormat("en");
 const AUTO_PAGE_MS = { min: 60_000, spread: 60_000 } as const;
 
 /** The office: quiet until the pager goes off, then the live incident, postmortem and debrief. */
-export function WarRoomView({ scenario, role, onFinish, onLeave, onUseScreen, onPaged, overlay, room }: Props) {
+export function WarRoomView({ scenario, role, onFinish, onBuySolution, onLeave, onUseScreen, onPaged, overlay, room }: Props) {
   const wallet = useWallet();
   const [stage, setStage] = useState<Stage>(() => ({ name: "office", isPaged: false, run: 0, visit: { startedAt: Date.now(), paidFromSeq: wallet.nextSeq } }));
   const onClosed = useCallback((incident: Incident) => setStage((current) => ({ name: "postmortem", incident, picked: null, visit: current.visit })), []);
   const isQuiet = stage.name === "office" && !stage.isPaged;
   const run = stage.name === "office" ? stage.run : 0;
+  const runStartedAt = stage.visit.startedAt;
+  const help = useMemo<IncidentHelp>(() => ({ scenario, role, runStartedAt, buy: () => onBuySolution(runStartedAt) }), [onBuySolution, role, runStartedAt, scenario]);
 
   const page = useCallback(() => {
     setStage((current) => (current.name === "office" ? { ...current, isPaged: true } : current));
@@ -59,22 +65,28 @@ export function WarRoomView({ scenario, role, onFinish, onLeave, onUseScreen, on
   }, [isQuiet, page, room, run]);
 
   if (stage.name === "office" && room) {
-    return <TeamIncident room={room} scenario={scenario} role={role} overlay={overlay} onUseScreen={onUseScreen} onClosed={onClosed} onLeave={onLeave} />;
+    return (
+      <IncidentHelpContext value={help}>
+        <TeamIncident room={room} scenario={scenario} role={role} overlay={overlay} onUseScreen={onUseScreen} onClosed={onClosed} onLeave={onLeave} />
+      </IncidentHelpContext>
+    );
   }
 
   if (stage.name === "office") {
     return (
-      <SoloIncident
-        key={stage.run}
-        scenario={scenario}
-        role={role}
-        isPaged={stage.isPaged}
-        onPage={page}
-        onClosed={onClosed}
-        onLeave={onLeave}
-        onUseScreen={onUseScreen}
-        overlay={overlay}
-      />
+      <IncidentHelpContext value={help}>
+        <SoloIncident
+          key={stage.run}
+          scenario={scenario}
+          role={role}
+          isPaged={stage.isPaged}
+          onPage={page}
+          onClosed={onClosed}
+          onLeave={onLeave}
+          onUseScreen={onUseScreen}
+          overlay={overlay}
+        />
+      </IncidentHelpContext>
     );
   }
 
@@ -146,6 +158,9 @@ export function WarRoomView({ scenario, role, onFinish, onLeave, onUseScreen, on
           </li>
         ))}
       </ul>
+      {hasBoughtSolution(wallet, { scenarioId: scenario.id, runStartedAt }) && (
+        <p className="debrief__assisted">Assisted run: you bought the worked solution, so this incident paid no bonus and earned no experience.</p>
+      )}
       <Payslip entries={earnings} emptyNote={`No resolution bonus below ${INCIDENT_MIN_POINTS} points — the fix did more harm than good.`} />
       <div className="paged__actions">
         <button

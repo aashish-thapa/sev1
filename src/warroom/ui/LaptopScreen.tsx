@@ -1,11 +1,13 @@
 import type { NodeId } from "../health.ts";
 import { clockAt, type CommsMessage, type Scenario } from "../scenario.ts";
 import type { ClusterState } from "../sim/model.ts";
+import { HelpPanel } from "./HelpPanel.tsx";
+import { useIncidentHelp } from "./incident-help.ts";
 import { InspectPanel } from "./InspectPanel.tsx";
 import { Terminal } from "./Terminal.tsx";
 import type { TerminalLine } from "./useIncident.ts";
 
-export type LaptopTab = "terminal" | "inspect";
+export type LaptopTab = "terminal" | "inspect" | "help";
 
 type Props = {
   tab: LaptopTab;
@@ -34,6 +36,11 @@ const inspectTitle = (node: NodeId) => (node.kind === "pod" ? `…${node.name.sl
 
 /** What's on your laptop: the bastion shell, and the last thing you plugged into. */
 export function LaptopScreen({ tab, onTab, inspected, cluster, scenario, terminal, focusSignal, notification, onClose }: Props) {
+  const help = useIncidentHelp();
+  const suggest = (command: string) => {
+    terminal.onDraftChange(command);
+    onTab("terminal");
+  };
   return (
     <div className="laptop">
       <div className="laptop__bar" role="tablist" aria-label="Laptop">
@@ -43,6 +50,11 @@ export function LaptopScreen({ tab, onTab, inspected, cluster, scenario, termina
         {inspected && (
           <button type="button" role="tab" className="laptop__tab" aria-selected={tab === "inspect"} onClick={() => onTab("inspect")}>
             {inspectTitle(inspected)}
+          </button>
+        )}
+        {help && (
+          <button type="button" role="tab" className="laptop__tab" aria-selected={tab === "help"} onClick={() => onTab("help")}>
+            Help
           </button>
         )}
         <button type="button" className="laptop__close" onClick={onClose}>
@@ -58,15 +70,14 @@ export function LaptopScreen({ tab, onTab, inspected, cluster, scenario, termina
         </p>
       )}
       <div className="laptop__body" role="tabpanel">
-        {tab === "inspect" && inspected ? (
+        {tab === "help" && help ? (
+          <HelpPanel help={help} onSuggest={suggest} />
+        ) : tab === "inspect" && inspected ? (
           <InspectPanel
             node={inspected}
             cluster={cluster}
             scenario={scenario}
-            onSuggest={(command) => {
-              terminal.onDraftChange(command);
-              onTab("terminal");
-            }}
+            onSuggest={suggest}
             onClose={() => onTab("terminal")}
           />
         ) : (

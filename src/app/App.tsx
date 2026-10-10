@@ -59,6 +59,7 @@ export function App({ shareUrl, ...services }: Props) {
             scenario={scenario}
             role={role}
             onFinish={(result, startedAt) => game.recordWarRoom(scenario, result, { isTeam: isInRoom, startedAt })}
+            onBuySolution={(startedAt) => game.buySolution(scenario, startedAt)}
             onLeave={() => {
               if (isInRoom) room.leave();
               game.leaveOffice();

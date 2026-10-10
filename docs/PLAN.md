@@ -66,3 +66,43 @@ Everything runs on the **Cloudflare Workers Free** plan, with no idle sleep or c
 - **Leaderboards.** Weekly, per role.
 - **More scenarios per role.** Content quality is the moat.
 - **Privacy-friendly analytics.**
+
+## Pending: Pro subscription (real money, Stripe)
+
+The code is built and pushed, but it isn't switched on. We'll finish this later.
+
+**Rules that are settled**
+- Pro never buys rank, experience, pay or leaderboard position.
+- Worked solutions always cost earned in-game money, for everyone.
+
+**Pro perks**
+
+| Perk | Status |
+|---|---|
+| 3 free hints a day at any tier | Done |
+| Practice every War Room, with no experience or pay | |
+| Unlimited practice rounds | |
+| Early access to new incidents, one week before everyone else | |
+| Supporter look | |
+
+**Already done**
+- **Server side:** Stripe Checkout for monthly or yearly, the customer portal, and a signed, idempotent webhook (`worker/billing/`).
+- **Database:** the entitlements in D1. Migration 0003 is applied live.
+- **Account:** `/api/me` and `AccountSession.entitlements`.
+- **Rules and UI:** the perk rules (`src/domain/entitlements.ts`) and the Pro daily hints in the Help tab.
+
+**Still to do**
+1. **Stripe setup (the user does this).**
+   - In test mode, create a "sev1 Pro" product with a monthly and a yearly price (the panel shows $4.99 per month and $39 per year), and turn on the Customer Portal.
+   - Add a webhook pointing to `https://sev1.aashish-thapa.workers.dev/api/billing/webhook` for these events:
+     - `checkout.session.completed`
+     - `customer.subscription.created`, `customer.subscription.updated` and `customer.subscription.deleted`
+   - Enter the secrets with `wrangler secret put`: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_PRO_MONTHLY` and `STRIPE_PRICE_PRO_YEARLY`.
+2. **Show the Pro panel and legal pages.**
+   - Mount ProPanel in the profile.
+   - Add the Terms, Privacy and Refund pages, which Stripe requires.
+   - Show an "Activating Pro…" state when the player lands on `/?billing=success`.
+3. **Practice War Rooms.** Add the lobby picker and record practice runs with no experience or pay.
+4. **Decide the free-player practice cap.** `FREE_PRACTICE_ROUNDS_PER_DAY = 3` hasn't been confirmed, because it takes something away from free players.
+5. **Finish the remaining perks.** Early access (`Scenario.releasedAt`), the supporter mark and name colours, and anything that writes cosmetics.
+6. **Test with real Stripe calls.** Make a test-mode purchase with the card 4242 4242 4242 4242, then switch to live keys.

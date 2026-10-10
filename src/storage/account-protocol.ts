@@ -2,7 +2,7 @@
 import { z } from "zod";
 import { ProgressSchema } from "../domain/progress.ts";
 
-export const API_ERRORS = ["invalid", "username_taken", "bad_credentials", "rate_limited", "signed_out", "rejected", "forbidden", "not_found"] as const;
+export const API_ERRORS = ["invalid", "username_taken", "bad_credentials", "rate_limited", "signed_out", "rejected", "forbidden", "not_found", "billing_unavailable", "no_subscription", "already_subscribed", "payment_provider"] as const;
 export type ApiError = (typeof API_ERRORS)[number];
 
 export const AccountSchema = z.object({ username: z.string() });
@@ -13,7 +13,22 @@ export type SyncedProgress = z.output<typeof SyncedProgressSchema>;
 
 /** Sign-up and sign-in both answer with who you are and what the account has saved. */
 export const AuthResponseSchema = z.object({ account: AccountSchema, progress: SyncedProgressSchema.nullable() });
-export const MeResponseSchema = z.object({ account: AccountSchema.nullable() });
+/** What the account has paid for, decided only by the server from Stripe's webhooks. */
+export const EntitlementsSchema = z.object({
+  /** Epoch ms when Pro lapses; null when the account doesn't have Pro. */
+  proUntil: z.int().nullable(),
+  cosmetics: z.array(z.string()),
+});
+export type Entitlements = z.output<typeof EntitlementsSchema>;
+export const NO_ENTITLEMENTS: Entitlements = { proUntil: null, cosmetics: [] };
+
+/** The Pro plans a player can check out. */
+export const PRO_PLANS = ["pro-monthly", "pro-yearly"] as const;
+export type ProPlan = (typeof PRO_PLANS)[number];
+export const CheckoutRequestSchema = z.object({ plan: z.enum(PRO_PLANS) });
+
+/** `entitlements` is null for guests. */
+export const MeResponseSchema = z.object({ account: AccountSchema.nullable(), entitlements: EntitlementsSchema.nullable().default(null) });
 export const SaveResponseSchema = z.object({ updatedAt: z.int().nonnegative() });
 /** A refused save carries what the server kept, so the client can adopt it. */
 export const RejectedSaveSchema = z.object({ error: z.literal("rejected"), current: SyncedProgressSchema.nullable() });

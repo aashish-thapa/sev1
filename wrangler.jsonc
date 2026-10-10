@@ -31,6 +31,8 @@
       "migrations_dir": "worker/migrations"
     }
   ],
+  // Billing reads STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_PRO_MONTHLY and STRIPE_PRICE_PRO_YEARLY, all set
+  // with `wrangler secret put` (secrets survive deploys; config vars would overwrite them). Until all four exist, /api/billing answers 503.
   "observability": { "enabled": true },
   // 8787 is the Node room server's; the Vite dev server proxies /api here.
   "dev": { "port": 8790 }

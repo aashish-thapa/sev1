@@ -1,11 +1,14 @@
 import { ProgressSchema } from "../../src/domain/progress.ts";
-import { SaveRequestSchema, SignInRequestSchema, SignUpRequestSchema } from "../../src/storage/account-protocol.ts";
+import { NO_ENTITLEMENTS, SaveRequestSchema, SignInRequestSchema, SignUpRequestSchema, type Entitlements } from "../../src/storage/account-protocol.ts";
 import { LEADERBOARD_PATH } from "../../src/storage/leaderboard-protocol.ts";
 import { AccountService, CredentialsSchema, SESSION_SECONDS, type AuthResult } from "./accounts.ts";
 import { clearedSessionCookie, failure, isSameOrigin, json, readBody, sessionCookie, sessionTokenOf } from "./http.ts";
 
+/** What an account has paid for; null when it has no billing record. */
+export type EntitlementsOf = (userId: string) => Promise<Entitlements | null>;
+
 /** HTTP for /api: parse, call the account service, shape the response. No rules live here. */
-export async function handleApi(request: Request, accounts: AccountService): Promise<Response> {
+export async function handleApi(request: Request, accounts: AccountService, entitlementsOf: EntitlementsOf): Promise<Response> {
   const { pathname } = new URL(request.url);
   const route = `${request.method} ${pathname}`;
   if (request.method !== "GET" && !isSameOrigin(request)) return failure("forbidden", "Cross-site requests are not allowed.", 403);
@@ -35,7 +38,8 @@ export async function handleApi(request: Request, accounts: AccountService): Pro
     }
     case "GET /api/me": {
       const user = await accounts.userFor(sessionTokenOf(request));
-      return json({ account: user ? { username: user.username } : null });
+      if (!user) return json({ account: null, entitlements: null });
+      return json({ account: { username: user.username }, entitlements: (await entitlementsOf(user.id)) ?? NO_ENTITLEMENTS });
     }
     case "GET /api/progress": {
       const user = await accounts.userFor(sessionTokenOf(request));

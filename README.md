@@ -81,3 +81,33 @@ pnpm exec wrangler login --device   # once; the device flow works over SSH
 pnpm db:migrate                     # apply new worker/migrations to the live D1
 pnpm release                        # test, build and deploy the committed HEAD (never uncommitted work)
 ```
+
+### Billing (Stripe, Pro subscription)
+
+Pro is sold through Stripe Checkout and managed in Stripe's Customer Portal. What an account has paid for (`entitlements` in D1) changes only when a signed Stripe webhook arrives; the browser never decides it. Paying never buys rank, XP, leaderboard position, hints or worked solutions. Until the four Stripe values below exist, every `/api/billing/*` route answers 503 and the rest of the game works as before.
+
+1. **Stripe dashboard, test mode:** create a product "sev1 Pro" with two recurring prices, one monthly and one yearly, and copy both price ids (`price_…`). Under *Settings → Billing → Customer portal*, activate the portal (cancel and update payment method).
+2. **Webhook:** in Workbench → Webhooks, create a destination with the snapshot payload for your account. Point it at `https://sev1.aashish-thapa.workers.dev/api/billing/webhook` with these events:
+   - `checkout.session.completed`
+   - `customer.subscription.created`
+   - `customer.subscription.updated`
+   - `customer.subscription.deleted`
+
+   Copy its signing secret (`whsec_…`).
+3. **Secrets:** you enter these yourself; they never go in the repo. Wrangler secrets survive deploys.
+   ```sh
+   pnpm exec wrangler secret put STRIPE_SECRET_KEY       # sk_test_… from Developers → API keys
+   pnpm exec wrangler secret put STRIPE_WEBHOOK_SECRET   # whsec_… from step 2
+   pnpm exec wrangler secret put STRIPE_PRICE_PRO_MONTHLY  # monthly price_… from step 1
+   pnpm exec wrangler secret put STRIPE_PRICE_PRO_YEARLY   # yearly price_… from step 1
+   pnpm db:migrate                                       # creates entitlements + stripe_events
+   ```
+4. **Test:** in the game, sign in, start checkout, and pay with Stripe's test card `4242 4242 4242 4242`. `/api/me` should then show `entitlements.proUntil`.
+
+Routes:
+- `POST /api/billing/checkout` (signed in): send `{ plan: "pro-monthly" | "pro-yearly" }`; returns `{ url }` for Checkout.
+- `POST /api/billing/portal` (signed in): returns `{ url }` for the portal.
+- `POST /api/billing/webhook` (Stripe only, signature-checked, idempotent by event id).
+- `GET /api/me` includes `entitlements: { proUntil, cosmetics }` for accounts.
+
+For local work, put the four values in an env file and run `wrangler dev --env-file <file>`.

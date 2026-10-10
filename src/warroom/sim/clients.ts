@@ -127,7 +127,7 @@ export function policyMix(source: PolicySource, commerce: Commerce, t: number): 
 }
 
 /** Share of clients holding a value `fires` matches, while the latest change spreads over `window` seconds. */
-function firingShare<Value>(change: ConfigChange<Value>, t: number, window: number, fires: (value: Value) => boolean): number {
+export function firingShare<Value>(change: ConfigChange<Value>, t: number, window: number, fires: (value: Value) => boolean): number {
   const before = fires(change.from);
   const after = fires(change.to);
   if (before === after) return after ? 1 : 0;
@@ -135,9 +135,15 @@ function firingShare<Value>(change: ConfigChange<Value>, t: number, window: numb
   return after ? progress : 1 - progress;
 }
 
+function listIncludes(list: string, entry: string): boolean {
+  return list.split(",").some((item) => item.trim() === entry);
+}
+
 /** Share of a build's clients on which a defect's trigger holds at `t`, counting clients that haven't picked up the last change. */
 export function triggerShare(trigger: DefectTrigger, commerce: Commerce, t: number): number {
   if (trigger === "always") return 1;
+  // Each part's last change spreads on its own clock, so the parts are taken as independent.
+  if ("all" in trigger) return trigger.all.reduce((share, part) => share * triggerShare(part, commerce, t), 1);
   if ("flag" in trigger) {
     const flag = findFlag(commerce, trigger.flag);
     // An unknown flag reads as off, as it does for retry policies.
@@ -146,7 +152,8 @@ export function triggerShare(trigger: DefectTrigger, commerce: Commerce, t: numb
   }
   const entry = findConfig(commerce, trigger.remoteConfig);
   if (!entry) return 0;
-  return firingShare(latestChange(entry.history), t, REMOTE_CONFIG_PROPAGATION_SECONDS, (value) => value === trigger.failsWhen);
+  const fires = "failsWithout" in trigger ? (value: string) => !listIncludes(value, trigger.failsWithout) : (value: string) => value === trigger.failsWhen;
+  return firingShare(latestChange(entry.history), t, REMOTE_CONFIG_PROPAGATION_SECONDS, fires);
 }
 
 export function segmentId(platform: PlatformId, build: ClientBuild): string {

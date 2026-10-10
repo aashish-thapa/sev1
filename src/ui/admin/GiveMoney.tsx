@@ -37,7 +37,9 @@ export function GiveMoney({ api, username, onClose }: Props) {
         ? `Granted ${formatCents(result.value.amountCents)} to ${username}. It lands in their wallet next time their game loads.`
         : result.problem === "forbidden"
           ? "This account can’t grant money."
-          : "Couldn’t reach the server; nothing was granted.",
+          : result.problem === "unknown_user"
+            ? `There’s no player called ${username}; nothing was granted.`
+            : "Couldn’t reach the server; nothing was granted.",
     );
     if (result.ok) setRefreshes((count) => count + 1);
   };

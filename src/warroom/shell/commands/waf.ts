@@ -6,6 +6,8 @@ import {
   distinctSourceIps,
   parseCidr,
   protectedPaths,
+  isJa4,
+  ja4Reach,
   rateLimitReach,
   sourcesByAsn,
   topReach,
@@ -108,10 +110,17 @@ function created(context: ShellContext, rule: Omit<WafRule, "id" | "createdAt">,
   ]);
 }
 
+const BLOCK_USAGE = "usage: waf block <ip|cidr> | waf block --top N | waf block --ja4 <fingerprint>";
+
 function block(args: readonly string[], context: ShellContext, commerce: Commerce): ShellResult {
-  const { value: topCount, rest } = takeFlag(args, "--top");
+  const { value: ja4, rest: afterJa4 } = takeFlag(args, "--ja4");
+  const { value: topCount, rest } = takeFlag(afterJa4, "--top");
   const createdBy = operatorName(context.role);
   const paths = protectedPaths(commerce);
+  if (ja4 !== undefined) {
+    if (!isJa4(ja4)) return { output: err(`waf: error: "${ja4}" is not a JA4 fingerprint (a_b_c, e.g. t13d1516h2_8daaf6152771_e5627efa2ab1)`) };
+    return created(context, { action: "block", expression: `cf.bot_management.ja4 eq "${ja4}" and ${paths}`, createdBy, ...ja4Reach(commerce, ja4) }, commerce);
+  }
   if (topCount !== undefined) {
     const n = Number(topCount);
     if (!Number.isInteger(n) || n < 1) return { output: err("waf: error: --top needs a positive integer") };
@@ -119,7 +128,7 @@ function block(args: readonly string[], context: ShellContext, commerce: Commerc
   }
   const target = rest[0];
   const cidr = target ? parseCidr(target) : null;
-  if (!target || !cidr) return { output: err("usage: waf block <ip|cidr> | waf block --top N") };
+  if (!target || !cidr) return { output: err(BLOCK_USAGE) };
   const expression = cidr.bits === 32 ? `ip.src eq ${target.split("/")[0]} and ${paths}` : `ip.src in {${target}} and ${paths}`;
   return created(context, { action: "block", expression, createdBy, ...cidrReach(commerce, cidr) }, commerce);
 }
@@ -149,7 +158,7 @@ function remove(args: readonly string[], context: ShellContext): ShellResult {
 
 export const waf = commerceCommand({
   name: "waf",
-  usage: "waf rules | top [N] [--by asn] | block <ip|cidr> | block --top N | ratelimit <n>/<period> | delete <rule-id>",
+  usage: "waf rules | top [N] [--by asn] | block <ip|cidr> | block --top N | block --ja4 <fp> | ratelimit <n>/<period> | delete <rule-id>",
   summary: "Edge WAF: rules, top talkers, blocks and rate limits",
   roles: ["security"],
   refuse: (_args, { role }) => ssoRefusal("waf", "waf-admins", role),
@@ -175,7 +184,7 @@ export const waf = commerceCommand({
   complete(args, _partial, context, commerce) {
     if (args.length === 0) return ["rules", "top", "block", "ratelimit", "delete"];
     if (args.length === 1 && (args[0] === "delete" || args[0] === "rm")) return commerce.wafRules.map((rule) => rule.id);
-    if (args.length === 1 && args[0] === "block") return ["--top", ...topSources(commerce, context.cluster.t, 5).map((source) => source.ip)];
+    if (args.length === 1 && args[0] === "block") return ["--top", "--ja4", ...topSources(commerce, context.cluster.t, 5).map((source) => source.ip)];
     if (args.length === 1 && args[0] === "ratelimit") return ["20/1m", "60/1m", "600/1m"];
     if (args[0] === "top") return args.at(-1) === "--by" ? ["ip", "asn"] : ["--by"];
     return [];

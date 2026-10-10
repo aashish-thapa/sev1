@@ -133,3 +133,23 @@ describe("waf top --by asn", () => {
     expect(securityShell(shopUnder(cardTesters), "waf top --by country").text).toContain('cannot rank by "country"');
   });
 });
+
+describe("waf block --ja4", () => {
+  const loginStuffing: Attack = { ...proxies, path: "/session" };
+
+  it("blocks one TLS client fingerprint on checkout and the attacked path", () => {
+    const { text, commerce } = securityShell(shopUnder(loginStuffing), `waf block --ja4 ${PYTHON_JA4}`);
+    expect(text).toContain(`rule r-0001 created (block): cf.bot_management.ja4 eq "${PYTHON_JA4}" and http.request.uri.path in {"/checkout" "/session"}`);
+    expect(commerce?.wafRules.at(-1)).toMatchObject({ customerShare: 0, attackShare: 1 });
+  });
+
+  it("turns away every customer whose browser presents a fingerprint it blocks", () => {
+    expect(securityShell(shopUnder(loginStuffing), `waf block --ja4 ${CHROMIUM_JA4}`).commerce?.wafRules.at(-1)).toMatchObject({ customerShare: 0.31, attackShare: 0 });
+  });
+
+  it("refuses anything that isn't a JA4 fingerprint", () => {
+    const { text, commerce } = securityShell(shopUnder(loginStuffing), "waf block --ja4 771,4865-4866,0-23");
+    expect(text).toContain('"771,4865-4866,0-23" is not a JA4 fingerprint');
+    expect(commerce).toBeUndefined();
+  });
+});

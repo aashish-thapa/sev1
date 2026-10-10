@@ -1,4 +1,6 @@
 import type { Role } from "../../domain/incident.ts";
+import { AVATARS, type AvatarId } from "./assets/catalog.ts";
+import { furnishingFootprints } from "./environment/furnishing.ts";
 import type { Footprint } from "./layout.ts";
 
 /**
@@ -97,7 +99,8 @@ export function seatOf(desk: Desk): { x: number; z: number } {
 export const SPAWN = { x: PLAYER_DESK.x, z: PLAYER_DESK.z + 1.3, yaw: 0 } as const;
 
 
-export type Furniture = { readonly kind: "table" | "counter" | "fridge" | "coffee" | "plant" | "sofa"; readonly footprint: Footprint; readonly height: number };
+/** Built-in fittings drawn procedurally; loose furniture and props live in `environment/furnishing.ts`. */
+export type Furniture = { readonly kind: "table" | "counter" | "fridge" | "coffee"; readonly footprint: Footprint; readonly height: number };
 
 export const FURNITURE: readonly Furniture[] = [
   { kind: "table", footprint: { x: 10.75, z: 10, width: 3.2, depth: 1.4 }, height: 0.75 },
@@ -107,12 +110,6 @@ export const FURNITURE: readonly Furniture[] = [
   { kind: "fridge", footprint: { x: 21.2, z: -2.8, width: 0.9, depth: 0.8 }, height: 1.9 },
   { kind: "table", footprint: { x: 15, z: -10, width: 1.2, depth: 1.2 }, height: 0.75 },
   { kind: "table", footprint: { x: 15, z: -5, width: 1.2, depth: 1.2 }, height: 0.75 },
-  // Cabin desks run along the side walls, leaving the middle free in front of each room's screen.
-  { kind: "table", footprint: { x: -21.4, z: -2.6, width: 0.8, depth: 1.6 }, height: 0.75 },
-  { kind: "table", footprint: { x: -11.6, z: -2.6, width: 0.8, depth: 1.6 }, height: 0.75 },
-  { kind: "sofa", footprint: { x: -20.6, z: 13.4, width: 2.4, depth: 0.9 }, height: 0.8 },
-  ...[-21.2, -10.5, -0.5, 6.2].map((x) => ({ kind: "plant" as const, footprint: { x, z: 14.2, width: 0.6, depth: 0.6 }, height: 1.3 })),
-  ...[12, 16].map((x) => ({ kind: "plant" as const, footprint: { x, z: 0.3, width: 0.6, depth: 0.6 }, height: 1.3 })),
 ];
 
 /** Wall segments as collision boxes. */
@@ -128,7 +125,7 @@ export function wallFootprints(): Footprint[] {
 /** Everything static the player bumps into, except the racks (which move with the incident). */
 export function officeObstacles(): Footprint[] {
   const desks = deskClusterFootprints();
-  return [...wallFootprints(), ...desks, ...FURNITURE.map((item) => item.footprint)];
+  return [...wallFootprints(), ...desks, ...FURNITURE.map((item) => item.footprint), ...furnishingFootprints()];
 }
 
 /** One box per four-desk cluster, so nobody slips between two desks. */
@@ -251,31 +248,37 @@ export const NAV_EDGES: readonly (readonly [string, string])[] = [
 
 // ── People ────────────────────────────────────────────────────────
 
-export type Outfit = 1 | 2 | 3 | 4 | 5 | 6;
+/** What someone standing still is doing — it picks their animation. */
+export type StandingActivity = "chatting" | "on-phone" | "presenting" | "waiting";
 
 export type Person =
-  | { readonly kind: "seated"; readonly id: string; readonly desk: Desk; readonly outfit: Outfit }
-  | { readonly kind: "standing"; readonly id: string; readonly x: number; readonly z: number; readonly yaw: number; readonly outfit: Outfit }
-  | { readonly kind: "walker"; readonly id: string; readonly stops: readonly { readonly node: string; readonly pause: number }[]; readonly outfit: Outfit; readonly offset: number }
+  | { readonly kind: "seated"; readonly id: string; readonly desk: Desk; readonly avatar: AvatarId }
+  | { readonly kind: "standing"; readonly id: string; readonly x: number; readonly z: number; readonly yaw: number; readonly activity: StandingActivity; readonly avatar: AvatarId }
+  | { readonly kind: "walker"; readonly id: string; readonly stops: readonly { readonly node: string; readonly pause: number }[]; readonly avatar: AvatarId; readonly offset: number }
   /** Someone from the incident channel: waits at home, walks over when their message lands. */
-  | { readonly kind: "messenger"; readonly id: string; readonly name: string; readonly home: string; readonly outfit: Outfit };
+  | { readonly kind: "messenger"; readonly id: string; readonly name: string; readonly home: string; readonly avatar: AvatarId };
+
+/** Steps through the cast with a stride coprime to its size, so neighbours never share a face. */
+function castMember(index: number): AvatarId {
+  return AVATARS[(index * 5 + 2) % AVATARS.length].id;
+}
 
 const seatedDesks = DESKS.filter((desk, index) => desk.id !== PLAYER_DESK.id && index % 3 !== 1);
 
 export const PEOPLE: readonly Person[] = [
-  ...seatedDesks.slice(0, 18).map((desk, index): Person => ({ kind: "seated", id: `seated-${index}`, desk, outfit: ((index % 6) + 1) as Outfit })),
-  { kind: "standing", id: "stand-room-b-1", x: 17.2, z: 11.4, yaw: Math.PI * 0.85, outfit: 3 },
-  { kind: "standing", id: "stand-room-b-2", x: 19.4, z: 11.5, yaw: Math.PI * 1.15, outfit: 5 },
-  { kind: "standing", id: "stand-kitchen", x: 15.7, z: -5.6, yaw: Math.PI * 0.3, outfit: 2 },
-  { kind: "walker", id: "walker-coffee", stops: [{ node: "mid:-10.5", pause: 4 }, { node: "kitchen:coffee", pause: 7 }], outfit: 4, offset: 0 },
-  { kind: "walker", id: "walker-meeting", stops: [{ node: "mid:-0.5", pause: 6 }, { node: "room-a", pause: 9 }], outfit: 1, offset: 11 },
-  { kind: "walker", id: "walker-tech", stops: [{ node: "dc:aisle-mid", pause: 8 }, { node: "corridor:-5.5", pause: 2 }, { node: "kitchen", pause: 5 }], outfit: 6, offset: 4 },
-  { kind: "walker", id: "walker-phone", stops: [{ node: "corridor:-15.5", pause: 3 }, { node: "corridor:4.5", pause: 3 }], outfit: 2, offset: 17 },
-  { kind: "messenger", id: "maya", name: "Maya Okonkwo", home: "cabin-a", outfit: 5 },
-  { kind: "messenger", id: "sam", name: "Sam Tan", home: "room-a", outfit: 3 },
-  { kind: "messenger", id: "elena", name: "Elena Ruiz", home: "room-b", outfit: 1 },
+  ...seatedDesks.slice(0, 18).map((desk, index): Person => ({ kind: "seated", id: `seated-${index}`, desk, avatar: castMember(index) })),
+  { kind: "standing", id: "stand-room-b-1", x: 17.2, z: 11.4, yaw: Math.PI * 0.85, activity: "chatting", avatar: "Male_Adult_07" },
+  { kind: "standing", id: "stand-room-b-2", x: 19.4, z: 11.5, yaw: Math.PI * 1.15, activity: "waiting", avatar: "Female_Adult_08" },
+  { kind: "standing", id: "stand-kitchen", x: 15.7, z: -5.6, yaw: Math.PI * 0.3, activity: "on-phone", avatar: "Male_Adult_12" },
+  { kind: "walker", id: "walker-coffee", stops: [{ node: "mid:-10.5", pause: 4 }, { node: "kitchen:coffee", pause: 7 }], avatar: "Female_Adult_02", offset: 0 },
+  { kind: "walker", id: "walker-meeting", stops: [{ node: "mid:-0.5", pause: 6 }, { node: "room-a", pause: 9 }], avatar: "Male_Adult_04", offset: 11 },
+  { kind: "walker", id: "walker-tech", stops: [{ node: "dc:aisle-mid", pause: 8 }, { node: "corridor:-5.5", pause: 2 }, { node: "kitchen", pause: 5 }], avatar: "Female_Adult_12", offset: 4 },
+  { kind: "walker", id: "walker-phone", stops: [{ node: "corridor:-15.5", pause: 3 }, { node: "corridor:4.5", pause: 3 }], avatar: "Male_Adult_09", offset: 17 },
+  { kind: "messenger", id: "maya", name: "Maya Okonkwo", home: "cabin-a", avatar: "Female_Adult_09" },
+  { kind: "messenger", id: "sam", name: "Sam Tan", home: "room-a", avatar: "Male_Adult_10" },
+  { kind: "messenger", id: "elena", name: "Elena Ruiz", home: "room-b", avatar: "Female_Adult_05" },
   ...WALL_SCREENS.map((screen, index): Person => {
     const spot = presenterSpot(screen);
-    return { kind: "standing", id: `presenter-${screen.id}`, x: spot.x, z: spot.z, yaw: spot.yaw, outfit: (((index + 2) % 6) + 1) as Outfit };
+    return { kind: "standing", id: `presenter-${screen.id}`, x: spot.x, z: spot.z, yaw: spot.yaw, activity: "presenting", avatar: castMember(index + 7) };
   }),
 ];

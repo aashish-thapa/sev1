@@ -45,6 +45,20 @@ Nothing runs an LLM at play time. Content is static JSON, so hosting costs stay 
 
 Write a `Scenario` in `src/warroom/scenarios/`: build the starting cluster, give the bad revision a trait the engine understands (add a new trait kind to `sim/model.ts` and its physics to `sim/engine.ts` if needed), define `isRootCauseFixed`, a comms timeline and the postmortem. Then add strategy tests like `src/warroom/warroom.test.ts`: doing nothing must get worse, the right fix must close, plausible wrong fixes must backfire.
 
+## 3D assets
+
+The office's people, furniture, surfaces and lighting are third-party assets built into `public/office/` and committed, so a normal clone needs nothing extra. To change or rebuild them:
+
+```sh
+pnpm assets:fetch                                          # sources → .asset-cache/ (~1.2 GB, gitignored)
+nix-shell -p blender --run "pnpm assets:build"             # or put Blender 5 on PATH / set BLENDER=
+```
+
+- **What exists** is named once in `src/warroom/floor/assets/catalog.ts`. **Where it comes from** is in `scripts/assets/manifest.ts`.
+- **People and animations:** Microsoft Rocketbox (MIT). Headless Blender converts FBX to glTF (`scripts/assets/rocketbox.py`) and pins walk root motion in place.
+- **Furniture, PBR surfaces and the HDRI:** Poly Haven (CC0).
+- **Compression:** everything is resized to 1K WebP and meshopt-compressed. Licence notices are in `public/office/CREDITS.md`.
+
 ## Writing incident cards
 
 Every card must pass `pnpm validate:content`. Beyond the schema, the rules that keep it credible:

@@ -1,9 +1,13 @@
+import { PerformanceMonitor } from "@react-three/drei";
 import { Canvas, useFrame, type ThreeEvent } from "@react-three/fiber";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type RefObject } from "react";
 import { edgeHealth, sameNode, type NodeId } from "../health.ts";
 import type { CommsMessage, Scenario } from "../scenario.ts";
 import { openConnections } from "../sim/engine.ts";
 import type { ClusterState } from "../sim/model.ts";
+import { AgXToneMapping, NoToneMapping } from "three";
+import { Effects } from "./environment/Effects.tsx";
+import { pinnedQuality, QUALITY, readDeviceHints, startingQuality, type Quality } from "./environment/quality.ts";
 import { Laptop } from "./Laptop.tsx";
 import { layoutHall, obstaclesOf, rowSigns, type Rack } from "./layout.ts";
 import { Office } from "./Office.tsx";
@@ -66,10 +70,12 @@ function startFor(role: Role): Player {
   return devSpawnOverride() ?? { x: spot.x, z: spot.z, yaw: spot.yaw, pitch: -0.05 };
 }
 
-/** Development only: `?at=<screen id>` drops you in front of that screen (stripped from production builds). */
+/** Development only: `?at=<screen id>` or `?at=x,z,yaw` drops you there (stripped from production builds). */
 function devSpawnOverride(): Player | null {
   if (!import.meta.env.DEV) return null;
   const id = new URLSearchParams(window.location.search).get("at");
+  const [x, z, yaw] = (id ?? "").split(",").map(Number);
+  if ([x, z, yaw].every(Number.isFinite)) return { x, z, yaw, pitch: 0 };
   const screen = WALL_SCREENS.find((candidate) => candidate.id === id);
   if (!screen) return null;
   const [nx, nz] = screen.normal;
@@ -99,6 +105,15 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
     [cluster, scenario.externals],
   );
   const reduceMotion = useMemo(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches, []);
+  const [pinned] = useState(pinnedQuality);
+  const [quality, setQuality] = useState<Quality>(() => pinned ?? startingQuality(readDeviceHints()));
+  const settings = QUALITY[quality];
+  // Only ever step down: switching shadows recompiles every material, so bouncing between tiers would stutter.
+  const stepDown = useCallback(() => {
+    if (!pinned) setQuality("low");
+  }, [pinned]);
+  // With post-processing the effect chain tone-maps; without it the renderer does.
+  const gl = useMemo(() => ({ antialias: true, powerPreference: "high-performance" as const, toneMapping: settings.hasEffects ? NoToneMapping : AgXToneMapping }), [settings.hasEffects]);
   const controls = useRef<Controls>({
     keys: new Set(),
     stick: { x: 0, y: 0 },
@@ -256,13 +271,15 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
       onPointerCancel={onPointerUp}
     >
       <Canvas
-        dpr={[1, 1.75]}
-        gl={{ antialias: true, powerPreference: "high-performance" }}
+        dpr={[...settings.dpr]}
+        shadows={settings.hasShadows ? "percentage" : false}
+        gl={gl}
         camera={{ fov: 70, near: 0.05, far: 80, position: [start.x, EYE_HEIGHT, start.z] }}
       >
         <color attach="background" args={[0, 0, 0]} />
-        <Office panic={panic} reduceMotion={reduceMotion} />
-        <People comms={comms} now={cluster.t} getPlayer={getPlayer} reduceMotion={reduceMotion} />
+        <PerformanceMonitor onDecline={stepDown} onFallback={stepDown} />
+        <Office panic={panic} reduceMotion={reduceMotion} hasShadows={settings.hasShadows} />
+        <People comms={comms} now={cluster.t} getPlayer={getPlayer} reduceMotion={reduceMotion} panic={panic} />
         <Teammates teammates={teammates} reduceMotion={reduceMotion} />
         {racks.map((rack) => (
           <RackModel
@@ -270,7 +287,7 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
             rack={rack}
             load={loadOf(rack)}
             isFocused={rack.key === focusedKey}
-            isSelected={sameNode(rack.node, selected)}
+            isSelected={rack.node !== null && sameNode(rack.node, selected)}
             reduceMotion={reduceMotion}
             onActivate={onRackClick}
           />
@@ -280,6 +297,7 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
         ))}
         <Beacon health={edgeHealth(cluster)} reduceMotion={reduceMotion} x={DATACENTRE_ORIGIN.x} z={DATACENTRE_ORIGIN.z} />
         <Laptop isOpen={isLaptopOpen} reduceMotion={reduceMotion} screenRef={laptopScreenRef} />
+        {settings.hasEffects && <Effects />}
         <PlayerRig start={start} racks={racks} usables={usables} readIntent={readIntent} onMove={onPlayerMove} onFocus={setFocusedKey} tremor={reduceMotion ? 0 : panic} />
       </Canvas>
 

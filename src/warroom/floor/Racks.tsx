@@ -1,11 +1,13 @@
 import { useFrame, type ThreeEvent } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
-import { BoxGeometry, EdgesGeometry, type Group, type MeshStandardMaterial } from "three";
+import { BoxGeometry, CanvasTexture, EdgesGeometry, RepeatWrapping, SRGBColorSpace, type Group, type MeshStandardMaterial } from "three";
 import type { Health } from "../health.ts";
 import type { Rack } from "./layout.ts";
 import { HEALTH_TOKEN, signTexture, tokenColor } from "./tokens.ts";
 
 const LED_COUNT = 10;
+/** Perforation pitch of a server-rack door, metres; the texture holds a 2 × 2 cell of holes. */
+const PERFORATION_PITCH = 0.025;
 
 type RackProps = {
   rack: Rack;
@@ -21,19 +23,31 @@ export function RackModel({ rack, load, isFocused, isSelected, reduceMotion, onA
   const { footprint, height, kind } = rack;
   if (kind === "external") return <ExternalCage rack={rack} isFocused={isFocused} onActivate={onActivate} />;
 
-  const bodyColor = tokenColor(kind === "idle" ? "--color-paper-2" : "--color-paper-3");
-  const trimColor = tokenColor(isSelected ? "--color-focus" : isFocused ? "--color-ink-2" : "--color-rule");
+  const bodyColor = tokenColor("--color-world-rack");
+  const highlight = isSelected ? tokenColor("--color-focus") : isFocused ? tokenColor("--color-ink-2") : null;
   const lit = kind === "idle" ? 3 : Math.max(1, Math.round(load * LED_COUNT));
+  const door = { width: footprint.width * 0.94, height: height * 0.95 };
 
   return (
     <group position={[footprint.x, 0, footprint.z]} rotation={[0, rack.front === 1 ? 0 : Math.PI, 0]} onClick={(event) => onActivate(rack, event)}>
-      <mesh position={[0, height / 2, 0]}>
+      <mesh position={[0, height / 2, 0]} castShadow receiveShadow>
         <boxGeometry args={[footprint.width, height, footprint.depth]} />
-        <meshStandardMaterial color={bodyColor} roughness={0.75} metalness={0.35} />
+        <meshStandardMaterial color={bodyColor} roughness={0.55} metalness={0.5} />
       </mesh>
-      <mesh position={[0, height / 2, footprint.depth / 2 + 0.002]}>
-        <planeGeometry args={[footprint.width * 0.92, height * 0.94]} />
-        <meshStandardMaterial color={trimColor} roughness={0.9} metalness={0.1} transparent opacity={isFocused || isSelected ? 0.55 : 0.25} />
+      <mesh position={[0, height / 2, footprint.depth / 2 + 0.003]}>
+        <planeGeometry args={[door.width, door.height]} />
+        <meshStandardMaterial
+          color={tokenColor("--color-world-metal")}
+          map={perforation(door.width, door.height)}
+          roughness={0.62}
+          metalness={0.15}
+          emissive={highlight ?? bodyColor}
+          emissiveIntensity={highlight ? 0.35 : 0}
+        />
+      </mesh>
+      <mesh position={[-footprint.width * 0.38, height * 0.55, footprint.depth / 2 + 0.02]}>
+        <boxGeometry args={[0.02, 0.32, 0.03]} />
+        <meshStandardMaterial color={tokenColor("--color-world-aluminium")} roughness={0.3} metalness={1} />
       </mesh>
       {Array.from({ length: LED_COUNT }, (_, index) => (
         <Led
@@ -114,4 +128,36 @@ export function Beacon({ health, reduceMotion, x, z }: { health: Health; reduceM
       </mesh>
     </group>
   );
+}
+
+const perforations = new Map<string, CanvasTexture>();
+
+/** A perforated steel door: bright metal with dark holes on a staggered grid, tiled at real pitch. Cached per door size. */
+function perforation(width: number, height: number): CanvasTexture {
+  const key = `${width.toFixed(2)}x${height.toFixed(2)}`;
+  const cached = perforations.get(key);
+  if (cached) return cached;
+  const size = 32;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("2D canvas unavailable");
+  const styles = getComputedStyle(document.documentElement);
+  context.fillStyle = styles.getPropertyValue("--color-world-aluminium").trim();
+  context.fillRect(0, 0, size, size);
+  context.fillStyle = styles.getPropertyValue("--color-terminal").trim();
+  for (const [x, y] of [[0.25, 0.25], [0.75, 0.25], [0, 0.75], [0.5, 0.75], [1, 0.75]] as const) {
+    context.beginPath();
+    context.arc(x * size, y * size, size * 0.16, 0, Math.PI * 2);
+    context.fill();
+  }
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.wrapS = RepeatWrapping;
+  texture.wrapT = RepeatWrapping;
+  texture.anisotropy = 8;
+  texture.repeat.set(width / (PERFORATION_PITCH * 2), height / (PERFORATION_PITCH * 2));
+  perforations.set(key, texture);
+  return texture;
 }

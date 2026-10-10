@@ -92,7 +92,7 @@ export function Laptop({ isOpen, reduceMotion, screenRef }: Props) {
     overlay.dataset.visible = "true";
   });
 
-  const shell = tokenColor("--color-rule");
+  const shell = tokenColor("--color-world-aluminium");
   const deck = tokenColor("--color-paper-3");
   const glass = tokenColor("--color-terminal");
   const keys = tokenColor("--color-rule-2");
@@ -102,7 +102,7 @@ export function Laptop({ isOpen, reduceMotion, screenRef }: Props) {
       {/* Base with keyboard, extending from the hinge toward the player. */}
       <mesh position={[0, -BASE.height / 2, BASE.depth / 2]}>
         <boxGeometry args={[BASE.width, BASE.height, BASE.depth]} />
-        <meshStandardMaterial color={shell} roughness={0.5} metalness={0.6} />
+        <meshStandardMaterial color={shell} roughness={0.32} metalness={1} />
       </mesh>
       <mesh position={[0, 0.0005, BASE.depth * 0.36]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[BASE.width * 0.86, BASE.depth * 0.46]} />
@@ -116,7 +116,7 @@ export function Laptop({ isOpen, reduceMotion, screenRef }: Props) {
       <group ref={lid} rotation={[Math.PI / 2, 0, 0]}>
         <mesh position={[0, LID.height / 2, -LID.thickness / 2]}>
           <boxGeometry args={[LID.width, LID.height, LID.thickness]} />
-          <meshStandardMaterial color={shell} roughness={0.5} metalness={0.6} />
+          <meshStandardMaterial color={shell} roughness={0.32} metalness={1} />
         </mesh>
         <mesh position={[0, LID.height / 2 + SCREEN_LIFT, 0.0005]}>
           <planeGeometry args={[SCREEN.width, SCREEN.height]} />

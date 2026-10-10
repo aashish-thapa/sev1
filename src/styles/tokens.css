@@ -44,8 +44,11 @@
   --color-world-glass: oklch(80% 0.03 220);
   --color-world-desk: oklch(90% 0.01 85);
   --color-world-metal: oklch(42% 0.01 260);
-  --color-world-leaf: oklch(52% 0.11 150);
   --color-world-ceiling: oklch(94% 0.01 85);
+  --color-world-aluminium: oklch(80% 0.004 250);
+  --color-world-plastic: oklch(21% 0.006 260);
+  --color-world-fabric: oklch(36% 0.02 250);
+  --color-world-rack: oklch(23% 0.008 260);
   --color-skin-1: oklch(82% 0.05 65);
   --color-skin-2: oklch(66% 0.08 55);
   --color-skin-3: oklch(48% 0.07 45);

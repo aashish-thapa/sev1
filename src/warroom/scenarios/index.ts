@@ -6,6 +6,7 @@ import { androidStagedRollout500s } from "./android-staged-rollout-500s.ts";
 import { checkoutMeltdown } from "./checkout-meltdown.ts";
 import { checkoutPoolLeak } from "./checkout-pool-leak.ts";
 import { crashOnCheckout } from "./crash-on-checkout.ts";
+import { forcedUpdateWall } from "./forced-update-wall.ts";
 import { iosRetryConfig } from "./ios-retry-config.ts";
 import { oomAfterDeploy } from "./oom-after-deploy.ts";
 import { ordersIndexInvalid } from "./orders-index-invalid.ts";
@@ -21,13 +22,14 @@ export const SCENARIOS: readonly Scenario[] = [
   checkoutMeltdown,
   iosRetryConfig,
   androidStagedRollout500s,
+  forcedUpdateWall,
 ];
 
 /** Each role's own War Rooms, easiest first. A role's ladder grows as its incidents are written. */
 const LADDERS: Readonly<Record<Role, readonly Scenario[]>> = {
   infrastructure: [scaledToZero, crashOnCheckout, oomAfterDeploy, checkoutPoolLeak, ordersIndexInvalid],
   frontend: [],
-  mobile: [iosRetryConfig, androidStagedRollout500s],
+  mobile: [iosRetryConfig, androidStagedRollout500s, forcedUpdateWall],
   security: [],
   data: [],
 };

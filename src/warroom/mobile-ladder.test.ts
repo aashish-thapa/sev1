@@ -2,19 +2,21 @@ import { describe, expect, it } from "vitest";
 import { applyFrame, encodeFrame, IncidentFrameSchema } from "../multiplayer/frame.ts";
 import { advance, alertRate, debrief, declareResolved, openIncident, type Incident } from "./incident.ts";
 import type { Scenario } from "./scenario.ts";
+import { androidStagedRollout500s } from "./scenarios/android-staged-rollout-500s.ts";
 import { checkoutCluster } from "./scenarios/checkout-cluster.ts";
 import { checkoutCommerce, iosUserAgent, NO_RETRY } from "./scenarios/checkout-commerce.ts";
-import { androidStagedRollout500s } from "./scenarios/android-staged-rollout-500s.ts";
+import { forcedUpdateWall } from "./scenarios/forced-update-wall.ts";
 import { iosRetryConfig } from "./scenarios/ios-retry-config.ts";
 import { scaledToZero } from "./scenarios/scaled-to-zero.ts";
 import { runLine } from "./shell/shell.ts";
 import { clientSegments, unsafeRetryShare } from "./sim/clients.ts";
+import { customerLossRate } from "./sim/commerce-step.ts";
 import { findPlatform, type Commerce, type RemoteConfigEntry } from "./sim/commerce.ts";
 import { isOlderThan, updateWall } from "./sim/update-wall.ts";
 
 const MIN_VERSION = "min_supported_version";
 /** The mobile ladder, easiest first. */
-const LADDER: readonly Scenario[] = [iosRetryConfig, androidStagedRollout500s];
+const LADDER: readonly Scenario[] = [iosRetryConfig, androidStagedRollout500s, forcedUpdateWall];
 /** As solutions.test.ts plays a worked answer: the first move 20 s after the page, a command every 8 s, then 180 s to settle. */
 const FIRST_MOVE_AT = 20;
 const THINKING_SECONDS = 8;
@@ -260,5 +262,39 @@ describe("android-staged-rollout-500s: a growing staged rollout behind a remote-
     expect(withoutHalt.isRootCauseFixed).toBe(true);
     expect(withoutHalt.objectives?.find((objective) => objective.role === "mobile")?.isMet).toBe(false);
     expect(withoutHalt.points).toBeLessThan(debrief(tryFix(scenario, V2_OFF, HALT).closed, scenario, true).points);
+  });
+});
+
+describe("forced-update-wall: forcing an update to a build that isn't out", () => {
+  const scenario = forcedUpdateWall;
+  const WALL = "remote-config set min_supported_version 7.3.1";
+  const ADDRESS_OFF = "remote-config set checkout_address_v2_enabled false";
+  const loss = (incident: Incident) => customerLossRate(commerceOf(incident), incident.cluster.t);
+
+  it("pages on the worse of 5xx and lost customers: half of iOS 7.3.0's checkouts fail", () => {
+    const opened = openIncident(scenario);
+    expect(opened.cluster.errorRate).toBeCloseTo(0.4 * 0.36 * 0.95 * 0.5, 6);
+    expect(alertRate(scenario, opened.cluster)).toBeCloseTo(0.36 * 0.95 * 0.5, 6);
+    expect(text(scenario, "releases status ios", opened)).toMatch(/ios\s+7\.3\.1\s+in review/);
+  });
+
+  it("raising the minimum version backfires: 5xx falls, customer loss rises, resolve is refused", () => {
+    const opened = play(scenario, openIncident(scenario), FIRST_MOVE_AT);
+    const { settled, refused } = tryFix(scenario, WALL);
+    expect(settled.cluster.errorRate).toBeLessThan(0.001);
+    expect(loss(settled)).toBeGreaterThan(0.36);
+    expect(loss(settled)).toBeGreaterThan(loss(opened) * 2);
+    expect(refused).toEqual({ kind: "refused", rate: loss(settled), label: "checkout 5xx or loss" });
+    expect(text(scenario, "releases status ios", settled)).toContain("iOS 7.3.0: 100.0% of sessions are on the forced-update screen.");
+  });
+
+  it("the wall still refuses resolve after the real fix, until the minimum comes back down", () => {
+    const walled = tryFix(scenario, WALL, ADDRESS_OFF);
+    expect(walled.refused?.kind).toBe("refused");
+    const lowered = play(scenario, as(scenario, "remote-config set min_supported_version 7.0.0", walled.settled), SETTLE_SECONDS);
+    expect(alertRate(scenario, lowered.cluster)).toBe(0);
+    const { refused, closed } = resolve(scenario, lowered);
+    expect(refused).toBeUndefined();
+    expect(debrief(closed, scenario, true).points).toBeLessThan(debrief(resolve(scenario, solve(scenario)).closed, scenario, true).points);
   });
 });

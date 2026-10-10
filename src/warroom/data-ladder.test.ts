@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { Role } from "../domain/incident.ts";
-import { advance, openIncident, type Incident } from "./incident.ts";
+import { applyFrame, encodeFrame, IncidentFrameSchema } from "../multiplayer/frame.ts";
+import { advance, alertRate, debrief, declareResolved, openIncident, type Incident } from "./incident.ts";
 import type { Scenario } from "./scenario.ts";
 import { checkoutCluster } from "./scenarios/checkout-cluster.ts";
 import { checkoutCommerce } from "./scenarios/checkout-commerce.ts";
 import { checkoutMeltdown } from "./scenarios/checkout-meltdown.ts";
+import { refundDoubleCharges, SETTLEMENT_CUTOFF } from "./scenarios/refund-double-charges.ts";
 import { scaledToZero } from "./scenarios/scaled-to-zero.ts";
 import { airflowCompact, airflowLine } from "./shell/commands/pipelines.ts";
 import { SSO_GROUPS } from "./shell/identity.ts";
 import { completeLine, runLine } from "./shell/shell.ts";
+import { pendingRefunds, visibleOrphans } from "./sim/commerce-actions.ts";
 import { customerLossRate, type Settlement } from "./sim/commerce-step.ts";
 import type { Commerce, FraudScoring } from "./sim/commerce.ts";
 import { FEATURE_MAX_AGE_SECONDS, fraudDeclines, NO_FRAUD, scoredAt, stepFraud } from "./sim/fraud.ts";
@@ -61,6 +64,70 @@ function commerceOf(incident: Incident): Commerce {
   const { commerce } = incident.cluster;
   if (!commerce) throw new Error("no commerce in this incident");
   return commerce;
+}
+
+function playTo(scenario: Scenario, t: number, incident: Incident): Incident {
+  return play(scenario, Math.max(0, t - incident.cluster.t), incident);
+}
+
+/** Runs `line` on `role`'s laptop and keeps whatever it changed. */
+function shellOn(scenario: Scenario, incident: Incident, line: string, role: Role = "data") {
+  const result = runLine(line, { cluster: incident.cluster, scenario, history: [], role });
+  return {
+    text: result.output.map((output) => output.text).join("\n"),
+    errors: result.output.filter((output) => output.tone === "err").map((output) => output.text),
+    changed: result.cluster !== undefined,
+    incident: result.cluster ? { ...incident, cluster: result.cluster } : incident,
+  };
+}
+
+/** Plays `steps` (second, command) on the data laptop, then the clock to `until`. */
+function scripted(scenario: Scenario, steps: readonly (readonly [number, string])[], until: number): Incident {
+  let incident = openIncident(scenario);
+  for (const [at, line] of steps) {
+    const result = shellOn(scenario, playTo(scenario, at, incident), line);
+    if (!result.changed) throw new Error(`${line} changed nothing:\n${result.text}`);
+    incident = result.incident;
+  }
+  return playTo(scenario, until, incident);
+}
+
+/** The worked solution as `solutions.test.ts` plays it: first move at 20 s, 8 s apart, 180 s to settle, then declare and monitor. */
+function workedSolution(scenario: Scenario) {
+  let incident = playTo(scenario, 20, openIncident(scenario));
+  for (const step of scenario.solution.data ?? []) {
+    const result = shellOn(scenario, incident, step.command);
+    expect(result.errors, step.command).toEqual([]);
+    incident = play(scenario, 8, result.incident);
+  }
+  const settled = play(scenario, 180, incident);
+  const declared = declareResolved(settled, scenario);
+  expect(declared.notice, `${scenario.id} refused to resolve`).toBeUndefined();
+  const closed = play(scenario, 700, declared.incident);
+  return { settled, closed, result: debrief(closed, scenario, true) };
+}
+
+/** The client a room keeps in sync from frames matches the server's state, second by second. */
+function expectFramesToRoundTrip(scenario: Scenario, steps: readonly (readonly [number, string])[], seconds: number) {
+  const roundTrip = (previous: Incident | null, next: Incident) =>
+    applyFrame(previous, IncidentFrameSchema.parse(JSON.parse(JSON.stringify(encodeFrame(previous, next)))));
+  let server = openIncident(scenario);
+  let client = roundTrip(null, server);
+  for (let second = 0; second < seconds; second += 1) {
+    let next = advance(server, scenario).incident;
+    for (const [at, line] of steps) if (at === next.cluster.t) next = shellOn(scenario, next, line).incident;
+    client = roundTrip(client, next);
+    server = next;
+  }
+  expect(client).toEqual(server);
+  return server;
+}
+
+function expectChipsToRun(scenario: Scenario) {
+  const opened = openIncident(scenario);
+  for (const line of scenario.suggestions?.data ?? []) {
+    expect(shellOn(scenario, opened, line).errors, line).toEqual([]);
+  }
 }
 
 describe("fraud scoring physics", () => {
@@ -290,4 +357,66 @@ describe("the pipelines command", () => {
     expect(text("pipelines list", opened, "infrastructure")).toContain("pipelines: 403 Forbidden: oncall-infrastructure@marlow.example is not in data-eng");
     expect(run(`pipelines run ${DAG}`, opened, "security").cluster).toBeUndefined();
   });
+});
+
+describe("tier 1: refund last night's double charges", () => {
+  const scenario = refundDoubleCharges;
+  const dataObjective = (incident: Incident) => scenario.objectives?.(incident.cluster).find((objective) => objective.role === "data");
+
+  it("opens with the storm's orphaned charges all visible, and pending refunds keep rising if nobody acts", () => {
+    const opened = openIncident(scenario);
+    const atPage = pendingRefunds(commerceOf(opened));
+    expect(atPage).toBeGreaterThan(5000);
+    expect(visibleOrphans(commerceOf(opened))).toBe(Math.floor(commerceOf(opened).ledger.orphanedCaptures));
+    expect(alertRate(scenario, opened.cluster)).toBe(1);
+    expect(opened.cluster.errorRate).toBeLessThan(0.01);
+
+    const tenMinutes = playTo(scenario, 600, opened);
+    expect(pendingRefunds(commerceOf(tenMinutes))).toBeGreaterThan(atPage + 60);
+    expect(alertRate(scenario, tenMinutes.cluster)).toBe(1);
+    expect(dataObjective(playTo(scenario, SETTLEMENT_CUTOFF + 1, tenMinutes))?.isMet).toBe(false);
+  });
+
+  it("refuses to resolve before a refund batch is submitted", () => {
+    const early = playTo(scenario, 60, openIncident(scenario));
+    expect(declareResolved(early, scenario).notice).toEqual({ kind: "refused", rate: 1, label: "orphaned charges not refunded" });
+    const previewed = shellOn(scenario, early, "reconcile preview");
+    expect(previewed.changed).toBe(false);
+    expect(declareResolved(previewed.incident, scenario).notice?.kind).toBe("refused");
+  });
+
+  it("closes at S or A with the worked solution, the batch queued before the cut-off", () => {
+    const { result } = workedSolution(scenario);
+    expect(result.isRootCauseFixed).toBe(true);
+    expect(result.objectives?.every((objective) => objective.isMet)).toBe(true);
+    expect(["S", "A"]).toContain(result.grade);
+  });
+
+  it("tells data the gateway is still trickling orphans in, and a later batch sweeps them up", () => {
+    const submitted = scripted(scenario, [[30, "reconcile submit"]], 400);
+    expect(shellOn(scenario, submitted, "reconcile preview").text).toMatch(/Trickling in: about 9 new orphaned captures a minute/);
+    const swept = shellOn(scenario, submitted, "reconcile submit").incident;
+    expect(pendingRefunds(commerceOf(swept))).toBe(0);
+    expect(commerceOf(swept).ledger.refundBatches).toHaveLength(2);
+  });
+
+  it("costs the objective, and points, to submit after the settlement cut-off", () => {
+    const onTime = scripted(scenario, [[60, "reconcile submit"]], SETTLEMENT_CUTOFF + 300);
+    const late = scripted(scenario, [[SETTLEMENT_CUTOFF + 5, "reconcile submit"]], SETTLEMENT_CUTOFF + 300);
+    expect(dataObjective(onTime)?.isMet).toBe(true);
+    expect(dataObjective(late)?.isMet).toBe(false);
+    expect(debrief(late, scenario, true).points).toBeLessThan(debrief(onTime, scenario, true).points - 9);
+  });
+
+  it("is deterministic", () => {
+    const steps = [[40, "reconcile submit"]] as const;
+    expect(scripted(scenario, steps, 300)).toEqual(scripted(scenario, steps, 300));
+  });
+
+  it("round-trips through multiplayer frames", () => {
+    const server = expectFramesToRoundTrip(scenario, [[50, "reconcile submit"]], 120);
+    expect(commerceOf(server).ledger.refundBatches).toHaveLength(1);
+  });
+
+  it("offers chips the data laptop can run", () => expectChipsToRun(scenario));
 });

@@ -14,10 +14,10 @@ function accrualPerSecond(commerce: Commerce): number {
 }
 
 function accrualWarning(commerce: Commerce): readonly OutputLine[] {
-  const rate = accrualPerSecond(commerce);
-  return rate >= 0.5
-    ? err(`Still accruing: about ${count(rate * 60)} new orphaned captures a minute. A batch now will be incomplete until the retries stop.`)
-    : dim("No new orphaned captures in the last visible minute.");
+  const perMinute = accrualPerSecond(commerce) * 60;
+  if (perMinute >= 30) return err(`Still accruing: about ${count(perMinute)} new orphaned captures a minute. A batch now will be incomplete until the retries stop.`);
+  if (perMinute >= 1) return dim(`Trickling in: about ${count(perMinute)} new orphaned captures a minute. A later batch picks them up.`);
+  return dim("No new orphaned captures in the last visible minute.");
 }
 
 function preview(context: ShellContext, commerce: Commerce): ShellResult {

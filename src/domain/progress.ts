@@ -90,6 +90,11 @@ export function recordWarRoomRun(progress: Progress, scenarioId: string, points:
   };
 }
 
+/** War Rooms finished across every scenario; picks which solo incident pages you next. */
+export function warRoomPlays(progress: Progress): number {
+  return Object.values(progress.warRoom).reduce((sum, record) => sum + record.plays, 0);
+}
+
 export function hasFinishedShift(progress: Progress, day: LocalDate): boolean {
   return progress.history.some((entry) => entry.day === day);
 }

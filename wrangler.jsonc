@@ -20,6 +20,7 @@
     {
       "binding": "DB",
       "database_name": "sev1",
+      "database_id": "0f4048f4-4678-42b5-af04-3eba47b7697a",
       "migrations_dir": "worker/migrations"
     }
   ],

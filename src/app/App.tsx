@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { warRoomPlays } from "../domain/progress.ts";
 import { Briefing } from "../ui/Briefing.tsx";
 import { DiscussionOverlay } from "../ui/DiscussionOverlay.tsx";
 import { findScenario, soloScenarioFor, TEAM_SCENARIO } from "../warroom/scenarios/index.ts";
@@ -22,8 +23,8 @@ export function App({ shareUrl, ...services }: Props) {
   const room = useRoom({ url: roomUrl() });
   const role = game.progress.role ?? "infrastructure";
   const isInRoom = room.room !== null && room.status !== "left" && room.status !== "failed";
-  // Solo infra gets the pure infra outage; other roles and every team room get the cross-team meltdown.
-  const scenario = isInRoom ? (findScenario(room.room?.scenarioId ?? "") ?? TEAM_SCENARIO) : soloScenarioFor(role);
+  // Solo infra rotates through the pure infra outages; other roles and every team room get the cross-team meltdown.
+  const scenario = isInRoom ? (findScenario(room.room?.scenarioId ?? "") ?? TEAM_SCENARIO) : soloScenarioFor(role, warRoomPlays(game.progress));
 
   // Fetch the 3D office while the player is still in the lobby.
   useEffect(preloadFloor, []);

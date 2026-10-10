@@ -2,7 +2,9 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { IncidentPackSchema } from "../src/domain/incident.ts";
-import { TaskPackSchema } from "../src/domain/work/task.ts";
+import { TaskPackSchema, type Task } from "../src/domain/work/task.ts";
+import { interviewCoverageGaps } from "../src/domain/work/interview.ts";
+import { ROLE_IDS } from "../src/domain/incident.ts";
 
 const packsDir = join(import.meta.dirname, "..", "src", "content", "packs");
 /** A visibly longer correct option is a tell; small differences are invisible on screen. */
@@ -44,6 +46,7 @@ console.log(`\n${total} cards total`);
 // Daily-work tasks: bug fixes and PR reviews.
 const tasksDir = join(import.meta.dirname, "..", "src", "content", "tasks");
 let taskTotal = 0;
+const allTasks: Task[] = [];
 for (const file of readdirSync(tasksDir).filter((name) => name.endsWith(".json")).sort()) {
   const raw: unknown = JSON.parse(readFileSync(join(tasksDir, file), "utf8"));
   const parsed = TaskPackSchema.safeParse(raw);
@@ -70,7 +73,12 @@ for (const file of readdirSync(tasksDir).filter((name) => name.endsWith(".json")
     seenIds.set(task.id, `tasks/${file}`);
   }
   taskTotal += parsed.data.length;
+  allTasks.push(...parsed.data);
   console.log(`✓ tasks/${file} — ${parsed.data.length} tasks`);
 }
 console.log(`${taskTotal} tasks total`);
+for (const gap of interviewCoverageGaps(allTasks, ROLE_IDS)) {
+  failures += 1;
+  console.error(`✗ interviews: ${gap}`);
+}
 if (failures > 0) process.exit(1);

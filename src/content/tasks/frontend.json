@@ -221,5 +221,353 @@
       "cause": "Nothing wrong: the page is code-split and wrapped in Suspense with a fallback.",
       "why": "lazy() wants a default export; mapping the named AnalyticsPage export to default keeps it working, and the Suspense fallback covers the load. Nobody else pays for the chart library."
     }
+  },
+  {
+    "kind": "code-fix",
+    "id": "frontend-fix-zero-based-month",
+    "role": "frontend",
+    "difficulty": 1,
+    "categories": [],
+    "title": "Receipts are dated one month early",
+    "ticket": "A customer paid on March 14 and the receipt page says 2/14/2026. Their accountant flagged it as a February charge.",
+    "file": {
+      "path": "src/receipts/formatDate.ts",
+      "language": "ts",
+      "lines": [
+        "/** A short local date for receipts, like 3/14/2026. */",
+        "export function formatShortDate(iso: string): string {",
+        "  const date = new Date(iso);",
+        "  const month = date.getMonth();",
+        "  const day = date.getDate();",
+        "  return `${month}/${day}/${date.getFullYear()}`;",
+        "}"
+      ]
+    },
+    "failing": {
+      "test": "formatShortDate \u203a formats a mid-March payment",
+      "output": [
+        "expect(formatShortDate('2026-03-14T09:30:00')).toBe('3/14/2026')",
+        "Expected: \"3/14/2026\"",
+        "Received: \"2/14/2026\""
+      ]
+    },
+    "bugLine": 3,
+    "fixes": [
+      "  const month = date.getMonth() + 1;",
+      "  const month = date.getUTCMonth();",
+      "  const month = date.getDay() + 1;",
+      "  const month = date.getMonth() || 12;"
+    ],
+    "fixAnswer": 0,
+    "explanation": {
+      "cause": "getMonth() counts from 0, so March comes back as 2.",
+      "why": "Adding one gives the calendar month. getUTCMonth is zero-based too, getDay is the day of the week, and || 12 only changes January."
+    }
+  },
+  {
+    "kind": "pr-review",
+    "id": "frontend-pr-stale-interval-countdown",
+    "role": "frontend",
+    "difficulty": 2,
+    "categories": [
+      "saas",
+      "fintech"
+    ],
+    "title": "Warn people a minute before their session expires",
+    "author": "Tomas Reyes",
+    "description": "People lose half-filled forms when the session times out. This calls onOneMinuteLeft from the existing countdown so the page can show a 'save your work' banner at 1:00.",
+    "path": "src/session/SessionTimer.tsx",
+    "language": "tsx",
+    "diff": [
+      {
+        "op": "-",
+        "text": "export function SessionTimer({ expiresInSeconds }: { expiresInSeconds: number }) {"
+      },
+      {
+        "op": "+",
+        "text": "export function SessionTimer({ expiresInSeconds, onOneMinuteLeft }: { expiresInSeconds: number; onOneMinuteLeft: () => void }) {"
+      },
+      {
+        "op": " ",
+        "text": "  const [remaining, setRemaining] = useState(expiresInSeconds);"
+      },
+      {
+        "op": " ",
+        "text": ""
+      },
+      {
+        "op": " ",
+        "text": "  useEffect(() => {"
+      },
+      {
+        "op": " ",
+        "text": "    const id = setInterval(() => {"
+      },
+      {
+        "op": " ",
+        "text": "      setRemaining((current) => Math.max(current - 1, 0));"
+      },
+      {
+        "op": "+",
+        "text": "      if (remaining === 60) onOneMinuteLeft();"
+      },
+      {
+        "op": " ",
+        "text": "    }, 1000);"
+      },
+      {
+        "op": " ",
+        "text": "    return () => clearInterval(id);"
+      },
+      {
+        "op": " ",
+        "text": "  }, []);"
+      },
+      {
+        "op": " ",
+        "text": ""
+      },
+      {
+        "op": " ",
+        "text": "  const minutes = Math.floor(remaining / 60);"
+      },
+      {
+        "op": " ",
+        "text": "  const seconds = String(remaining % 60).padStart(2, \"0\");"
+      },
+      {
+        "op": " ",
+        "text": "  return <p role=\"timer\">Session expires in {minutes}:{seconds}</p>;"
+      },
+      {
+        "op": " ",
+        "text": "}"
+      }
+    ],
+    "verdict": "request-changes",
+    "flaw": 7,
+    "explanation": {
+      "cause": "The interval callback was created on the first render, so the remaining it checks is always the starting value. The warning never fires, or fires every second if the session starts at exactly 60.",
+      "why": "The existing tick is safe because it uses the functional setRemaining. The new check needs the live value too: run it in a separate effect on [remaining], or check current inside the updater."
+    }
+  },
+  {
+    "kind": "code-fix",
+    "id": "frontend-fix-search-race-signal",
+    "role": "frontend",
+    "difficulty": 3,
+    "categories": [
+      "ecommerce"
+    ],
+    "title": "Search shows results for what you typed a moment ago",
+    "ticket": "Typing 'lamp' quickly sometimes shows the results for 'lam', and they stay there until you type another letter. Happens most on slow mobile connections.",
+    "file": {
+      "path": "src/search/SearchBox.tsx",
+      "language": "tsx",
+      "lines": [
+        "export function SearchBox() {",
+        "  const [query, setQuery] = useState(\"\");",
+        "  const [results, setResults] = useState<Product[]>([]);",
+        "",
+        "  useEffect(() => {",
+        "    if (query.length < 2) return;",
+        "    const controller = new AbortController();",
+        "    searchProducts(query)",
+        "      .then(setResults)",
+        "      .catch((error) => {",
+        "        if (error.name !== \"AbortError\") reportError(error);",
+        "      });",
+        "    return () => controller.abort();",
+        "  }, [query]);",
+        "",
+        "  return <Combobox value={query} onChange={setQuery} options={results} />;",
+        "}"
+      ]
+    },
+    "failing": {
+      "test": "SearchBox \u203a keeps the latest query's results when responses arrive out of order",
+      "output": [
+        "typed 'lam' then 'lamp'; the 'lam' response resolved last",
+        "expect(options()).toEqual(['Lamp shade', 'Desk lamp'])",
+        "Received: ['Lambswool throw', 'Lamp shade', 'Desk lamp', 'Laminate shelf']"
+      ]
+    },
+    "bugLine": 7,
+    "fixes": [
+      "    searchProducts(query, { signal: controller.signal })",
+      "    searchProducts(query, { signal: new AbortController().signal })",
+      "    searchProducts(query, { cache: \"no-store\" })",
+      "    searchProducts(query.trim())"
+    ],
+    "fixAnswer": 0,
+    "explanation": {
+      "cause": "The cleanup aborts a controller whose signal never reaches the request, so the older 'lam' fetch still resolves and overwrites the newer results.",
+      "why": "Passing controller.signal lets the cleanup cancel the stale request, which then rejects with AbortError and is ignored. A brand new controller is never aborted, and skipping the cache or trimming the query does nothing about ordering."
+    }
+  },
+  {
+    "kind": "pr-review",
+    "id": "frontend-pr-utc-due-today",
+    "role": "frontend",
+    "difficulty": 3,
+    "categories": [
+      "fintech",
+      "saas"
+    ],
+    "title": "Badge invoices that are due today or overdue",
+    "author": "Priya Natarajan",
+    "description": "Adds 'Due today' and 'Overdue' badges to the invoice list so people pay before the late fee. Due dates come from the API as plain calendar days, so this compares date strings instead of timestamps.",
+    "path": "src/invoices/due.ts",
+    "language": "ts",
+    "diff": [
+      {
+        "op": "+",
+        "text": "/** Invoices carry their due date as a plain calendar day, like \"2026-10-10\". */"
+      },
+      {
+        "op": "+",
+        "text": "function todayKey(now: Date): string {"
+      },
+      {
+        "op": "+",
+        "text": "  return now.toISOString().slice(0, 10);"
+      },
+      {
+        "op": "+",
+        "text": "}"
+      },
+      {
+        "op": "+",
+        "text": ""
+      },
+      {
+        "op": "+",
+        "text": "export function isDueToday(dueDate: string, now = new Date()): boolean {"
+      },
+      {
+        "op": "+",
+        "text": "  return dueDate === todayKey(now);"
+      },
+      {
+        "op": "+",
+        "text": "}"
+      },
+      {
+        "op": "+",
+        "text": ""
+      },
+      {
+        "op": "+",
+        "text": "export function isOverdue(dueDate: string, now = new Date()): boolean {"
+      },
+      {
+        "op": "+",
+        "text": "  return dueDate < todayKey(now);"
+      },
+      {
+        "op": "+",
+        "text": "}"
+      }
+    ],
+    "verdict": "request-changes",
+    "flaw": 2,
+    "explanation": {
+      "cause": "toISOString gives the UTC date, not the user's, so 'today' rolls over at UTC midnight.",
+      "why": "In the evening for anyone west of UTC, an invoice due today shows as overdue, and just after midnight in the east it isn't due yet. Build the key from getFullYear, getMonth and getDate so it matches the local calendar day."
+    }
+  },
+  {
+    "kind": "pr-review",
+    "id": "frontend-pr-optimistic-like-rollback",
+    "role": "frontend",
+    "difficulty": 3,
+    "categories": [
+      "social"
+    ],
+    "title": "Flip the like button before the server answers",
+    "author": "Jonah Whitfield",
+    "description": "Liking a post waits a full round trip before the heart fills, which feels broken on mobile. This updates the cached post right away and puts it back if the request fails.",
+    "path": "src/posts/useToggleLike.ts",
+    "language": "ts",
+    "diff": [
+      {
+        "op": " ",
+        "text": "export function useToggleLike(postId: string) {"
+      },
+      {
+        "op": " ",
+        "text": "  const queryClient = useQueryClient();"
+      },
+      {
+        "op": " ",
+        "text": "  const queryKey = [\"post\", postId];"
+      },
+      {
+        "op": " ",
+        "text": "  return useMutation({"
+      },
+      {
+        "op": " ",
+        "text": "    mutationFn: (liked: boolean) => setLiked(postId, liked),"
+      },
+      {
+        "op": "-",
+        "text": "    onSuccess: () => queryClient.invalidateQueries({ queryKey }),"
+      },
+      {
+        "op": "+",
+        "text": "    onMutate: async (liked) => {"
+      },
+      {
+        "op": "+",
+        "text": "      await queryClient.cancelQueries({ queryKey });"
+      },
+      {
+        "op": "+",
+        "text": "      const previous = queryClient.getQueryData<Post>(queryKey);"
+      },
+      {
+        "op": "+",
+        "text": "      queryClient.setQueryData<Post>(queryKey, (post) => post && { ...post, liked });"
+      },
+      {
+        "op": "+",
+        "text": "      return { previous };"
+      },
+      {
+        "op": "+",
+        "text": "    },"
+      },
+      {
+        "op": "+",
+        "text": "    onError: (_error, _liked, context) => {"
+      },
+      {
+        "op": "+",
+        "text": "      queryClient.setQueryData(queryKey, context?.previous);"
+      },
+      {
+        "op": "+",
+        "text": "    },"
+      },
+      {
+        "op": "+",
+        "text": "    onSettled: () => queryClient.invalidateQueries({ queryKey }),"
+      },
+      {
+        "op": " ",
+        "text": "  });"
+      },
+      {
+        "op": " ",
+        "text": "}"
+      }
+    ],
+    "verdict": "approve",
+    "flaw": null,
+    "explanation": {
+      "cause": "Nothing wrong: the optimistic write is snapshotted first and rolled back on error.",
+      "why": "Cancelling in-flight fetches stops a stale refetch from overwriting the optimistic heart, the copy keeps the snapshot untouched, and refetching on settle brings the like count back in line with the server."
+    }
   }
 ]

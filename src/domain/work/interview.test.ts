@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createTaskLibrary } from "../../content/task-library.ts";
 import { atDifficulty, companyLevel, difficultiesFor } from "../company/levels.ts";
-import { buildInterview, gradeInterview, INTERVIEW_LENGTH, type InterviewAnswer } from "./interview.ts";
+import { ROLE_IDS } from "../incident.ts";
+import { buildInterview, gradeInterview, INTERVIEW_LENGTH, interviewCoverageGaps, type InterviewAnswer } from "./interview.ts";
 import type { CodeFixTask, PrReviewTask } from "./task.ts";
 
 const dir = join(import.meta.dirname, "..", "..", "content", "tasks");
@@ -55,5 +56,9 @@ describe("interviews", () => {
     expect(gradeInterview(tasks, key, perfect)).toEqual({ correct: 3, total: 3, score: 100 });
     expect(gradeInterview(tasks, key, perfect.slice(1))).toMatchObject({ correct: 2, score: 67 });
     expect(gradeInterview(tasks, key, [])).toMatchObject({ correct: 0, score: 0 });
+  });
+
+  it("has a full interview, with a bug fix and a review, for every role at every difficulty", () => {
+    expect(interviewCoverageGaps(tasks, ROLE_IDS)).toEqual([]);
   });
 });

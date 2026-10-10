@@ -69,3 +69,24 @@ export function gradeInterview(tasks: readonly Task[], key: InterviewKey, answer
   const total = key.length;
   return { correct, total, score: total === 0 ? 0 : Math.round((correct / total) * 100) };
 }
+
+const DIFFICULTIES: readonly TaskDifficulty[] = [1, 2, 3];
+
+/**
+ * Where the library can't fill a full interview: every role needs, at every difficulty, enough
+ * tasks for one interview with both a bug fix and a review. Otherwise pass marks would be off.
+ */
+export function interviewCoverageGaps(tasks: readonly Task[], roles: readonly Role[]): string[] {
+  const gaps: string[] = [];
+  for (const role of roles) {
+    for (const difficulty of DIFFICULTIES) {
+      const pool = tasks.filter((task) => task.role === role && task.difficulty === difficulty);
+      const fixes = pool.filter((task) => task.kind === "code-fix").length;
+      const reviews = pool.length - fixes;
+      if (pool.length < INTERVIEW_LENGTH || fixes === 0 || reviews === 0) {
+        gaps.push(`${role} at difficulty ${difficulty}: ${fixes} bug fixes and ${reviews} reviews; needs ${INTERVIEW_LENGTH} with at least one of each`);
+      }
+    }
+  }
+  return gaps;
+}

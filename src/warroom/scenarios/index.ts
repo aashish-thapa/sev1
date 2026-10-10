@@ -4,15 +4,19 @@ import type { Role } from "../../domain/incident.ts";
 import type { Scenario } from "../scenario.ts";
 import { addressAutocomplete500s } from "./address-autocomplete-500s.ts";
 import { androidStagedRollout500s } from "./android-staged-rollout-500s.ts";
+import { botFloodSingleIp } from "./bot-flood-single-ip.ts";
+import { cardTestingSoar } from "./card-testing-soar.ts";
 import { checkoutMeltdown } from "./checkout-meltdown.ts";
 import { checkoutPoolLeak } from "./checkout-pool-leak.ts";
 import { deadKillSwitch } from "./dead-kill-switch.ts";
 import { crashOnCheckout } from "./crash-on-checkout.ts";
+import { credentialStuffingHosting } from "./credential-stuffing-hosting.ts";
 import { forcedUpdateWall } from "./forced-update-wall.ts";
 import { iosRetryConfig } from "./ios-retry-config.ts";
 import { oomAfterDeploy } from "./oom-after-deploy.ts";
 import { ordersIndexInvalid } from "./orders-index-invalid.ts";
 import { pinnedCertRotation } from "./pinned-cert-rotation.ts";
+import { residentialProxyStuffing } from "./residential-proxy-stuffing.ts";
 import { scaledToZero } from "./scaled-to-zero.ts";
 import { staleServiceWorker } from "./stale-service-worker.ts";
 import { webAutoRetryStorm } from "./web-auto-retry-storm.ts";
@@ -33,6 +37,10 @@ export const SCENARIOS: readonly Scenario[] = [
   androidStagedRollout500s,
   forcedUpdateWall,
   pinnedCertRotation,
+  botFloodSingleIp,
+  credentialStuffingHosting,
+  cardTestingSoar,
+  residentialProxyStuffing,
 ];
 
 /** Each role's own War Rooms, easiest first. A role's ladder grows as its incidents are written. */
@@ -40,7 +48,7 @@ const LADDERS: Readonly<Record<Role, readonly Scenario[]>> = {
   infrastructure: [scaledToZero, crashOnCheckout, oomAfterDeploy, checkoutPoolLeak, ordersIndexInvalid],
   frontend: [webAutoRetryStorm, addressAutocomplete500s, deadKillSwitch, staleServiceWorker],
   mobile: [iosRetryConfig, androidStagedRollout500s, forcedUpdateWall, pinnedCertRotation],
-  security: [],
+  security: [botFloodSingleIp, credentialStuffingHosting, cardTestingSoar, residentialProxyStuffing],
   data: [],
 };
 

@@ -80,15 +80,23 @@ export function deleteWafRule(state: ClusterState, id: string): CommerceResult {
   });
 }
 
-/** A true-positive disposition runs the containment playbook right away instead of waiting for the timer. */
-export function resolveAlert(state: ClusterState, id: string, disposition: AlertDisposition, note: string, by: string): CommerceResult {
+/**
+ * A true-positive disposition runs the containment playbook right away instead of waiting for the timer,
+ * unless the analyst names the WAF rule that already contains it (`containedBy`), or the alert has no playbook.
+ */
+export function resolveAlert(state: ClusterState, id: string, disposition: AlertDisposition, note: string, by: string, containedBy?: string): CommerceResult {
   return withCommerce(state, (commerce) => {
     const alert = commerce.alerts.find((candidate) => candidate.id === id);
     if (!alert) return `alert ${id} not found`;
     if (!isAlertOpen(alert)) return `alert ${id} is already closed`;
-    const resolved = { ...alert, autoContainAt: null, resolution: { disposition, at: state.t, by, note } };
+    if (containedBy !== undefined) {
+      if (disposition !== "true-positive") return "--contained-by goes with a true-positive disposition";
+      if (!commerce.wafRules.some((rule) => rule.id === containedBy)) return `rule ${containedBy} not found`;
+    }
+    const recorded = containedBy === undefined ? note : `${note} (contained by ${containedBy})`;
+    const resolved = { ...alert, autoContainAt: null, resolution: { disposition, at: state.t, by, note: recorded } };
     const alerts = commerce.alerts.map((candidate) => (candidate.id === id ? resolved : candidate));
-    if (disposition !== "true-positive") return { ...commerce, alerts };
+    if (disposition !== "true-positive" || containedBy !== undefined || alert.containTopIps === 0) return { ...commerce, alerts };
     return {
       ...commerce,
       alerts,

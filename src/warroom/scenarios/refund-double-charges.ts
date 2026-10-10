@@ -105,9 +105,9 @@ export const refundDoubleCharges: Scenario = {
   postmortem: {
     question: "Why were customers charged for checkouts that failed?",
     options: [
-      "checkout-api gave up after 3 s, but the gateway still captured the charge",
+      "checkout-api timed out, but the gateway still captured the charge",
       "The web Pay button sent every order twice with no idempotency key",
-      "CDC lag made the warehouse count each charge twice",
+      "CDC lag made the warehouse count every captured charge twice",
       "Payments Ops re-ran yesterday’s refund batch by mistake",
     ],
     answerIndex: 0,

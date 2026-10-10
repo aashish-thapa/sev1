@@ -125,9 +125,9 @@ export const fraudModelRegression: Scenario = {
     question: "What caused the jump in declined checkouts?",
     options: [
       "fraud-scorer v13 declines far more good customers than v12 did",
-      "A card-testing wave pushed real fraud through checkout",
-      "Risk lowered the decline threshold to stop card testers",
-      "A stale feature made returning customers look brand new",
+      "A card-testing wave pushed far more real fraud through checkout",
+      "Risk lowered the decline threshold overnight to stop card testers",
+      "A stale feature made every returning customer look brand new",
     ],
     answerIndex: 0,
     explanation: {

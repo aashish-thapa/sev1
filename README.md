@@ -71,3 +71,13 @@ Every card must pass `pnpm validate:content`. Beyond the schema, the rules that 
 ## Design notes
 
 Built with the Hallmark anti-slop rules (bespoke route). Tokens live in `src/styles/tokens.css`; every colour and font in `app.css` references a token. The sparkline series colour was validated with the dataviz palette validator against the card surface. Checked at 320/375/414/768 px with no horizontal scroll.
+
+## Deploying
+
+The game runs live at https://sev1.aashish-thapa.workers.dev on Cloudflare's free tier. Cloudflare serves the static site, runs one Durable Object per multiplayer room, and stores accounts and the money ledger in D1. The full plan and free-tier budget are in `docs/PLAN.md`.
+
+```sh
+pnpm exec wrangler login --device   # once; the device flow works over SSH
+pnpm db:migrate                     # apply new worker/migrations to the live D1
+pnpm release                        # build + deploy
+```

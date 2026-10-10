@@ -29,6 +29,8 @@ const REASON_LABEL: Readonly<Record<Company["ledger"][number]["reason"], string>
   payroll: "Payroll",
   "room-purchase": "Room bought",
   "server-purchase": "Server bought",
+  investment: "Investment",
+  dividend: "Dividend",
 };
 
 const OFFER_PROBLEM: Readonly<Record<"below_minimum" | "no_free_desk", string>> = {

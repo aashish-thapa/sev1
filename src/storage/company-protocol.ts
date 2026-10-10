@@ -30,7 +30,7 @@ export type FoundRequest = z.input<typeof FoundRequestSchema>;
 /** Spend exactly `seedCents` from the wallet with ref `fundingRef`; the next save funds the company. */
 export const FoundResponseSchema = z.object({ companyId: z.string(), fundingRef: z.string(), seedCents: Cents });
 
-export const LEDGER_REASONS = ["seed", "revenue", "room-upkeep", "server-upkeep", "contractor", "pantry", "payroll", "room-purchase", "server-purchase"] as const;
+export const LEDGER_REASONS = ["seed", "revenue", "room-upkeep", "server-upkeep", "contractor", "pantry", "payroll", "room-purchase", "server-purchase", "investment", "dividend"] as const;
 
 export const CompanyMemberSchema = z.object({
   username: z.string(),
@@ -77,6 +77,11 @@ export const CompanySchema = z.object({
   postings: z.array(z.lazy(() => PostingSchema)).default([]),
   /** Applicants to this company's postings; only the founder and hiring managers get them. */
   applications: z.array(z.lazy(() => ApplicationSchema)).default([]),
+  /** Who owns the company. */
+  capTable: z.lazy(() => CapTableSchema).nullable().default(null),
+  /** Offers the founder has out to investors; only the founder gets them. */
+  investmentOffers: z.array(z.lazy(() => InvestmentOfferSchema)).default([]),
+  trackers: z.lazy(() => TrackersSchema).nullable().default(null),
 });
 export type Company = z.output<typeof CompanySchema>;
 
@@ -103,6 +108,12 @@ export const MyCompanySchema = z.object({
   payouts: z.array(PendingPayoutSchema),
   /** Postings you've interviewed for, and where each stands. */
   applications: z.array(z.lazy(() => MyApplicationSchema)).default([]),
+  /** Investment offers made to you, waiting for an answer. */
+  investmentOffers: z.array(z.lazy(() => ReceivedOfferSchema)).default([]),
+  /** Your stakes in companies, in or out of the one you work at. */
+  holdings: z.array(z.lazy(() => HoldingSchema)).default([]),
+  /** Dividends booked for you and not yet in your wallet; claimed like payroll. */
+  dividends: z.array(z.lazy(() => PendingDividendSchema)).default([]),
 });
 export type MyCompany = z.output<typeof MyCompanySchema>;
 
@@ -248,3 +259,62 @@ export type WorkBoard = z.output<typeof WorkBoardSchema>;
 /** POST /api/company/work/:taskId: one answer, graded once. Returns the graded WorkItem. */
 export const WorkAnswerSchema = InterviewAnswerSchema;
 export type WorkAnswer = z.input<typeof WorkAnswerSchema>;
+
+// ── Investors ──────────────────────────────────────────────────────
+
+export const OFFERS_PATH = "/api/company/offers";
+const Bps = z.int().min(0).max(10_000);
+
+export const CapTableSchema = z.object({
+  founder: z.string(),
+  founderBps: Bps,
+  holders: z.array(z.object({ username: z.string(), bps: Bps, investedCents: Cents })).max(50),
+});
+export type CapTableWire = z.output<typeof CapTableSchema>;
+
+/** An offer the founder made: money in for a share of the company. */
+export const InvestmentOfferSchema = z.object({
+  id: z.string(),
+  investor: z.string(),
+  amountCents: Cents,
+  equityBps: Bps,
+  createdAt: z.number(),
+});
+export type InvestmentOffer = z.output<typeof InvestmentOfferSchema>;
+
+/** POST /api/company/offers (founder only). */
+export const OfferRequestSchema = z.object({ investor: z.string().trim().min(1).max(24), amountCents: Cents, equityBps: Bps });
+export type OfferRequest = z.input<typeof OfferRequestSchema>;
+
+/** An offer as the investor sees it, with what it says the company is worth. */
+export const ReceivedOfferSchema = InvestmentOfferSchema.extend({
+  companyId: z.string(),
+  companyName: z.string(),
+  category: CategoryIdSchema,
+  levelTitle: z.string(),
+  founder: z.string(),
+  valuationCents: Cents,
+});
+export type ReceivedOffer = z.output<typeof ReceivedOfferSchema>;
+
+/** POST /api/offers/:id/accept: the spend that pays for the stake; the client spends it with reason "invest". */
+export const AcceptOfferResponseSchema = z.object({ investRef: z.string(), amountCents: Cents });
+export type AcceptOfferResponse = z.output<typeof AcceptOfferResponseSchema>;
+
+export const HoldingSchema = z.object({ companyId: z.string(), companyName: z.string(), bps: Bps, investedCents: Cents });
+export type Holding = z.output<typeof HoldingSchema>;
+
+export const PendingDividendSchema = z.object({ id: z.string(), companyId: z.string(), companyName: z.string(), workDay: Count, amountCents: Cents });
+export type PendingDividend = z.output<typeof PendingDividendSchema>;
+
+const WindowSchema = z.object({ earningsCents: Cents, expensesCents: Cents, expensesByReason: z.record(z.string(), Cents) });
+
+/** Investment, inventory, and earnings and running costs over 7 and 30 work days; computed on the server from the books. */
+export const TrackersSchema = z.object({
+  investedCents: Cents,
+  inventory: z.array(z.object({ item: z.string(), count: Count, costCents: Cents })),
+  inventoryCents: Cents,
+  last7: WindowSchema,
+  last30: WindowSchema,
+});
+export type TrackersWire = z.output<typeof TrackersSchema>;

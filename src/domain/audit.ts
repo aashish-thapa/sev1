@@ -25,9 +25,9 @@ const TIME_SLACK = 1.25;
 const EVENT_ALLOWANCE = 2;
 const MAX_INCIDENT_CENTS = 100 * INCIDENT_CENTS_PER_POINT;
 const MAX_CARD_CENTS = Math.max(...Object.values(CARD_BONUS_CENTS));
-const EARN_REASONS = ["salary", "card", "incident", "payroll", "grant"] as const satisfies readonly PayReason[];
+const EARN_REASONS = ["salary", "card", "incident", "payroll", "grant", "dividend"] as const satisfies readonly PayReason[];
 /** Earnings the server issues and the save only claims: each new line must be one the server promised. */
-const SERVER_ISSUED = ["payroll", "grant"] as const satisfies readonly PayReason[];
+const SERVER_ISSUED = ["payroll", "grant", "dividend"] as const satisfies readonly PayReason[];
 type ServerIssued = (typeof SERVER_ISSUED)[number];
 
 /** Looks up the tier of a scenario by id; the Worker answers from the scenario registry. */
@@ -45,9 +45,13 @@ export type PromisedMoney = {
   readonly fundings: ReadonlyMap<string, number>;
   readonly payouts: ReadonlyMap<string, number>;
   readonly grants: ReadonlyMap<string, number>;
+  /** Investments the server is waiting for (ref → the exact amount the investor agreed to put in). */
+  readonly investments: ReadonlyMap<string, number>;
+  /** Dividends companies booked for this investor and not yet claimed. */
+  readonly dividends: ReadonlyMap<string, number>;
 };
 
-export const NO_PROMISED_MONEY: PromisedMoney = { fundings: new Map(), payouts: new Map(), grants: new Map() };
+export const NO_PROMISED_MONEY: PromisedMoney = { fundings: new Map(), payouts: new Map(), grants: new Map(), investments: new Map(), dividends: new Map() };
 
 /** Does the server stand behind this new ledger line (a purchase it can price, or pay it booked)? */
 type Vouch = (entry: LedgerEntry) => boolean;
@@ -98,8 +102,11 @@ export function isPlausibleWallet(
     if (issued.some((entry) => entry.amountCents <= 0 || !isBookedPay(entry))) return false;
     if (delta(reason, "earnedCents") !== issued.reduce((sum, entry) => sum + entry.amountCents, 0)) return false;
   }
-  const companySpend = purchases.filter((entry) => entry.reason === "company").reduce((sum, entry) => sum - entry.amountCents, 0);
-  if (next.spentCents.company - previous.spentCents.company !== companySpend) return false;
+  // Money moved to a company (founding or investing) must be exactly the lines that moved it.
+  for (const reason of ["company", "invest"] as const) {
+    const moved = purchases.filter((entry) => entry.reason === reason).reduce((sum, entry) => sum - entry.amountCents, 0);
+    if (next.spentCents[reason] - previous.spentCents[reason] !== moved) return false;
+  }
 
   return isLedgerConsistent(previous, next);
 }
@@ -123,12 +130,13 @@ export function isPlausibleProgress(
   const isAllowedSpend: Vouch = (entry) => {
     // A company seed must be exactly what the server is waiting for, under the ref it issued.
     if (entry.reason === "company") return promised.fundings.get(entry.ref) === -entry.amountCents;
+    if (entry.reason === "invest") return promised.investments.get(entry.ref) === -entry.amountCents;
     const scenarioId = scenarioOfPurchase(entry.ref);
     const tier = scenarioId === null ? undefined : tierOf(scenarioId);
     // Price rises with level, so charging at the level the buyer started this sync from is the floor.
     return tier !== undefined && -entry.amountCents >= solutionPriceCents(tier, lowestLevel);
   };
-  const issuedBy: Readonly<Record<ServerIssued, ReadonlyMap<string, number>>> = { payroll: promised.payouts, grant: promised.grants };
+  const issuedBy: Readonly<Record<ServerIssued, ReadonlyMap<string, number>>> = { payroll: promised.payouts, grant: promised.grants, dividend: promised.dividends };
   const isBookedPay: Vouch = (entry) => (SERVER_ISSUED as readonly string[]).includes(entry.reason) && issuedBy[entry.reason as ServerIssued].get(entry.ref) === entry.amountCents;
   return (
     newCorrect >= 0 &&

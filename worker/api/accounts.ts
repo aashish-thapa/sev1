@@ -145,7 +145,14 @@ export class AccountService {
   /** Everything the server has promised this player's wallet and not yet seen claimed. */
   private async promisedTo(user: User): Promise<PromisedMoney> {
     const [company, grants] = await Promise.all([this.bank ? this.bank.claimsFor(user.id, this.now()) : NO_PROMISED_MONEY, this.pendingGrants(user)]);
-    return { fundings: company.fundings, payouts: company.payouts, grants: new Map(grants.map((grant) => [payRef.grant(grant.id), grant.amountCents])) };
+    return {
+      fundings: company.fundings,
+      payouts: company.payouts,
+      grants: new Map(grants.map((grant) => [payRef.grant(grant.id), grant.amountCents])),
+      // Investments and dividends join once the company bank books them (startup mode, phase 4).
+      investments: new Map(),
+      dividends: new Map(),
+    };
   }
 
   /** The account's balance by the server's books, which startup-mode spending will draw on. */

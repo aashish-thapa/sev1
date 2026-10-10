@@ -30,7 +30,13 @@ const WAIT_MS = 2000;
 describe("protocol parsing", () => {
   it("accepts a well-formed join and normalises the room code", () => {
     const parsed = parseClientMessage(JSON.stringify({ type: "join", roomCode: " abcd ", name: "  Maya ", role: "security" }));
-    expect(parsed).toEqual({ ok: true, message: { type: "join", roomCode: "ABCD", name: "Maya", role: "security" } });
+    expect(parsed).toEqual({ ok: true, message: { type: "join", roomCode: "ABCD", name: "Maya", role: "security", badge: null } });
+  });
+
+  it("takes a badge from the catalog and turns down one that isn't", () => {
+    const join = (badge: string) => parseClientMessage(JSON.stringify({ type: "join", roomCode: "ABCD", name: "Maya", role: "security", badge }));
+    expect(join("streak-7")).toMatchObject({ ok: true, message: { badge: "streak-7" } });
+    expect(join("made-up").ok).toBe(false);
   });
 
   it.each([
@@ -371,7 +377,7 @@ describe("war room server", () => {
     client.on("welcome", (welcome) => welcomes.push(welcome));
     const until = (condition: () => boolean) => expect.poll(condition, { timeout: WAIT_MS, interval: 10 }).toBe(true);
 
-    client.create({ scenarioId: scenario.id, name: "Maya", role: "infrastructure", visibility: "private" });
+    client.create({ scenarioId: scenario.id, name: "Maya", role: "infrastructure", badge: null, visibility: "private" });
     await until(() => client.status === "joined" && client.incident !== null);
     const seat = client.seat;
 
@@ -400,7 +406,7 @@ describe("war room server", () => {
     client.on("status", ({ status, error }) => {
       if (status === "failed") failure = error?.code;
     });
-    client.join({ roomCode: "QQQQ", name: "Sam", role: "data" });
+    client.join({ roomCode: "QQQQ", name: "Sam", role: "data", badge: null });
     await expect.poll(() => failure, { timeout: WAIT_MS }).toBe("room_not_found");
   });
 });

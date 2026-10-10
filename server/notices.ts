@@ -1,3 +1,4 @@
+import { badgeById } from "../src/domain/achievements.ts";
 import type { Role } from "../src/domain/incident.ts";
 import type { IncidentNotice } from "../src/warroom/incident.ts";
 import type { CommsMessage } from "../src/warroom/scenario.ts";
@@ -32,8 +33,9 @@ export function chatComms(name: string, role: Role, text: string, at: number): C
   return { at, from: `${name} · ${role}`, text };
 }
 
-export function joinedComms(name: string, role: Role, at: number): CommsMessage {
-  return { at, from: WAR_ROOM, text: `${name} (${role}) joined.` };
+export function joinedComms(name: string, role: Role, badge: string | null, at: number): CommsMessage {
+  const shown = badge ? badgeById(badge) : undefined;
+  return { at, from: WAR_ROOM, text: `${name}${shown ? ` · ${shown.glyph} ${shown.title}` : ""} (${role}) joined.` };
 }
 
 export function leftComms(name: string, at: number): CommsMessage {

@@ -1,19 +1,25 @@
 import { useContext, useState } from "react";
 import { AccountContext } from "../app/useAccount.ts";
+import { featuredBadge } from "../domain/achievements.ts";
 import { careerLevel } from "../domain/career.ts";
 import { ROLE_IDS, type Role } from "../domain/incident.ts";
 import type { Progress } from "../domain/progress.ts";
 import { ROLE_INFO } from "../domain/roles.ts";
 import type { RoomVisibility } from "../multiplayer/protocol.ts";
 import { usePublicRooms, type ListPublicRooms } from "../multiplayer/usePublicRooms.ts";
+import { useLeaderboard, type FetchLeaderboard } from "../storage/leaderboard-api.ts";
 import { AccountPanel } from "./AccountPanel.tsx";
+import { BadgeMark, BadgeShelf } from "./Badges.tsx";
 import { CareerLadder } from "./Career.tsx";
+import { LeaderboardPanel } from "./LeaderboardPanel.tsx";
 import { WalletChip } from "./WalletChip.tsx";
 
 type Props = {
   progress: Progress;
   roles: { chosen: Role | null; onChoose: (role: Role) => void };
   onEnterOffice: () => void;
+  onFeatureBadge: (badgeId: string | null) => void;
+  fetchLeaderboard: FetchLeaderboard;
   rooms: {
     status: string;
     error: string | null;
@@ -34,7 +40,7 @@ const SCREENS = [
 ] as const;
 
 /** The lobby: what the game is, who you are in it, and the three ways to start. */
-export function Briefing({ progress, roles, onEnterOffice, rooms }: Props) {
+export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, fetchLeaderboard, rooms }: Props) {
   const session = useContext(AccountContext);
   const role = roles.chosen ?? "infrastructure";
   // Until the player types, rooms use their account name, which may arrive after the first render.
@@ -45,6 +51,8 @@ export function Briefing({ progress, roles, onEnterOffice, rooms }: Props) {
   const [openedAs, setOpenedAs] = useState<string | null>(null);
   const isAccountOpen = openedAs !== null && openedAs === session?.status;
   const setAccountOpen = (isOpen: boolean) => setOpenedAs(isOpen ? (session?.status ?? null) : null);
+  const shown = featuredBadge(progress);
+  const leaderboard = useLeaderboard(fetchLeaderboard, `${session?.status}:${session?.account?.username ?? ""}`);
 
   return (
     <main className="home">
@@ -60,7 +68,14 @@ export function Briefing({ progress, roles, onEnterOffice, rooms }: Props) {
               aria-controls={ACCOUNT_PANEL_ID}
               onClick={() => setAccountOpen(!isAccountOpen)}
             >
-              {isSignedIn ? session.account?.username : "Log in / Sign up"}
+              {isSignedIn ? (
+                <>
+                  {session.account?.username}
+                  {shown && <BadgeMark badge={shown} />}
+                </>
+              ) : (
+                "Log in / Sign up"
+              )}
             </button>
           )}
         </div>
@@ -108,6 +123,15 @@ export function Briefing({ progress, roles, onEnterOffice, rooms }: Props) {
         <label className="home__name">
           <span>Your name in rooms</span>
           <input value={name} maxLength={NAME_LIMIT} autoComplete="nickname" placeholder="Maya" onChange={(event) => setTypedName(event.target.value)} />
+          <span className="home__name-shows">
+            {shown ? (
+              <>
+                Teammates see <BadgeMark badge={shown} /> {shown.title} by your name.
+              </>
+            ) : (
+              "Earn a badge below to show it by your name."
+            )}
+          </span>
         </label>
         <div className="home__modes">
           <article className="mode">
@@ -126,6 +150,11 @@ export function Briefing({ progress, roles, onEnterOffice, rooms }: Props) {
           {rooms.status === "connecting" ? "Connecting to the room…" : (rooms.error ?? "")}
         </p>
       </section>
+
+      <div className="home__standing">
+        <BadgeShelf progress={progress} featured={shown?.id ?? null} onFeature={onFeatureBadge} />
+        <LeaderboardPanel view={leaderboard} you={isSignedIn ? (session?.account?.username ?? null) : null} onSignUp={() => setAccountOpen(true)} />
+      </div>
 
       <section className="home__how" aria-labelledby="how-title">
         <h2 id="how-title" className="home__heading">

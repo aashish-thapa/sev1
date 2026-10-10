@@ -5,7 +5,8 @@ import { careerLevel } from "../domain/career.ts";
 import { ROLE_IDS, ROLES, roleOf, type IncidentCard, type Role } from "../domain/incident.ts";
 import { payRef } from "../domain/economy.ts";
 import { hasBoughtSolution, spend, type SolutionTier, type SpendOutcome } from "../domain/purchases.ts";
-import { chooseRole, earn, hasFinishedShift, recordAssistedRun, recordAttempt, recordWarRoomRun, startShift, type Attempt, type Progress } from "../domain/progress.ts";
+import { hasEarned } from "../domain/achievements.ts";
+import { chooseRole, earn, featureBadge, hasFinishedShift, recordAssistedRun, recordAttempt, recordWarRoomRun, startShift, type Attempt, type Progress } from "../domain/progress.ts";
 import { overallRating, rateAttempt, STARTING_RATING } from "../domain/rating.ts";
 import { planShift, presentIncident, type Pace, type PresentedIncident } from "../domain/shift.ts";
 import type { ProgressStore } from "../storage/progress-store.ts";
@@ -47,6 +48,8 @@ export type ShiftGame = {
   enterOffice(): void;
   leaveOffice(): void;
   chooseRole(role: Role): void;
+  /** Shows an earned badge next to your name in rooms and on the leaderboard; null shows none. */
+  featureBadge(badgeId: string | null): void;
   /**
    * Your role's screen holds your rated daily problems (practice once they're done);
    * another role's screen is unrated practice in their field; the library (`null`) mixes everyone's.
@@ -130,6 +133,13 @@ export function useShiftGame({ library, store, today: clock, now = Date.now }: G
     setScreen({ name: "lobby" });
   }, []);
   const onChooseRole = useCallback((role: Role) => commit(chooseRole(progress, role)), [commit, progress]);
+  // The server refuses a save that features an unearned badge, so the lobby never asks for one.
+  const onFeatureBadge = useCallback(
+    (badgeId: string | null) => {
+      if (badgeId === null || hasEarned(progress, badgeId)) commit(featureBadge(progress, badgeId));
+    },
+    [commit, progress],
+  );
   const recordWarRoom = useCallback(
     (scenario: { readonly id: string; readonly title: string }, result: Debrief, run: { readonly isTeam: boolean; readonly startedAt: number }) => {
       // A run closed with a bought solution counts as played, but pays nothing and teaches the ladder nothing.
@@ -181,6 +191,7 @@ export function useShiftGame({ library, store, today: clock, now = Date.now }: G
     enterOffice,
     leaveOffice,
     chooseRole: onChooseRole,
+    featureBadge: onFeatureBadge,
     openDiscussion,
     answer,
     wrapUpDiscussion,

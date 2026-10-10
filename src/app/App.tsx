@@ -9,6 +9,8 @@ import { preloadFloor } from "../warroom/ui/floorLoader.ts";
 import { WarRoomView } from "../warroom/ui/WarRoomView.tsx";
 import { useRoom } from "../multiplayer/useRoom.ts";
 import { fetchPublicRooms } from "../multiplayer/usePublicRooms.ts";
+import { fetchLeaderboard } from "../storage/leaderboard-api.ts";
+import { featuredBadge } from "../domain/achievements.ts";
 import { PayoutToast } from "../ui/PayoutToast.tsx";
 import { PromotionToast } from "../ui/PromotionToast.tsx";
 import { CareerContext } from "./career-context.ts";
@@ -50,6 +52,9 @@ export function App({ shareUrl, ...services }: Props) {
     />
   ) : null;
 
+  // Rooms show it by your name; only an earned badge is ever sent.
+  const badge = featuredBadge(game.progress)?.id ?? null;
+
   const leaveOffice = () => {
     if (isInRoom) room.leave();
     game.leaveOffice();
@@ -80,11 +85,13 @@ export function App({ shareUrl, ...services }: Props) {
           progress={game.progress}
           roles={{ chosen: game.progress.role, onChoose: game.chooseRole }}
           onEnterOffice={game.enterOffice}
+          onFeatureBadge={game.featureBadge}
+          fetchLeaderboard={fetchLeaderboard}
           rooms={{
             status: room.status,
             error: room.error?.message ?? null,
-            onCreate: (name, visibility) => room.create(TEAM_SCENARIO.id, name, role, visibility),
-            onJoin: (code, name) => room.join(code, name, role),
+            onCreate: (name, visibility) => room.create(TEAM_SCENARIO.id, { name, role, badge }, visibility),
+            onJoin: (code, name) => room.join(code, { name, role, badge }),
             listPublic: fetchPublicRooms,
           }}
         />

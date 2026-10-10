@@ -4,7 +4,7 @@ import type { Incident } from "../warroom/incident.ts";
 import type { CommsMessage } from "../warroom/scenario.ts";
 import { promptFor } from "../warroom/shell/prompt.ts";
 import type { TerminalLine } from "../warroom/ui/useIncident.ts";
-import { RoomClient, seatOf, type RoomEvents, type RoomStatus, type Seat, type SocketConstructor } from "./client.ts";
+import { RoomClient, seatOf, type Engineer, type RoomEvents, type RoomStatus, type Seat, type SocketConstructor } from "./client.ts";
 import type { Player, Position, Resume, RoomVisibility, ServerMessageOf } from "./protocol.ts";
 
 export type RoomInfo = {
@@ -77,11 +77,11 @@ export function useRoom(options: { url: string; WebSocket?: SocketConstructor })
   }, [client]);
 
   const create = useCallback(
-    (scenarioId: string, name: string, role: Role, visibility: RoomVisibility) => client.create({ scenarioId, name, role, visibility }),
+    (scenarioId: string, engineer: Engineer, visibility: RoomVisibility) => client.create({ scenarioId, visibility, ...engineer }),
     [client],
   );
   const join = useCallback(
-    (roomCode: string, name: string, role: Role, resume?: Resume) => client.join({ roomCode, name, role, resume }),
+    (roomCode: string, engineer: Engineer, resume?: Resume) => client.join({ roomCode, resume, ...engineer }),
     [client],
   );
   const leave = useCallback(() => client.leave(), [client]);

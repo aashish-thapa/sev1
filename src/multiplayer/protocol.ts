@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { badgeById } from "../domain/achievements.ts";
 import { ROLE_IDS, type Role } from "../domain/incident.ts";
 import type { Debrief } from "../warroom/incident.ts";
 import type { CommsMessage } from "../warroom/scenario.ts";
@@ -42,6 +43,18 @@ export type Position = z.infer<typeof PositionSchema>;
 const ResumeSchema = z.object({ playerId: PlayerIdSchema, token: z.string().min(1).max(128) });
 export type Resume = z.infer<typeof ResumeSchema>;
 
+/**
+ * The badge a player shows by their name. The server only takes catalog ids; it can't check a
+ * guest has earned one, so in rooms the badge is cosmetic. Older clients send none.
+ */
+const OfferedBadgeSchema = z
+  .string()
+  .refine((id) => badgeById(id) !== undefined, "unknown badge")
+  .nullable()
+  .default(null);
+/** What clients accept back: any short id, so a client older than the catalog still parses the room. */
+const ShownBadgeSchema = z.string().max(40).nullable().default(null);
+
 /** Public rooms are listed for anyone to join; private ones only open to people given the code. */
 export const ROOM_VISIBILITIES = ["public", "private"] as const;
 export type RoomVisibility = (typeof ROOM_VISIBILITIES)[number];
@@ -54,12 +67,14 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
     role: RoleSchema,
     // Clients from before public rooms never send it; their rooms stay invite-only.
     visibility: z.enum(ROOM_VISIBILITIES).default("private"),
+    badge: OfferedBadgeSchema,
   }),
   z.strictObject({
     type: z.literal("join"),
     roomCode: RoomCodeSchema,
     name: PlayerNameSchema,
     role: RoleSchema,
+    badge: OfferedBadgeSchema,
     /** Reclaims a seat (and its shell history) after a dropped connection. */
     resume: ResumeSchema.optional(),
   }),
@@ -95,6 +110,7 @@ const PlayerSchema = z.object({
   position: PositionSchema.nullable(),
   /** False while a dropped player's seat is held for them to reconnect. */
   isConnected: z.boolean(),
+  badge: ShownBadgeSchema,
 });
 export type Player = z.infer<typeof PlayerSchema>;
 

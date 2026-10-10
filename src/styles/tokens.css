@@ -32,6 +32,11 @@
   --color-good: oklch(80% 0.150 155);
   --color-good-wash: oklch(30% 0.060 155);
 
+  /* Badge tiers — metals, readable as text on paper and paper-2 */
+  --color-tier-bronze: oklch(72% 0.090 55);
+  --color-tier-silver: oklch(84% 0.012 250);
+  --color-tier-gold: oklch(85% 0.140 88);
+
   /* Data */
   --color-series: oklch(66% 0.120 74);
 

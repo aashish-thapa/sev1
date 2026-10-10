@@ -34,7 +34,7 @@ export type RoomTiming = {
 
 export const DEFAULT_ROOM_TIMING: RoomTiming = { tickMs: 1000, monitoringTickMs: 50, playerGraceMs: 60_000 };
 
-export type JoinRequest = { readonly name: string; readonly role: Role; readonly resume?: Resume };
+export type JoinRequest = { readonly name: string; readonly role: Role; readonly badge: string | null; readonly resume?: Resume };
 
 export type JoinOutcome = { readonly ok: true; readonly playerId: string } | { readonly ok: false; readonly code: ErrorCode; readonly message: string };
 
@@ -49,6 +49,7 @@ type Seat = {
   readonly token: string;
   readonly name: string;
   readonly role: Role;
+  readonly badge: string | null;
   position: Position | null;
   /** Null while the player is disconnected and the seat is held for them. */
   connection: Connection | null;
@@ -112,7 +113,7 @@ export class Room {
     if (this.incident.phase.name === "closed") this.send(seat, this.closedMessage());
 
     this.broadcast({ type: "players", players: this.players() }, seat);
-    if (!resumed) this.post(joinedComms(seat.name, seat.role, this.incident.cluster.t));
+    if (!resumed) this.post(joinedComms(seat.name, seat.role, seat.badge, this.incident.cluster.t));
     this.logger("info", resumed ? "player_resumed" : "player_joined", { room: this.code, player: seat.id, role: seat.role });
     this.occupancyChanged();
     return { ok: true, playerId: seat.id };
@@ -249,6 +250,7 @@ export class Room {
       token: newSecret(24),
       name: request.name,
       role: request.role,
+      badge: request.badge,
       position: null,
       connection,
       history: [],
@@ -276,6 +278,7 @@ export class Room {
       role: seat.role,
       position: seat.position,
       isConnected: seat.connection !== null,
+      badge: seat.badge,
     }));
   }
 

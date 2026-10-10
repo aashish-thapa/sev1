@@ -62,13 +62,13 @@ export function openSession({ connection, rooms, findScenario, logger }: Session
         if (!scenario) return fail("unknown_scenario", `There is no scenario called ${message.scenarioId}.`);
         const room = rooms.create(scenario, message.visibility);
         if (!room) return fail("server_full", "This server is hosting as many war rooms as it can. Try again shortly.");
-        return enter(room, { name: message.name, role: message.role });
+        return enter(room, { name: message.name, role: message.role, badge: message.badge });
       }
       case "join": {
         if (seated) return fail("already_in_room", `You are already in room ${seated.room.code}.`);
         const room = rooms.find(message.roomCode);
         if (!room) return fail("room_not_found", `No war room with code ${message.roomCode}.`);
-        return enter(room, { name: message.name, role: message.role, resume: message.resume });
+        return enter(room, { name: message.name, role: message.role, badge: message.badge, resume: message.resume });
       }
       case "leave":
         if (!seated) return fail("not_in_room", "You are not in a war room.");

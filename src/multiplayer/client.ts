@@ -63,8 +63,11 @@ export function seatOf(welcome: ServerMessageOf<"welcome">): Seat {
 }
 
 type Intent =
-  | { readonly kind: "create"; readonly scenarioId: string; readonly name: string; readonly role: Role; readonly visibility: RoomVisibility }
-  | { readonly kind: "join"; readonly roomCode: string; readonly name: string; readonly role: Role; readonly resume?: Resume };
+  | ({ readonly kind: "create"; readonly scenarioId: string; readonly visibility: RoomVisibility } & Engineer)
+  | ({ readonly kind: "join"; readonly roomCode: string; readonly resume?: Resume } & Engineer);
+
+/** Who takes the seat: shown to teammates by name, role and the badge they chose. */
+export type Engineer = { readonly name: string; readonly role: Role; readonly badge: string | null };
 
 type Listeners = { [Type in keyof RoomEvents]: Set<(event: RoomEvents[Type]) => void> };
 
@@ -132,11 +135,11 @@ export class RoomClient {
     return () => set.delete(listener);
   }
 
-  create(request: { scenarioId: string; name: string; role: Role; visibility: RoomVisibility }) {
+  create(request: { scenarioId: string; visibility: RoomVisibility } & Engineer) {
     this.begin({ kind: "create", ...request });
   }
 
-  join(request: { roomCode: string; name: string; role: Role; resume?: Resume }) {
+  join(request: { roomCode: string; resume?: Resume } & Engineer) {
     this.begin({ kind: "join", ...request });
   }
 
@@ -211,11 +214,11 @@ export class RoomClient {
     this.lastHeardAt = performance.now();
     const seat = this.seatHeld;
     if (seat) {
-      this.transmit({ type: "join", roomCode: seat.roomCode, name: intent.name, role: intent.role, resume: seat.resume });
+      this.transmit({ type: "join", roomCode: seat.roomCode, name: intent.name, role: intent.role, badge: intent.badge, resume: seat.resume });
     } else if (intent.kind === "create") {
-      this.transmit({ type: "create", scenarioId: intent.scenarioId, name: intent.name, role: intent.role, visibility: intent.visibility });
+      this.transmit({ type: "create", scenarioId: intent.scenarioId, name: intent.name, role: intent.role, badge: intent.badge, visibility: intent.visibility });
     } else {
-      this.transmit({ type: "join", roomCode: intent.roomCode, name: intent.name, role: intent.role, resume: intent.resume });
+      this.transmit({ type: "join", roomCode: intent.roomCode, name: intent.name, role: intent.role, badge: intent.badge, resume: intent.resume });
     }
   }
 

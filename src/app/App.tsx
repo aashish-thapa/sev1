@@ -7,6 +7,7 @@ import { findScenario, soloScenarioFor, TEAM_SCENARIO } from "../warroom/scenari
 import { preloadFloor } from "../warroom/ui/floorLoader.ts";
 import { WarRoomView } from "../warroom/ui/WarRoomView.tsx";
 import { useRoom } from "../multiplayer/useRoom.ts";
+import { fetchPublicRooms } from "../multiplayer/usePublicRooms.ts";
 import { PayoutToast } from "../ui/PayoutToast.tsx";
 import { PromotionToast } from "../ui/PromotionToast.tsx";
 import { CareerContext } from "./career-context.ts";
@@ -73,15 +74,14 @@ export function App({ shareUrl, ...services }: Props) {
       ) : (
         <Briefing
           progress={game.progress}
-          today={game.today}
-          queuedAlerts={game.queuedAlerts}
-          roles={{ chosen: game.progress.role, counts: game.roleCounts, onChoose: game.chooseRole }}
+          roles={{ chosen: game.progress.role, onChoose: game.chooseRole }}
           onEnterOffice={game.enterOffice}
-          team={{
+          rooms={{
             status: room.status,
             error: room.error?.message ?? null,
-            onCreate: (name) => room.create(TEAM_SCENARIO.id, name, role),
+            onCreate: (name, visibility) => room.create(TEAM_SCENARIO.id, name, role, visibility),
             onJoin: (code, name) => room.join(code, name, role),
+            listPublic: fetchPublicRooms,
           }}
         />
       )}

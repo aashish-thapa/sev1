@@ -177,9 +177,9 @@ const logs: Subcommand = (args, { cluster, scenario }) => {
     return { output: printLogs(cluster.logs[jobName] ?? [], tail, scenario) };
   }
   const deploymentName = deploymentTarget([target]);
-  const podName = deploymentName
-    ? findDeployment(cluster, deploymentName)?.pods.find(isServing)?.name
-    : target.replace(/^pods?\//, "");
+  // Like kubectl, deployment/NAME picks one of its pods: a serving one if any, else any live one.
+  const deploymentPods = deploymentName ? (findDeployment(cluster, deploymentName)?.pods.filter(isLive) ?? []) : [];
+  const podName = deploymentName ? (deploymentPods.find(isServing) ?? deploymentPods[0])?.name : target.replace(/^pods?\//, "");
   if (!podName || !findPod(cluster, podName)) {
     return { output: err(`Error from server (NotFound): pods "${podName ?? target}" not found`) };
   }

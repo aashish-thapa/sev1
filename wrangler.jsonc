@@ -12,10 +12,17 @@
     "run_worker_first": ["/rooms", "/api/*"]
   },
   "durable_objects": {
-    "bindings": [{ "name": "ROOMS", "class_name": "RoomObject" }]
+    "bindings": [
+      { "name": "ROOMS", "class_name": "RoomObject" },
+      // One instance, the public room list the lobby reads.
+      { "name": "DIRECTORY", "class_name": "DirectoryObject" }
+    ]
   },
   // The free plan only offers SQLite-backed Durable Objects.
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RoomObject"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["RoomObject"] },
+    { "tag": "v2", "new_sqlite_classes": ["DirectoryObject"] }
+  ],
   "d1_databases": [
     {
       "binding": "DB",

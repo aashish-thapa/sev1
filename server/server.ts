@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
-import { encodeServerMessage, MAX_INBOUND_BYTES } from "../src/multiplayer/protocol.ts";
+import { encodeServerMessage, MAX_INBOUND_BYTES, PUBLIC_ROOMS_PATH, type PublicRoomList } from "../src/multiplayer/protocol.ts";
 import type { Logger } from "./log.ts";
 import { RoomRegistry } from "./registry.ts";
 import type { Connection, RoomTiming } from "./room.ts";
@@ -40,11 +40,17 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     timing: options.timing,
     random: options.random,
     logger,
+    now: Date.now,
   });
   const sockets = new WebSocketServer({ noServer: true, maxPayload: HARD_MAX_PAYLOAD });
   const http = createServer((request, response) => {
     if (request.method === "GET" && request.url === "/healthz") {
       response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ rooms: registry.size }));
+      return;
+    }
+    if (request.method === "GET" && request.url === PUBLIC_ROOMS_PATH) {
+      const list: PublicRoomList = { rooms: registry.listPublic() };
+      response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" }).end(JSON.stringify(list));
       return;
     }
     response.writeHead(426, { upgrade: "websocket" }).end();

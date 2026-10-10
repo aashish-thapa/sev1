@@ -166,10 +166,8 @@ a {
   font-weight: 500;
 }
 
+/* ── Single-column screens ─────────────────────────────────────── */
 
-/* ── Briefing ───────────────────────────────────────────────────── */
-
-.briefing,
 .shift,
 .report,
 .paged,
@@ -180,85 +178,6 @@ a {
   margin-inline: auto;
 }
 
-.briefing {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
-  min-height: 100dvh;
-  padding-block: var(--space-md) max(var(--space-lg), env(safe-area-inset-bottom));
-}
-
-.briefing__bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-md);
-}
-
-.briefing__stats {
-  display: flex;
-  gap: var(--space-lg);
-  font-size: var(--text-sm);
-}
-
-.briefing__stats dt {
-  color: var(--color-muted);
-  font-size: var(--text-2xs);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.briefing__stats dd {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
-
-/* The queue fades as it recedes: the next page is loud, the twelfth is a rumour. */
-.queue {
-  align-self: end;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2xs);
-  padding-top: var(--space-xl);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  font-variant-numeric: tabular-nums;
-}
-
-.queue__page {
-  display: grid;
-  grid-template-columns: 5ch 5ch minmax(0, 1fr);
-  gap: var(--space-sm);
-  color: var(--color-muted);
-}
-
-.queue__page:first-child {
-  color: var(--color-ink);
-}
-
-.queue__more {
-  padding-top: var(--space-2xs);
-  color: var(--color-muted);
-}
-
-.queue__page[data-severity="SEV1"] .queue__severity {
-  color: var(--color-critical);
-}
-
-.queue__service {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.briefing__main {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-lg);
-  padding-block: var(--space-xl);
-}
-
-.briefing__display,
 .report__display {
   display: flex;
   flex-direction: column;
@@ -272,7 +191,6 @@ a {
   overflow-wrap: anywhere;
 }
 
-.briefing__display-sub,
 .report__display-sub {
   margin-top: var(--space-xs);
   color: var(--color-muted);
@@ -281,22 +199,6 @@ a {
   font-stretch: 100%;
   letter-spacing: -0.01em;
   line-height: 1.1;
-}
-
-.briefing__lede {
-  max-width: 34ch;
-  color: var(--color-ink-2);
-}
-
-.briefing__cta {
-  min-width: 12rem;
-}
-
-.briefing__foot {
-  padding-top: var(--space-md);
-  border-top: 1px solid var(--color-rule-2);
-  color: var(--color-muted);
-  font-size: var(--text-sm);
 }
 
 /* ── Shift ──────────────────────────────────────────────────────── */
@@ -1107,44 +1009,6 @@ a {
   }
 }
 
-/* ── Briefing: war room entry ───────────────────────────────────── */
-
-.briefing__warroom {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-md);
-  padding-block: var(--space-lg);
-  border-top: 1px solid var(--color-rule-2);
-}
-
-.briefing__warroom > div {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2xs);
-  max-width: 34ch;
-}
-
-.briefing__warroom-title {
-  font-family: var(--font-display);
-  font-size: var(--text-lg);
-  font-weight: 800;
-  font-stretch: 75%;
-  line-height: 1;
-}
-
-.briefing__warroom-lede {
-  color: var(--color-ink-2);
-  font-size: var(--text-sm);
-}
-
-.briefing__warroom-meta {
-  color: var(--color-muted);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-}
-
 /* ── War room: paged · postmortem · debrief ─────────────────────── */
 
 .paged,
@@ -1760,71 +1624,6 @@ a {
 
 /* ── Track picker ───────────────────────────────────────────────── */
 
-.roles {
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-
-.roles__legend {
-  margin-bottom: var(--space-xs);
-  padding: 0;
-  color: var(--color-muted);
-  font-size: var(--text-xs);
-}
-
-.roles__row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-xs);
-}
-
-.roles__toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-xs);
-  min-height: 40px;
-  padding: 0 var(--space-sm);
-  border: 1px solid var(--color-rule-strong);
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--color-ink-2);
-  font: 500 var(--text-sm) / 1 var(--font-body);
-  white-space: nowrap;
-  cursor: pointer;
-  transition:
-    background-color var(--dur-short) var(--ease-out),
-    border-color var(--dur-short) var(--ease-out);
-}
-
-.roles__toggle[aria-pressed="true"] {
-  border-color: var(--color-accent);
-  background: var(--color-paper-2);
-  color: var(--color-ink);
-}
-
-.roles__toggle:active:not(:disabled) {
-  transform: translateY(1px);
-}
-
-.roles__toggle:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.roles__count {
-  color: var(--color-muted);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .roles__toggle:hover:not(:disabled) {
-    border-color: var(--color-ink-2);
-  }
-}
-
 /* ── War room: walkable floor ───────────────────────────────────── */
 
 .floor {
@@ -2181,74 +1980,6 @@ a {
   display: none;
 }
 
-/* ── Lobby: role picker ─────────────────────────────────────────── */
-
-.roles__legend {
-  margin-bottom: var(--space-sm);
-  color: var(--color-ink-2);
-  font-size: var(--text-sm);
-}
-
-.roles__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
-  gap: var(--space-sm);
-}
-
-.roles__option {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2xs);
-  padding: var(--space-md);
-  border: 1px solid var(--color-rule-strong);
-  border-radius: var(--radius-md);
-  background: var(--color-paper-2);
-  color: var(--color-ink);
-  text-align: start;
-  cursor: pointer;
-  transition: border-color var(--dur-short) var(--ease-out), background-color var(--dur-short) var(--ease-out);
-}
-
-.roles__option[aria-pressed="true"] {
-  border-color: var(--color-accent);
-  background: var(--color-paper-3);
-}
-
-.roles__option:active {
-  transform: translateY(1px);
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .roles__option:hover {
-    border-color: var(--color-ink-2);
-  }
-}
-
-.roles__label {
-  font-family: var(--font-display);
-  font-size: var(--text-md);
-  font-weight: 700;
-  font-stretch: 85%;
-}
-
-.roles__blurb {
-  color: var(--color-ink-2);
-  font-size: var(--text-sm);
-}
-
-.roles__room {
-  color: var(--color-muted);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-}
-
-.briefing__actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-sm);
-}
-
 /* ── Discussion at a wall screen ────────────────────────────────── */
 
 .discussion {
@@ -2309,73 +2040,6 @@ a {
 }
 
 /* ── Team: lobby panel and in-office feed ───────────────────────── */
-
-.team-lobby {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-sm);
-  padding-block: var(--space-lg);
-  border-top: 1px solid var(--color-rule-2);
-}
-
-.team-lobby__title {
-  font-family: var(--font-display);
-  font-size: var(--text-lg);
-  font-weight: 800;
-  font-stretch: 75%;
-  line-height: 1;
-}
-
-.team-lobby__lede,
-.team-lobby__status {
-  min-height: 1lh;
-  color: var(--color-ink-2);
-  font-size: var(--text-sm);
-}
-
-.team-lobby__field {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2xs);
-  max-width: 20rem;
-  color: var(--color-muted);
-  font-size: var(--text-xs);
-}
-
-.team-lobby input {
-  min-height: 44px;
-  padding: 0 var(--space-sm);
-  border: 1px solid var(--color-rule-strong);
-  border-radius: var(--radius-md);
-  outline: 2px solid transparent;
-  outline-offset: 1px;
-  background: var(--color-paper-2);
-  color: var(--color-ink);
-  font: 400 var(--text-base) / 1 var(--font-body);
-}
-
-.team-lobby input:focus-visible {
-  outline-color: var(--color-focus);
-}
-
-.team-lobby__row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-xs);
-}
-
-.team-lobby__or {
-  color: var(--color-muted);
-  font-size: var(--text-sm);
-}
-
-.team-lobby .team-lobby__code {
-  width: 6.5rem;
-  font-family: var(--font-mono);
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-}
 
 .team {
   position: absolute;

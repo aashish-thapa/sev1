@@ -66,6 +66,7 @@ export class Room {
   private stopTicker: StopTicker | null = null;
   private readonly timing: RoomTiming;
   private readonly logger: Logger;
+  /** Called when who's connected changes, or the incident closes: what hosts track for expiry and listing. */
   private readonly onOccupancyChange: (room: Room) => void;
 
   constructor(code: string, scenario: Scenario, timing: RoomTiming, logger: Logger, onOccupancyChange: (room: Room) => void) {
@@ -76,6 +77,15 @@ export class Room {
     this.onOccupancyChange = onOccupancyChange;
     this.incident = openIncident(scenario);
     this.comms = scenario.comms.filter((message) => message.at <= this.incident.cluster.t);
+  }
+
+  /** The first engineer to take a seat; null until someone has. */
+  get hostName(): string | null {
+    return this.seats.values().next().value?.name ?? null;
+  }
+
+  get isClosed(): boolean {
+    return this.incident.phase.name === "closed";
   }
 
   get connectedCount(): number {
@@ -205,6 +215,8 @@ export class Room {
       this.broadcast(this.closedMessage());
       this.logger("info", "incident_closed", { room: this.code, t, reopens: incident.reopenCount });
       this.syncTicker();
+      // A closed room leaves the public list, so its host hears about it like a join or leave.
+      this.onOccupancyChange(this);
     }
   }
 

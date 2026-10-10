@@ -15,6 +15,8 @@ import {
   MAX_INBOUND_BYTES,
   parseClientMessage,
   parseServerMessage,
+  PUBLIC_ROOMS_PATH,
+  PublicRoomListSchema,
   ROOM_CODE_ALPHABET,
   type ClientMessageInput,
   type ServerMessage,
@@ -221,6 +223,27 @@ describe("war room server", () => {
     await server?.close();
   });
 
+  async function publicRooms() {
+    const response = await fetch(`http://127.0.0.1:${server.port}${PUBLIC_ROOMS_PATH}`);
+    return PublicRoomListSchema.parse(await response.json()).rooms;
+  }
+
+  it("lists a public room with its host, keeps private rooms off the list, and drops a room once it empties", async () => {
+    await boot();
+    const host = await probe();
+    host.send({ type: "create", scenarioId: scenario.id, name: "Maya", role: "infrastructure", visibility: "public" });
+    const welcome = await host.next("welcome");
+    const secret = await probe();
+    secret.send({ type: "create", scenarioId: scenario.id, name: "Sam", role: "frontend" });
+    await secret.next("welcome");
+
+    expect(await publicRooms()).toEqual([
+      expect.objectContaining({ code: welcome.roomCode, host: "Maya", players: 1, scenarioTitle: scenario.title }),
+    ]);
+    host.close();
+    await expect.poll(publicRooms, { timeout: WAIT_MS, interval: 10 }).toEqual([]);
+  });
+
   it("shares one incident: a command from one engineer changes what both see", async () => {
     await boot();
     const { host, welcome } = await createRoom("infrastructure");
@@ -348,7 +371,7 @@ describe("war room server", () => {
     client.on("welcome", (welcome) => welcomes.push(welcome));
     const until = (condition: () => boolean) => expect.poll(condition, { timeout: WAIT_MS, interval: 10 }).toBe(true);
 
-    client.create({ scenarioId: scenario.id, name: "Maya", role: "infrastructure" });
+    client.create({ scenarioId: scenario.id, name: "Maya", role: "infrastructure", visibility: "private" });
     await until(() => client.status === "joined" && client.incident !== null);
     const seat = client.seat;
 

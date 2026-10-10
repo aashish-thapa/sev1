@@ -4,6 +4,7 @@ import {
   parseClientMessage,
   type ClientMessage,
   type ErrorCode,
+  type RoomVisibility,
   type ServerMessage,
 } from "../src/multiplayer/protocol.ts";
 import type { Logger } from "./log.ts";
@@ -14,7 +15,7 @@ import type { Scenario } from "../src/warroom/scenario.ts";
 /** Where a socket's create/join lands: every room in a Node process, or the single room a Durable Object holds. */
 export interface RoomDirectory {
   /** Null when no room can be opened here (capacity, or this host already holds its room). */
-  create(scenario: Scenario): Room | null;
+  create(scenario: Scenario, visibility: RoomVisibility): Room | null;
   find(code: string): Room | undefined;
 }
 
@@ -59,7 +60,7 @@ export function openSession({ connection, rooms, findScenario, logger }: Session
         if (seated) return fail("already_in_room", `You are already in room ${seated.room.code}.`);
         const scenario = findScenario(message.scenarioId);
         if (!scenario) return fail("unknown_scenario", `There is no scenario called ${message.scenarioId}.`);
-        const room = rooms.create(scenario);
+        const room = rooms.create(scenario, message.visibility);
         if (!room) return fail("server_full", "This server is hosting as many war rooms as it can. Try again shortly.");
         return enter(room, { name: message.name, role: message.role });
       }

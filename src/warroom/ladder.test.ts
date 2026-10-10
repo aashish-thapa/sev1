@@ -62,6 +62,8 @@ describe("intern: a deploy that crashes on the first checkout", () => {
     expect(pods).toContain("CrashLoopBackOff");
     const podName = opened.cluster.deployments[0].pods[0].name;
     expect(shell(crashOnCheckout, opened, `kubectl logs ${podName}`).text).toContain("payments.default-currency");
+    const crashLooping = { ...opened, cluster: { ...opened.cluster, deployments: opened.cluster.deployments.map((deployment) => ({ ...deployment, pods: deployment.pods.map((pod) => ({ ...pod, phase: "CrashLoopBackOff" as const })) })) } };
+    expect(shell(crashOnCheckout, crashLooping, "kubectl logs deployment/checkout-api").text).toContain("payments.default-currency");
   });
 
   it("is fixed by rolling back", () => {

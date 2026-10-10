@@ -1,0 +1,446 @@
+/* Hallmark · redesign: lobby · pre-emit critique: P4 H4 E4 S5 R4 V4
+ * structure: pitch beside one real screenshot → three ways to play → a shift in three screenshots → account
+ * idea: "show the game, then let them in": every claim on the page is a screenshot or a button
+ * theme: the app's own tokens (tokens.css); no new colours or fonts
+ */
+
+.home {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xl);
+  width: 100%;
+  max-width: 72rem;
+  min-height: 100dvh;
+  margin-inline: auto;
+  padding: var(--space-md) max(var(--space-md), env(safe-area-inset-right)) max(var(--space-lg), env(safe-area-inset-bottom))
+    max(var(--space-md), env(safe-area-inset-left));
+}
+
+.home__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.home__bar-end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-lg);
+  font-size: var(--text-sm);
+}
+
+.home__user {
+  color: var(--color-ink-2);
+}
+
+.home__link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--color-ink);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: var(--color-rule-strong);
+  text-underline-offset: 0.25em;
+  white-space: nowrap;
+}
+
+.home__link:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+/* ── Guest notice: the one thing a new player must not miss ── */
+
+.home__guest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm) var(--space-lg);
+  margin-top: calc(-1 * var(--space-xl));
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--color-rule);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius-md);
+  background: var(--color-paper-2);
+  color: var(--color-ink-2);
+  font-size: var(--text-sm);
+}
+
+.home__guest > span {
+  flex: 1 1 22rem;
+  min-width: 0;
+}
+
+.home__guest-action {
+  min-height: 44px;
+}
+
+/* ── Intro: the pitch, your role and level, and one real frame of the game ── */
+
+.home__intro {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-xl);
+  align-items: center;
+}
+
+.home__pitch {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  min-width: 0;
+}
+
+.home__title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-display);
+  font-weight: 800;
+  font-stretch: 75%;
+  letter-spacing: -0.02em;
+  line-height: 0.95;
+  overflow-wrap: anywhere;
+}
+
+.home__title-sub {
+  color: var(--color-accent);
+}
+
+.home__lede {
+  max-width: 46ch;
+  color: var(--color-ink-2);
+  font-size: var(--text-md);
+  line-height: 1.45;
+}
+
+.home__shot {
+  margin: 0;
+  min-width: 0;
+}
+
+.home__shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--color-rule-2);
+  border-radius: var(--radius-md);
+  background: var(--color-paper-2);
+}
+
+.home__shot figcaption {
+  margin-top: var(--space-xs);
+  color: var(--color-muted);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+
+/* ── Role: five radio pills ── */
+
+.role-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.role-picker__legend {
+  margin-bottom: var(--space-xs);
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+}
+
+.role-picker__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.role-picker__option {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 var(--space-md);
+  border: 1px solid var(--color-rule);
+  border-radius: 999px;
+  color: var(--color-ink-2);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-short) var(--ease-out),
+    border-color var(--dur-short) var(--ease-out);
+}
+
+.role-picker__option input,
+.mode__choice-option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.role-picker__option:has(input:checked) {
+  border-color: var(--color-accent);
+  background: var(--color-paper-3);
+  color: var(--color-ink);
+}
+
+.role-picker__option:has(input:focus-visible),
+.mode__choice-option:has(input:focus-visible) {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.role-picker__blurb {
+  color: var(--color-muted);
+  font-size: var(--text-sm);
+}
+
+/* ── Play: solo, host, join ── */
+
+.home__play {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.home__heading {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: 800;
+  font-stretch: 75%;
+  letter-spacing: -0.01em;
+  line-height: 1;
+}
+
+.home__name {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  max-width: 20rem;
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+}
+
+.home__name input,
+.mode__code input {
+  min-height: 44px;
+  padding: 0 var(--space-sm);
+  border: 1px solid var(--color-rule-strong);
+  border-radius: var(--radius-md);
+  outline: 2px solid transparent;
+  outline-offset: 1px;
+  background: var(--color-paper-2);
+  color: var(--color-ink);
+  font: 400 var(--text-base) / 1 var(--font-body);
+}
+
+.home__name input:focus-visible,
+.mode__code input:focus-visible {
+  outline-color: var(--color-focus);
+}
+
+.home__modes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-md);
+}
+
+.mode {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  min-width: 0;
+  padding: var(--space-lg);
+  border: 1px solid var(--color-rule-2);
+  border-radius: var(--radius-lg);
+  background: var(--color-paper-2);
+}
+
+.mode__title {
+  font-size: var(--text-md);
+  font-weight: 700;
+}
+
+.mode__body {
+  color: var(--color-ink-2);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+.mode__action {
+  align-self: flex-start;
+  margin-top: auto;
+}
+
+.mode__hint {
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+}
+
+.mode__choice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.mode__choice-option {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 var(--space-sm);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  color: var(--color-ink-2);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.mode__choice-option:has(input:checked) {
+  border-color: var(--color-accent);
+  background: var(--color-paper-3);
+  color: var(--color-ink);
+}
+
+.mode__list {
+  min-height: 3lh;
+}
+
+.open-rooms {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.open-rooms__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding-block: var(--space-xs);
+  border-bottom: 1px solid var(--color-rule-2);
+}
+
+.open-rooms__row:last-child {
+  border-bottom: 0;
+}
+
+.open-rooms__who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: var(--text-sm);
+}
+
+.open-rooms__who span {
+  overflow: hidden;
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.open-rooms__join {
+  min-height: 40px;
+  padding-inline: var(--space-md);
+}
+
+.mode__code {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin-top: auto;
+}
+
+.mode__code input {
+  width: 6.5rem;
+  font-family: var(--font-mono);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.home__status {
+  min-height: 1lh;
+  color: var(--color-ink-2);
+  font-size: var(--text-sm);
+}
+
+/* ── How a shift goes: three real screenshots ── */
+
+.home__how {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.home__screens {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-lg);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Same frame for every step, cropped from the top where the action is. */
+.home__screens img {
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  object-position: top;
+}
+
+.home__account .account {
+  max-width: 36rem;
+}
+
+.home__foot {
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--color-rule-2);
+  color: var(--color-muted);
+  font-size: var(--text-sm);
+}
+
+@media (min-width: 48rem) {
+  .home__modes {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .home__screens {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: start;
+  }
+}
+
+@media (min-width: 64rem) {
+  .home__intro {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  }
+}
+
+@media (hover: hover) {
+  .role-picker__option:hover,
+  .mode__choice-option:hover {
+    border-color: var(--color-ink-2);
+  }
+
+  .home__link:hover {
+    text-decoration-color: var(--color-ink);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .role-picker__option {
+    transition: none;
+  }
+}

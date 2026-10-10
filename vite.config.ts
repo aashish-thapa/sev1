@@ -50,6 +50,8 @@ export default defineConfig({
     // Rooms ride the same origin as the app, so one tunnel/port serves both.
     proxy: {
       "/rooms": { target: "ws://localhost:8787", ws: true },
+      // Listed before /api so the public room list comes from the room server, not the worker.
+      "/api/rooms": { target: "http://localhost:8787" },
       // Accounts run in the worker: `pnpm dev:worker`. Without it the lobby reports the account server as unreachable.
       "/api": { target: "http://localhost:8790" },
     },

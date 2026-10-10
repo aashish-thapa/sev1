@@ -42,8 +42,19 @@ export type Position = z.infer<typeof PositionSchema>;
 const ResumeSchema = z.object({ playerId: PlayerIdSchema, token: z.string().min(1).max(128) });
 export type Resume = z.infer<typeof ResumeSchema>;
 
+/** Public rooms are listed for anyone to join; private ones only open to people given the code. */
+export const ROOM_VISIBILITIES = ["public", "private"] as const;
+export type RoomVisibility = (typeof ROOM_VISIBILITIES)[number];
+
 export const ClientMessageSchema = z.discriminatedUnion("type", [
-  z.strictObject({ type: z.literal("create"), scenarioId: z.string().min(1).max(64), name: PlayerNameSchema, role: RoleSchema }),
+  z.strictObject({
+    type: z.literal("create"),
+    scenarioId: z.string().min(1).max(64),
+    name: PlayerNameSchema,
+    role: RoleSchema,
+    // Clients from before public rooms never send it; their rooms stay invite-only.
+    visibility: z.enum(ROOM_VISIBILITIES).default("private"),
+  }),
   z.strictObject({
     type: z.literal("join"),
     roomCode: RoomCodeSchema,
@@ -159,6 +170,24 @@ export function parseClientMessage(raw: string): ParseResult<ClientMessage> {
 export function parseServerMessage(raw: string): ParseResult<ServerMessage> {
   return parseWith(ServerMessageSchema, raw, Number.POSITIVE_INFINITY);
 }
+
+/** Where the lobby reads the public rooms that are open to join. */
+export const PUBLIC_ROOMS_PATH = "/api/rooms";
+
+/** A public room as the lobby lists it. */
+export const PublicRoomSchema = z.object({
+  code: RoomCodeSchema,
+  host: z.string(),
+  players: z.int().nonnegative(),
+  maxPlayers: z.int().positive(),
+  scenarioTitle: z.string(),
+  /** Epoch milliseconds the room opened. */
+  openedAt: z.number(),
+});
+export type PublicRoom = z.infer<typeof PublicRoomSchema>;
+
+export const PublicRoomListSchema = z.object({ rooms: z.array(PublicRoomSchema) });
+export type PublicRoomList = z.infer<typeof PublicRoomListSchema>;
 
 export function encodeClientMessage(message: ClientMessageInput): string {
   return JSON.stringify(message);

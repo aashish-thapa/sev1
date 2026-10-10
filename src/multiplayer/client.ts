@@ -8,6 +8,7 @@ import {
   type ClientMessageInput,
   type Position,
   type Resume,
+  type RoomVisibility,
   type ServerMessage,
   type ServerMessageOf,
   ROOM_CODE_QUERY,
@@ -62,7 +63,7 @@ export function seatOf(welcome: ServerMessageOf<"welcome">): Seat {
 }
 
 type Intent =
-  | { readonly kind: "create"; readonly scenarioId: string; readonly name: string; readonly role: Role }
+  | { readonly kind: "create"; readonly scenarioId: string; readonly name: string; readonly role: Role; readonly visibility: RoomVisibility }
   | { readonly kind: "join"; readonly roomCode: string; readonly name: string; readonly role: Role; readonly resume?: Resume };
 
 type Listeners = { [Type in keyof RoomEvents]: Set<(event: RoomEvents[Type]) => void> };
@@ -131,7 +132,7 @@ export class RoomClient {
     return () => set.delete(listener);
   }
 
-  create(request: { scenarioId: string; name: string; role: Role }) {
+  create(request: { scenarioId: string; name: string; role: Role; visibility: RoomVisibility }) {
     this.begin({ kind: "create", ...request });
   }
 
@@ -212,7 +213,7 @@ export class RoomClient {
     if (seat) {
       this.transmit({ type: "join", roomCode: seat.roomCode, name: intent.name, role: intent.role, resume: seat.resume });
     } else if (intent.kind === "create") {
-      this.transmit({ type: "create", scenarioId: intent.scenarioId, name: intent.name, role: intent.role });
+      this.transmit({ type: "create", scenarioId: intent.scenarioId, name: intent.name, role: intent.role, visibility: intent.visibility });
     } else {
       this.transmit({ type: "join", roomCode: intent.roomCode, name: intent.name, role: intent.role, resume: intent.resume });
     }

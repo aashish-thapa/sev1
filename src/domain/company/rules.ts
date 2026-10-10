@@ -12,14 +12,23 @@ import {
   ROOM_KINDS,
   serverTierById,
   SHIPPED_TASK_BONUS,
+  STARTER_SERVER_TIER,
   type CategoryId,
   type RoomKindId,
   type ServerTierId,
 } from "./catalog.ts";
 
-/** The seed a founder must put in: the first bay plus a week of the best-paid role's minimum. */
-export const FOUNDING_MINIMUM_CENTS =
-  roomKindById("bay").costCents + FOUNDING_RUNWAY_DAYS * Math.max(...Object.values(ROLE_MINIMUM_PAY_CENTS));
+/**
+ * What funding a company sets up: the first bay, bought from the seed, and the starter server,
+ * granted free (it isn't charged, so it isn't in the founding minimum).
+ */
+export const FOUNDING_PURCHASES: { readonly room: RoomKindId; readonly server: ServerTierId } = { room: "bay", server: STARTER_SERVER_TIER };
+
+/**
+ * The seed a founder must put in: the first bay (bought from the seed when funding lands) plus a week
+ * of the best-paid role's minimum. The starter server comes free with it, so it isn't counted here.
+ */
+export const FOUNDING_MINIMUM_CENTS = roomKindById("bay").costCents + FOUNDING_RUNWAY_DAYS * Math.max(...Object.values(ROLE_MINIMUM_PAY_CENTS));
 
 export type Member = {
   readonly userId: string;

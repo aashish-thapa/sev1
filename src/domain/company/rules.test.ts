@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { categoryById, ROLE_MINIMUM_PAY_CENTS, roomKindById, serverTierById } from "./catalog.ts";
-import { capacityRps, checkOffer, checkServerPurchase, FOUNDING_MINIMUM_CENTS, seats, settleWorkDay, uncoveredRoles, type CompanyBook } from "./rules.ts";
+import { categoryById, ROLE_MINIMUM_PAY_CENTS, roomKindById, serverTierById, STARTER_SERVER_TIER } from "./catalog.ts";
+import { capacityRps, checkOffer, checkServerPurchase, FOUNDING_MINIMUM_CENTS, racks, seats, settleWorkDay, uncoveredRoles, type CompanyBook } from "./rules.ts";
 
 const shop: CompanyBook = {
   category: "ecommerce",
@@ -14,8 +14,15 @@ const shop: CompanyBook = {
 };
 
 describe("company rules", () => {
-  it("asks a founder for the first bay plus a week of pay", () => {
+  it("asks a founder for the first bay and a week of pay; the starter server is free", () => {
     expect(FOUNDING_MINIMUM_CENTS).toBe(roomKindById("bay").costCents + 7 * ROLE_MINIMUM_PAY_CENTS.infrastructure);
+  });
+
+  it("lets a just-founded company earn: its bay's closet holds the starter server", () => {
+    const founded: CompanyBook = { category: "ecommerce", fundsCents: 84_000, members: [{ userId: "founder", role: "infrastructure", payCents: 12_000 }], rooms: ["bay"], servers: [STARTER_SERVER_TIER] };
+    expect(racks(founded.rooms)).toBeGreaterThanOrEqual(founded.servers.length);
+    const day = settleWorkDay(founded, { healthyShare: 1, tasksShipped: 0, contractorCents: 0 });
+    expect(day.fundsAfter).toBeGreaterThan(founded.fundsCents);
   });
 
   it("refuses offers under the role's minimum or past the free desks", () => {
@@ -25,7 +32,7 @@ describe("company rules", () => {
   });
 
   it("needs a free rack for every server", () => {
-    expect(checkServerPurchase({ ...shop, rooms: ["bay"] }, "small")).toBe("no_free_rack");
+    expect(checkServerPurchase({ ...shop, rooms: ["bay"], servers: ["small"] }, "small")).toBe("no_free_rack");
     expect(checkServerPurchase(shop, "small")).toBeNull();
     expect(checkServerPurchase({ ...shop, fundsCents: 0 }, "small")).toBe("not_enough_funds");
   });

@@ -1,6 +1,7 @@
 /** In-memory company books with the same conditional writes as D1, for tests. */
 import type { CompanyClaims } from "../../src/domain/audit.ts";
 import { roomKindById, type RoomKindId, type ServerTierId } from "../../src/domain/company/catalog.ts";
+import { FOUNDING_PURCHASES } from "../../src/domain/company/rules.ts";
 import { payRef } from "../../src/domain/economy.ts";
 import type { Role } from "../../src/domain/incident.ts";
 import type { PendingPayout, ReceivedInvitation } from "../../src/storage/company-protocol.ts";
@@ -27,11 +28,15 @@ export class MemoryCompanyStore implements CompanyStore, CompanyBank {
   applyMoves(userId: string, moves: CompanyMoves, at: number): void {
     for (const ref of moves.fundingRefs) {
       const company = [...this.companies.values()].find((candidate) => candidate.fundingRef === ref);
-      if (!company || company.founderId !== userId || company.state !== "unfunded" || company.fundingExpiresAt <= at) continue;
+      // Like D1: the audit already found the intent live, so the save that debits the wallet always activates it.
+      if (!company || company.founderId !== userId || company.state !== "unfunded") continue;
       this.companies.set(company.id, { ...company, state: "active" });
       this.book(company.id, { ref, reason: "seed", amountCents: company.fundingCents, at, workDay: 0, note: null });
-      this.book(company.id, { ref: "room:founding", reason: "room-purchase", amountCents: -roomKindById("bay").costCents, at, workDay: 0, note: roomKindById("bay").title });
-      if (!this.rooms.some((room) => room.id === `${company.id}:room:founding`)) this.rooms.push({ companyId: company.id, id: `${company.id}:room:founding`, kind: "bay" });
+      const room = roomKindById(FOUNDING_PURCHASES.room);
+      this.book(company.id, { ref: "room:founding", reason: "room-purchase", amountCents: -room.costCents, at, workDay: 0, note: room.title });
+      if (!this.rooms.some((owned) => owned.id === `${company.id}:room:founding`)) this.rooms.push({ companyId: company.id, id: `${company.id}:room:founding`, kind: FOUNDING_PURCHASES.room });
+      // The starter server is free (no ledger line), like D1.
+      if (!this.servers.some((owned) => owned.id === `${company.id}:server:founding`)) this.servers.push({ companyId: company.id, id: `${company.id}:server:founding`, tier: FOUNDING_PURCHASES.server });
     }
     for (const id of moves.payoutIds) {
       const payout = this.payouts.get(id);

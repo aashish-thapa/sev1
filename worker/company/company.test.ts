@@ -97,6 +97,8 @@ describe("founding", () => {
     const mine = MyCompanySchema.parse(await setup.companies.mine(founder));
     expect(mine.company?.state).toBe("active");
     expect(mine.company?.rooms).toEqual(["bay"]);
+    // The starter server comes free, so day one can earn; only the bay is paid from the seed.
+    expect(mine.company?.servers).toEqual(["small"]);
     expect(mine.company?.fundsCents).toBe(SEED - 80_000);
     expect(mine.company?.members).toMatchObject([{ username: "maya", isFounder: true }]);
   });

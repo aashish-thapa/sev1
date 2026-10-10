@@ -80,7 +80,8 @@ export type RoomKind = {
 };
 
 export const ROOM_KINDS: readonly RoomKind[] = [
-  { id: "bay", title: "Open-plan bay", costCents: 80_000, upkeepCents: 2_000, seats: 4, racks: 0 },
+  // A bay's server closet holds one rack: the starter server's, until the company can afford a server room.
+  { id: "bay", title: "Open-plan bay", costCents: 80_000, upkeepCents: 2_000, seats: 4, racks: 1 },
   { id: "server-room", title: "Server room", costCents: 150_000, upkeepCents: 5_000, seats: 0, racks: 4 },
 ];
 
@@ -95,6 +96,9 @@ export type ServerTier = {
   /** Requests a second it can serve. */
   readonly capacityRps: number;
 };
+
+/** Granted free with the first bay when a company is funded, so day one can earn. */
+export const STARTER_SERVER_TIER: ServerTierId = "small";
 
 export const SERVER_TIERS: readonly ServerTier[] = [
   { id: "small", title: "Small server", costCents: 30_000, upkeepCents: 500, capacityRps: 100 },

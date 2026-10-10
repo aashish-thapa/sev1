@@ -1,13 +1,13 @@
 import type { CompanyClaims } from "../../src/domain/audit.ts";
 import { payRef } from "../../src/domain/economy.ts";
 import { roomKindById, type CategoryId, type RoomKindId, type ServerTierId } from "../../src/domain/company/catalog.ts";
+import { FOUNDING_PURCHASES } from "../../src/domain/company/rules.ts";
 import type { Role } from "../../src/domain/incident.ts";
 import type { PendingPayout, ReceivedInvitation } from "../../src/storage/company-protocol.ts";
 import type { CompanyBank, CompanyMoves } from "../api/store.ts";
 import type { BookLine, BookReason, CompanyRow, CompanyState, CompanyStore, CompanyView, InvitationRow, MemberRow, Purchase, SettledDay } from "./store.ts";
 
 /** The first bay is bought from the seed the moment the company is funded; its ref makes that happen once. */
-const FOUNDING_ROOM: RoomKindId = "bay";
 const FOUNDING_ROOM_REF = "room:founding";
 
 type CompanyRecord = {
@@ -63,10 +63,14 @@ export function companyMoveStatements(db: D1Database, userId: string, moves: Com
           "SELECT ?, id, ?, ?, 'room-purchase', 0, NULL, ?, ? FROM companies WHERE funding_ref = ? AND state = 'active' " +
           "ON CONFLICT (company_id, ref) DO NOTHING",
       )
-      .bind(crypto.randomUUID(), FOUNDING_ROOM_REF, -roomKindById(FOUNDING_ROOM).costCents, roomKindById(FOUNDING_ROOM).title, at, ref),
+      .bind(crypto.randomUUID(), FOUNDING_ROOM_REF, -roomKindById(FOUNDING_PURCHASES.room).costCents, roomKindById(FOUNDING_PURCHASES.room).title, at, ref),
     db
       .prepare("INSERT OR IGNORE INTO company_rooms (id, company_id, kind, bought_at) SELECT id || ':room:founding', id, ?, ? FROM companies WHERE funding_ref = ? AND state = 'active'")
-      .bind(FOUNDING_ROOM, at, ref),
+      .bind(FOUNDING_PURCHASES.room, at, ref),
+    // The starter server is free and sits in the bay's closet, so day one can earn: a row, no ledger line.
+    db
+      .prepare("INSERT OR IGNORE INTO company_servers (id, company_id, tier, bought_at) SELECT id || ':server:founding', id, ?, ? FROM companies WHERE funding_ref = ? AND state = 'active'")
+      .bind(FOUNDING_PURCHASES.server, at, ref),
   ]);
   const claims = moves.payoutIds.map((id) =>
     db.prepare("UPDATE company_payouts SET claimed_at = ? WHERE id = ? AND user_id = ? AND claimed_at IS NULL").bind(at, id, userId),

@@ -8,11 +8,12 @@ import { crashOnCheckout } from "./crash-on-checkout.ts";
 import { oomAfterDeploy } from "./oom-after-deploy.ts";
 import { ordersIndexInvalid } from "./orders-index-invalid.ts";
 import { fraudModelRegression } from "./fraud-model-regression.ts";
+import { fraudThresholdFailOpen } from "./fraud-threshold-fail-open.ts";
 import { refundDoubleCharges } from "./refund-double-charges.ts";
 import { scaledToZero } from "./scaled-to-zero.ts";
 
 /** Every live incident the game ships; the app and the room server read this one list. */
-export const SCENARIOS: readonly Scenario[] = [scaledToZero, crashOnCheckout, oomAfterDeploy, checkoutPoolLeak, ordersIndexInvalid, checkoutMeltdown, refundDoubleCharges, fraudModelRegression];
+export const SCENARIOS: readonly Scenario[] = [scaledToZero, crashOnCheckout, oomAfterDeploy, checkoutPoolLeak, ordersIndexInvalid, checkoutMeltdown, refundDoubleCharges, fraudModelRegression, fraudThresholdFailOpen];
 
 /** Each role's own War Rooms, easiest first. A role's ladder grows as its incidents are written. */
 const LADDERS: Readonly<Record<Role, readonly Scenario[]>> = {
@@ -20,7 +21,7 @@ const LADDERS: Readonly<Record<Role, readonly Scenario[]>> = {
   frontend: [],
   mobile: [],
   security: [],
-  data: [refundDoubleCharges, fraudModelRegression],
+  data: [refundDoubleCharges, fraudModelRegression, fraudThresholdFailOpen],
 };
 
 export function findScenario(id: string): Scenario | undefined {

@@ -8,6 +8,7 @@ import { checkoutCommerce } from "./scenarios/checkout-commerce.ts";
 import { checkoutMeltdown } from "./scenarios/checkout-meltdown.ts";
 import { fraudModelRegression } from "./scenarios/fraud-model-regression.ts";
 import { scorerOf } from "./scenarios/fraud-scorer.ts";
+import { FRAUD_CAPTURE_BOUND, fraudThresholdFailOpen } from "./scenarios/fraud-threshold-fail-open.ts";
 import { refundDoubleCharges, SETTLEMENT_CUTOFF } from "./scenarios/refund-double-charges.ts";
 import { scaledToZero } from "./scenarios/scaled-to-zero.ts";
 import { airflowCompact, airflowLine } from "./shell/commands/pipelines.ts";
@@ -478,6 +479,83 @@ describe("tier 2: good customers declined", () => {
   it("round-trips through multiplayer frames", () => {
     const server = expectFramesToRoundTrip(scenario, [[40, "models rollback fraud-scorer"]], 90);
     expect(scorerOf(server.cluster)?.active).toBe("v12");
+  });
+
+  it("offers chips the data laptop can run", () => expectChipsToRun(scenario));
+});
+
+describe("tier 3: the threshold nobody tuned", () => {
+  const scenario = fraudThresholdFailOpen;
+  const loss = (incident: Incident) => alertRate(scenario, incident.cluster);
+  const captured = (incident: Incident) => commerceOf(incident).ledger.fraudulentCaptures ?? 0;
+  const fraudObjective = (incident: Incident) => scenario.objectives?.(incident.cluster)[0];
+
+  it("opens declining a fifth of customers during a live card-testing ring, and loses more of them every minute", () => {
+    const opened = openIncident(scenario);
+    expect(loss(opened)).toBeGreaterThan(0.19);
+    expect(opened.cluster.errorRate).toBe(0);
+    expect(captured(opened)).toBe(0);
+    const twoMinutes = playTo(scenario, 120, opened);
+    const tenMinutes = playTo(scenario, 600, twoMinutes);
+    expect(tenMinutes.cluster.failedCheckouts).toBeGreaterThan(twoMinutes.cluster.failedCheckouts * 4);
+    expect(captured(tenMinutes)).toBeGreaterThan(captured(twoMinutes));
+    expect(debrief(tenMinutes, scenario, true).points).toBeLessThan(debrief(twoMinutes, scenario, true).points);
+    expect(declareResolved(tenMinutes, scenario).notice?.kind).toBe("refused");
+  });
+
+  it("closes at S or A with the worked solution, the ring's captures under the bound", () => {
+    const { closed, result } = workedSolution(scenario);
+    expect(result.isRootCauseFixed).toBe(true);
+    expect(result.objectives?.every((objective) => objective.isMet)).toBe(true);
+    expect(captured(closed)).toBeLessThan(FRAUD_CAPTURE_BOUND / 2);
+    expect(["S", "A"]).toContain(result.grade);
+  });
+
+  it("failing open floods the gateway with the ring: 5xx for everyone and fraud captures piling up", () => {
+    const failedOpen = scripted(scenario, [[30, "models mode fraud-scorer fail-open"]], 150);
+    expect(commerceOf(failedOpen).gateway.timeoutShare).toBe(1);
+    expect(failedOpen.cluster.errorRate).toBeGreaterThan(0.3);
+    expect(loss(failedOpen)).toBeGreaterThan(0.9);
+    expect(captured(failedOpen)).toBeGreaterThan(FRAUD_CAPTURE_BOUND);
+    expect(fraudObjective(failedOpen)?.isMet).toBe(false);
+    expect(declareResolved(failedOpen, scenario).notice?.kind).toBe("refused");
+
+    const fixed = scripted(scenario, [[30, "models threshold fraud-scorer 0.85"]], 150);
+    expect(debrief(failedOpen, scenario, true).points).toBeLessThan(debrief(fixed, scenario, true).points - 30);
+  });
+
+  it("rolling back the model does nothing: the threshold is serving config, not part of a version", () => {
+    const rolledBack = shellOn(scenario, playTo(scenario, 30, openIncident(scenario)), "models rollback fraud-scorer");
+    expect(rolledBack.changed).toBe(true);
+    expect(scorerOf(rolledBack.incident.cluster)?.active).toBe("v11");
+    const later = playTo(scenario, 150, rolledBack.incident);
+    expect(loss(later)).toBeGreaterThan(0.19);
+    expect(declareResolved(later, scenario).notice?.kind).toBe("refused");
+    expect(scenario.isRootCauseFixed(later.cluster)).toBe(false);
+  });
+
+  it("shows the declines sit between the new threshold and the tuned one", () => {
+    const view = shellOn(scenario, openIncident(scenario), "warehouse run declined-checkouts").text;
+    expect(view).toMatch(/0\.35-0\.85\s+\|\s+\d{4,}/);
+    expect(shellOn(scenario, scripted(scenario, [[30, "models threshold fraud-scorer 0.85"]], 40), "warehouse run declined-checkouts").text).not.toContain("0.35-0.85");
+  });
+
+  it("is deterministic", () => {
+    const steps = [[45, "models threshold fraud-scorer 0.85"]] as const;
+    expect(scripted(scenario, steps, 200)).toEqual(scripted(scenario, steps, 200));
+  });
+
+  it("round-trips through multiplayer frames", () => {
+    const server = expectFramesToRoundTrip(
+      scenario,
+      [
+        [30, "models mode fraud-scorer fail-open"],
+        [60, "models mode fraud-scorer enforce"],
+        [70, "models threshold fraud-scorer 0.85"],
+      ],
+      120,
+    );
+    expect(scorerOf(server.cluster)?.threshold).toBe(0.85);
   });
 
   it("offers chips the data laptop can run", () => expectChipsToRun(scenario));

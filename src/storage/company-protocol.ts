@@ -30,7 +30,7 @@ export type FoundRequest = z.input<typeof FoundRequestSchema>;
 /** Spend exactly `seedCents` from the wallet with ref `fundingRef`; the next save funds the company. */
 export const FoundResponseSchema = z.object({ companyId: z.string(), fundingRef: z.string(), seedCents: Cents });
 
-export const LEDGER_REASONS = ["seed", "revenue", "room-upkeep", "server-upkeep", "contractor", "payroll", "room-purchase", "server-purchase"] as const;
+export const LEDGER_REASONS = ["seed", "revenue", "room-upkeep", "server-upkeep", "contractor", "pantry", "payroll", "room-purchase", "server-purchase"] as const;
 
 export const CompanyMemberSchema = z.object({
   username: z.string(),

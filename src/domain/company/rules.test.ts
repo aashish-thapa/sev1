@@ -73,6 +73,18 @@ describe("company rules", () => {
       { userId: "maya", amountCents: 5_000 },
     ]);
   });
+
+  it("books the pantry like upkeep, before payroll, so a big pantry bill can short pay", () => {
+    const day = settleWorkDay(shop, { healthyShare: 1, tasksShipped: 0, contractorCents: 0, pantryCents: 1_850 });
+    const reasons = day.lines.map((line) => line.reason);
+    expect(day.lines.find((line) => line.reason === "pantry")?.amountCents).toBe(-1_850);
+    expect(reasons.indexOf("pantry")).toBeLessThan(reasons.indexOf("payroll"));
+    const without = settleWorkDay(shop, { healthyShare: 1, tasksShipped: 0, contractorCents: 0 });
+    expect(without.fundsAfter - day.fundsAfter).toBe(1_850);
+    expect(without.lines.some((line) => line.reason === "pantry")).toBe(false);
+    const starved = settleWorkDay({ ...shop, fundsCents: 0, servers: [] }, { healthyShare: 0, tasksShipped: 0, contractorCents: 0, pantryCents: 10_000_000 });
+    expect(starved.isPayrollShort).toBe(true);
+  });
 });
 
 describe("company catalog", () => {

@@ -91,9 +91,11 @@ export type WorkDayReport = {
   readonly tasksShipped: number;
   /** Contractor fees booked for issues resolved during the day. */
   readonly contractorCents: number;
+  /** What the members took from the office pantry that day; the company stocks it. */
+  readonly pantryCents?: number;
 };
 
-export type LedgerReason = "revenue" | "room-upkeep" | "server-upkeep" | "contractor" | "payroll";
+export type LedgerReason = "revenue" | "room-upkeep" | "server-upkeep" | "contractor" | "pantry" | "payroll";
 
 /** One signed line in the company's books; payroll lines name the member paid. */
 export type LedgerLine = { readonly reason: LedgerReason; readonly amountCents: number; readonly userId?: string };
@@ -109,7 +111,7 @@ export type Settlement = {
 };
 
 /**
- * Books one work day: revenue comes in first, then upkeep and contractors, then payroll. If the
+ * Books one work day: revenue comes in first, then upkeep, contractors and the pantry, then payroll. If the
  * money runs short, every member gets the same fraction of their pay rather than some going unpaid.
  */
 export function settleWorkDay(book: CompanyBook, report: WorkDayReport): Settlement {
@@ -121,14 +123,16 @@ export function settleWorkDay(book: CompanyBook, report: WorkDayReport): Settlem
   const roomUpkeep = book.rooms.reduce((sum, room) => sum + roomKindById(room).upkeepCents, 0);
   const serverUpkeep = book.servers.reduce((sum, server) => sum + serverTierById(server).upkeepCents, 0);
   const contractor = Math.max(0, Math.round(report.contractorCents));
+  const pantry = Math.max(0, Math.round(report.pantryCents ?? 0));
 
   const lines: LedgerLine[] = [];
   if (revenue > 0) lines.push({ reason: "revenue", amountCents: revenue });
   if (roomUpkeep > 0) lines.push({ reason: "room-upkeep", amountCents: -roomUpkeep });
   if (serverUpkeep > 0) lines.push({ reason: "server-upkeep", amountCents: -serverUpkeep });
   if (contractor > 0) lines.push({ reason: "contractor", amountCents: -contractor });
+  if (pantry > 0) lines.push({ reason: "pantry", amountCents: -pantry });
 
-  const available = Math.max(0, book.fundsCents + revenue - roomUpkeep - serverUpkeep - contractor);
+  const available = Math.max(0, book.fundsCents + revenue - roomUpkeep - serverUpkeep - contractor - pantry);
   const owed = book.members.reduce((sum, member) => sum + member.payCents, 0);
   const share = owed === 0 || available >= owed ? 1 : available / owed;
   const payroll = book.members.map((member) => ({ userId: member.userId, amountCents: Math.floor(member.payCents * share) }));

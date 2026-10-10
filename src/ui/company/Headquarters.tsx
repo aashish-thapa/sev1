@@ -30,6 +30,7 @@ const REASON_LABEL: Readonly<Record<Company["ledger"][number]["reason"], string>
   "room-upkeep": "Room upkeep",
   "server-upkeep": "Server upkeep",
   contractor: "Contractor",
+  pantry: "Pantry",
   payroll: "Payroll",
   "room-purchase": "Room bought",
   "server-purchase": "Server bought",

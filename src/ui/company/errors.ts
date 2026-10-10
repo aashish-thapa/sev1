@@ -30,6 +30,8 @@ export const COMPANY_ERROR_TEXT: Readonly<Record<CompanyError, string> & Partial
   interview_not_found: "That interview is gone. Apply again to start a new one.",
   application_not_found: "That application is gone; it may already be decided.",
   no_questions: "This role has no interview questions at that level yet.",
+  already_answered: "You’ve already answered that one today.",
+  not_on_board: "That task isn’t on today’s board.",
   rate_limited: "Too many tries. Wait a moment.",
   unreachable: "Couldn’t reach the company server.",
 };

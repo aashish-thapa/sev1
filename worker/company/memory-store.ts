@@ -18,6 +18,12 @@ export class MemoryCompanyStore implements CompanyStore, CompanyBank {
   readonly servers: { companyId: string; id: string; tier: ServerTierId }[] = [];
   readonly ledger: Line[] = [];
   readonly payouts = new Map<string, { id: string; companyId: string; userId: string; workDay: number; amountCents: number; claimedAt: number | null }>();
+  /** The work log a winning settlement marks counted, as D1 does in the same batch. */
+  private readonly work: { markSettled(ids: readonly string[], workDay: number): void } | undefined;
+
+  constructor(work?: { markSettled(ids: readonly string[], workDay: number): void }) {
+    this.work = work;
+  }
 
   addUser(id: string, username: string): void {
     this.usernames.set(id, username);
@@ -163,6 +169,7 @@ export class MemoryCompanyStore implements CompanyStore, CompanyBank {
     for (const payout of day.payouts) {
       if (!this.payouts.has(payout.id)) this.payouts.set(payout.id, { ...payout, companyId: day.companyId, workDay: day.fromWorkDay + 1, claimedAt: null });
     }
+    this.work?.markSettled(day.workIds, day.fromWorkDay + 1);
     return true;
   }
 

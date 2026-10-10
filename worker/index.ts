@@ -14,6 +14,8 @@ import { D1CompanyStore } from "./company/d1-store.ts";
 import { APPLICATIONS_PATH, APPLY_PATH, handleCompany, handleDirectory, INTERVIEWS_PATH, INVITATIONS_PATH } from "./company/routes.ts";
 import { CompanyDirectory } from "./company/directory.ts";
 import { HiringService } from "./company/hiring.ts";
+import { WorkService } from "./company/work.ts";
+import { D1WorkStore } from "./company/work-d1-store.ts";
 import { D1CompanyDirectory, D1HiringStore } from "./company/hiring-d1-store.ts";
 import { TASKS } from "./company/tasks.ts";
 import { CompanyService } from "./company/service.ts";
@@ -100,12 +102,14 @@ export default {
       if (pathname === COMPANIES_PATH || pathname === TOP_COMPANIES_PATH) return handleDirectory(request, new CompanyDirectory(new D1CompanyDirectory(env.DB)));
       if (pathname === COMPANY_PATH || [COMPANY_PATH, INVITATIONS_PATH, APPLY_PATH, INTERVIEWS_PATH, APPLICATIONS_PATH].some((prefix) => pathname.startsWith(`${prefix}/`))) {
         const hiringStore = new D1HiringStore(env.DB);
+        const workStore = new D1WorkStore(env.DB);
         const companies = new CompanyService({
           store: companyStore,
           now: Date.now,
           newId: () => crypto.randomUUID(),
           isOverLimit: isOverLimit(COMPANY_WRITES_PER_WINDOW),
           hiring: hiringStore,
+          work: workStore,
           pantryOf: async (userId, day) => pantryCostOn((await savedProgressOf(accountStore, userId)).pantry, day),
         });
         const hiring = new HiringService({
@@ -118,7 +122,15 @@ export default {
           newId: () => crypto.randomUUID(),
           isOverLimit: isOverLimit(COMPANY_WRITES_PER_WINDOW),
         });
-        return handleCompany(request, accounts, companies, hiring, officeFor(env));
+        const work = new WorkService({
+          store: workStore,
+          company: companies,
+          tasks: TASKS,
+          now: Date.now,
+          newId: () => crypto.randomUUID(),
+          isOverLimit: isOverLimit(COMPANY_WRITES_PER_WINDOW),
+        });
+        return handleCompany(request, accounts, companies, hiring, officeFor(env), work);
       }
       if (pathname.startsWith(ADMIN_PREFIX)) {
         const store = new D1AccountStore(env.DB);

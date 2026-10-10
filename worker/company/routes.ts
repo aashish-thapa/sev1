@@ -12,12 +12,15 @@ import {
   InviteRequestSchema,
   SetMemberRequestSchema,
   SettleRequestSchema,
+  WORK_PATH,
+  WorkAnswerSchema,
 } from "../../src/storage/company-protocol.ts";
 import type { AccountService } from "../api/accounts.ts";
 import { failure, idempotencyKeyOf, isSameOrigin, json, readBody, sessionTokenOf } from "../api/http.ts";
 import { CATEGORY_IDS, type CategoryId } from "../../src/domain/company/catalog.ts";
 import type { CompanyDirectory } from "./directory.ts";
 import type { HiringService } from "./hiring.ts";
+import type { WorkService } from "./work.ts";
 import type { CompanyOffice } from "./office.ts";
 
 /** The company's private multiplayer room: returns `{ code }` to join it like any room. */
@@ -35,6 +38,7 @@ const POSTING_CLOSE = new RegExp(`^${POSTINGS_PATH}/${ID}/close$`);
 const POSTING_APPLY = new RegExp(`^${APPLY_PATH}/${ID}/apply$`);
 const INTERVIEW_ANSWERS = new RegExp(`^${INTERVIEWS_PATH}/${ID}/answers$`);
 const APPLICATION_DECISION = new RegExp(`^${APPLICATIONS_PATH}/${ID}/(hire|reject)$`);
+const WORK_ANSWER = new RegExp(`^${WORK_PATH}/${ID}$`);
 /** Public lists change once a work day; a minute of caching spares the database on every page view. */
 const PUBLIC_CACHE = { "cache-control": "public, max-age=60" } as const;
 const CategorySchema = z.enum(CATEGORY_IDS);
@@ -64,6 +68,9 @@ const STATUS: Readonly<Record<CompanyProblem, number>> = {
   interview_not_found: 404,
   application_not_found: 404,
   no_questions: 409,
+  not_on_board: 404,
+  already_answered: 409,
+  invalid: 400,
 };
 
 const MESSAGE: Readonly<Record<CompanyProblem, string>> = {
@@ -90,6 +97,9 @@ const MESSAGE: Readonly<Record<CompanyProblem, string>> = {
   interview_not_found: "That interview isn't yours or doesn't exist.",
   application_not_found: "That application isn't open.",
   no_questions: "There are no interview questions for that role yet.",
+  not_on_board: "That task isn't on your board today.",
+  already_answered: "You've already answered that task today.",
+  invalid: "That answer doesn't fit the task.",
 };
 
 function respond<Value>(outcome: Outcome<Value>, status = 200): Response {
@@ -97,7 +107,14 @@ function respond<Value>(outcome: Outcome<Value>, status = 200): Response {
 }
 
 /** HTTP for startup mode: parse, check who's asking, hand to the service. Accounts only. */
-export async function handleCompany(request: Request, accounts: Pick<AccountService, "userFor">, companies: CompanyService, hiring: HiringService, office: CompanyOffice): Promise<Response> {
+export async function handleCompany(
+  request: Request,
+  accounts: Pick<AccountService, "userFor">,
+  companies: CompanyService,
+  hiring: HiringService,
+  office: CompanyOffice,
+  work: WorkService,
+): Promise<Response> {
   const url = new URL(request.url);
   const route = `${request.method} ${url.pathname}`;
   if (request.method !== "GET" && !isSameOrigin(request)) return failure("forbidden", "Cross-site requests are not allowed.", 403);
@@ -120,6 +137,11 @@ export async function handleCompany(request: Request, accounts: Pick<AccountServ
       const body = await readBody(request, InterviewAnswersSchema);
       return body.ok ? respond(await hiring.answer(user, answering[1], body.data.answers)) : body.response;
     }
+    const answeringWork = WORK_ANSWER.exec(url.pathname);
+    if (answeringWork) {
+      const body = await readBody(request, WorkAnswerSchema);
+      return body.ok ? respond(await work.answer(user, answeringWork[1], body.data)) : body.response;
+    }
     const deciding = APPLICATION_DECISION.exec(url.pathname);
     if (deciding) return respond(deciding[2] === "hire" ? await hiring.hire(user, deciding[1]) : await hiring.reject(user, deciding[1]));
   }
@@ -131,6 +153,8 @@ export async function handleCompany(request: Request, accounts: Pick<AccountServ
       const body = await readBody(request, FoundRequestSchema);
       return body.ok ? respond(await companies.found(user, body.data), 201) : body.response;
     }
+    case `GET ${WORK_PATH}`:
+      return respond(await work.board(user));
     case `POST ${OFFICE_PATH}`: {
       const entered = await office.enter(user.id);
       return entered ? json(entered) : failure("not_in_company", "Only members of an active company have an office.", 404);
@@ -157,7 +181,8 @@ export async function handleCompany(request: Request, accounts: Pick<AccountServ
     }
     case `POST ${COMPANY_PATH}/workday`: {
       const body = await readBody(request, SettleRequestSchema);
-      return body.ok ? respond(await companies.settle(user, body.data)) : body.response;
+      // Older clients still send their own tasksShipped; the server counts recorded work instead.
+      return body.ok ? respond(await companies.settle(user)) : body.response;
     }
     default:
       return failure("not_found", `No route for ${route}.`, 404);

@@ -8,6 +8,7 @@ import { companyLevel } from "../../src/domain/company/levels.ts";
 import type { Role } from "../../src/domain/incident.ts";
 import type { Application, Company, FoundRequest, MyCompany, Posting, WorkDaySettlement } from "../../src/storage/company-protocol.ts";
 import type { ApplicationRow, HiringStore, PostingRow } from "./hiring-store.ts";
+import type { WorkStore } from "./work-store.ts";
 import type { CompanyStore, CompanyView } from "./store.ts";
 
 /** How long a founder has to put the seed in before the company is dropped. */
@@ -16,6 +17,8 @@ export const FUNDING_WINDOW_MS = 24 * 60 * 60 * 1000;
 const LEDGER_SHOWN = 60;
 /** Until tasks are recorded on the server, a member's report can claim at most this many per member a day. */
 const TASKS_PER_MEMBER_CAP = 3;
+/** The most shipped work one closed day counts, whatever the team size. */
+const MAX_TASKS_PER_DAY = 50;
 
 export type CompanyProblem =
   | "not_in_company"
@@ -40,15 +43,15 @@ export type CompanyProblem =
   | "interview_expired"
   | "interview_not_found"
   | "application_not_found"
-  | "no_questions";
+  | "no_questions"
+  | "not_on_board"
+  | "already_answered"
+  | "invalid";
 
 export type Outcome<Value> = { readonly ok: true; readonly value: Value } | { readonly ok: false; readonly problem: CompanyProblem };
 
 /** Who's asking; the service only needs their id. */
 export type Caller = { readonly id: string };
-
-/** What a member reports when they settle the day. Phase 2 replaces this with task data the server recorded. */
-export type DayReport = { readonly tasksShipped: number };
 
 /** Every day counts as fully healthy for now; phase 2 derives this from recorded War Room outcomes. */
 export const HEALTHY_SHARE_DEFAULT = 1;
@@ -56,6 +59,8 @@ export const HEALTHY_SHARE_DEFAULT = 1;
 export type CompanyDeps = {
   readonly store: CompanyStore;
   readonly now: () => number;
+  /** Shipped work the server recorded; without it, a closed day counts none. */
+  readonly work?: Pick<WorkStore, "unsettledShipped">;
   /**
    * What a member's coffees and snacks cost on a UTC day (YYYY-MM-DD), read from their saved progress.
    * Without it the pantry is free, as in job mode.
@@ -130,6 +135,10 @@ function companyOf(view: CompanyView, postings: readonly PostingRow[], applicati
     lifetimeRevenueCents: view.lifetimeRevenueCents,
     postings: postings.map(postingOf),
     applications: applications.map(applicationOf),
+    // Investors arrive with phase 4's server; until then a company shows none.
+    capTable: null,
+    investmentOffers: [],
+    trackers: null,
   };
 }
 
@@ -149,7 +158,7 @@ export class CompanyService {
       store.pendingPayouts(caller.id),
       this.deps.hiring?.myApplications(caller.id) ?? [],
     ]);
-    return { company: view ? await this.present(view, caller.id) : null, invitations, payouts, applications };
+    return { company: view ? await this.present(view, caller.id) : null, invitations, payouts, applications, investmentOffers: [], holdings: [], dividends: [] };
   }
 
   async found(caller: Caller, request: FoundRequest): Promise<Outcome<{ companyId: string; fundingRef: string; seedCents: number }>> {
@@ -239,7 +248,7 @@ export class CompanyService {
   }
 
   /** Any member may close the day, once per real UTC day. */
-  async settle(caller: Caller, report: DayReport): Promise<Outcome<WorkDaySettlement>> {
+  async settle(caller: Caller): Promise<Outcome<WorkDaySettlement>> {
     const { store, now } = this.deps;
     if (await this.deps.isOverLimit(`company:${caller.id}`)) return fail("rate_limited");
     const view = await this.companyFor(caller.id);
@@ -252,10 +261,13 @@ export class CompanyService {
     const book = bookOf(view);
     const pantryOf = this.deps.pantryOf;
     const pantryCents = pantryOf ? (await Promise.all(book.members.map((member) => pantryOf(member.userId, today)))).reduce((sum, cents) => sum + cents, 0) : 0;
+    // Work the server graded and no closed day has counted yet, across every member; the client's own count is ignored.
+    const countable = Math.min(MAX_TASKS_PER_DAY, TASKS_PER_MEMBER_CAP * book.members.length);
+    const workIds = this.deps.work ? await this.deps.work.unsettledShipped(view.company.id, countable) : [];
     const settlement = settleWorkDay(book, {
       pantryCents,
       healthyShare: HEALTHY_SHARE_DEFAULT,
-      tasksShipped: Math.min(TASKS_PER_MEMBER_CAP * book.members.length, Math.max(0, Math.floor(report.tasksShipped) || 0)),
+      tasksShipped: workIds.length,
       // Contractors are booked per issue once phase 2 records issues; a day settles without them until then.
       contractorCents: 0,
     });
@@ -271,7 +283,7 @@ export class CompanyService {
     const payouts = settlement.payroll
       .filter((pay) => pay.amountCents > 0)
       .map((pay) => ({ id: `${view.company.id}:${workDay}:${pay.userId}`, userId: pay.userId, amountCents: pay.amountCents }));
-    const booked = await store.settle({ companyId: view.company.id, fromWorkDay: view.company.workDay, today, at, lines, payouts });
+    const booked = await store.settle({ companyId: view.company.id, fromWorkDay: view.company.workDay, today, at, lines, payouts, workIds });
     if (!booked) return fail("already_settled_today");
     return ok({
       workDay,

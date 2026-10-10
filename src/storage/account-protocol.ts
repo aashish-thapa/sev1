@@ -27,6 +27,9 @@ export const COMPANY_ERRORS = [
   "interview_not_found",
   "application_not_found",
   "no_questions",
+  // Daily work.
+  "not_on_board",
+  "already_answered",
 ] as const;
 
 export const API_ERRORS = [

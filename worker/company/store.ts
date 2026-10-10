@@ -72,6 +72,8 @@ export type SettledDay = {
   readonly at: number;
   readonly lines: readonly { readonly ref: string; readonly reason: LedgerReason; readonly amountCents: number; readonly userId: string | null; readonly note: string | null }[];
   readonly payouts: readonly { readonly id: string; readonly userId: string; readonly amountCents: number }[];
+  /** Shipped work rows this day counts; marked counted only if this settlement wins the day. */
+  readonly workIds: readonly string[];
 };
 
 export interface CompanyStore {

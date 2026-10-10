@@ -1,12 +1,11 @@
 import { segmentId, segmentStats } from "../../sim/clients.ts";
 import { setReleasePaused } from "../../sim/commerce-actions.ts";
 import { findPlatform, type Commerce, type Platform } from "../../sim/commerce.ts";
+import { rolloutLabel } from "../../sim/rollout.ts";
 import { applied, commerceCommand, percent } from "../commerce-command.ts";
 import { ssoRefusal } from "../identity.ts";
 import { dim, err, out, table, type ShellContext, type ShellResult } from "../types.ts";
 
-/** App Store Connect's 7-day phased release schedule (share of automatic updates offered). */
-const PHASED_PERCENT = [1, 2, 5, 10, 20, 50, 100];
 const MOBILE = ["ios", "android"];
 const DISPLAY_NAME: Record<string, string> = { ios: "iOS", android: "Android" };
 
@@ -14,13 +13,6 @@ function crashFree(version: string): string {
   let hash = 0;
   for (const char of version) hash = (hash * 31 + char.charCodeAt(0)) % 1000;
   return `${(99.4 + (hash % 40) / 100).toFixed(2)}%`;
-}
-
-function rolloutLabel(platform: Platform): string {
-  const { rollout } = platform;
-  if (rollout.kind === "instant") return "released (100%)";
-  const percentToday = PHASED_PERCENT[Math.min(rollout.day, PHASED_PERCENT.length) - 1];
-  return `phased${rollout.isPaused ? " · PAUSED" : ""} · day ${rollout.day}/7 (${percentToday}%)`;
 }
 
 function status(filter: string | undefined, context: ShellContext, commerce: Commerce): ShellResult {

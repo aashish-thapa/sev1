@@ -12,21 +12,29 @@ import { Laptop } from "./Laptop.tsx";
 import { layoutHall, obstaclesOf, rowSigns, type Rack } from "./layout.ts";
 import { Office } from "./Office.tsx";
 import type { Role } from "../../domain/incident.ts";
-import { BUILDING, DATACENTRE_ORIGIN, officeObstacles, screenFootprint, spawnFor, WALL_SCREENS, type WallScreen } from "./office.ts";
-import type { Footprint } from "./layout.ts";
+import { BUILDING, DATACENTRE_ORIGIN, officeObstacles, PLAYER_DESK, screenFootprint, spawnFor, WALL_SCREENS, type WallScreen } from "./office.ts";
 import { whereabouts, type Whereabouts } from "./whereabouts.ts";
-
-type Usable = {
-  readonly key: string;
-  readonly footprint: Footprint;
-  readonly verb: string;
-  readonly label: string;
-  readonly target: { readonly kind: "rack"; readonly rack: Rack } | { readonly kind: "screen"; readonly screen: WallScreen };
-};
+import { useCareer } from "../../app/career-context.ts";
+import { BrewingCup } from "./interactions/BrewingCup.tsx";
+import { HeldCup } from "./interactions/HeldCup.tsx";
+import { LifeHud } from "./interactions/LifeHud.tsx";
+import { MyDesk } from "./interactions/MyDesk.tsx";
+import { PinnedNotes } from "./interactions/PinnedNotes.tsx";
+import { eyeHeightOf, lookWhileSeated, wantsToWalk, type Stance } from "./interactions/stance.ts";
+import { StickyWallPanel } from "./interactions/StickyWallPanel.tsx";
+import type { Usable } from "./interactions/usable.ts";
+import { useCoffee } from "./interactions/useCoffee.ts";
+import { useSeating } from "./interactions/useSeating.ts";
+import { useSmallTalk } from "./interactions/useSmallTalk.ts";
+import { useStandup } from "./interactions/useStandup.ts";
+import { useStickyWall } from "./interactions/useStickyWall.ts";
+import { SIPS_PER_CUP } from "./interactions/coffee.ts";
+import "./interactions/office-life.css";
 import { People, Teammates } from "./People.tsx";
 import { SelfBody } from "./people/SelfBody.tsx";
 import type { Teammate } from "../ui/feed.ts";
 import { facing, walk, type Intent, type Player } from "./player.ts";
+import { MathUtils, Vector3 } from "three";
 import { Beacon, RackModel } from "./Racks.tsx";
 import { signTexture } from "./tokens.ts";
 
@@ -58,13 +66,14 @@ type Props = {
   onPresence?: (position: { x: number; z: number; yaw: number }) => void;
   /** Picks your own body; teammates derive the same avatar from the same seed. */
   selfAvatarSeed: string;
+  /** An incident is live and it's yours: the floor points you back to your desk. */
+  isPaged?: boolean;
 };
 
 const STRIDE_METRES = 0.72;
 
 const STILL: Intent = { forward: 0, strafe: 0, yawDelta: 0, pitchDelta: 0 };
 
-const EYE_HEIGHT = 1.62;
 const LOOK_SPEED = 0.0045;
 const CLICK_REACH = 4.5;
 const DRAG_SLOP = 6;
@@ -94,7 +103,7 @@ type Controls = {
 };
 
 /** Walkable server hall. Each rack is a live object in the same simulation as the terminal. */
-export default function FloorView({ cluster, scenario, role, selected, comms, isLaptopOpen, isOverlayOpen, panic, laptopScreenRef, onInspect, onUseScreen, onToggleLaptop, onWhereabouts, onStep, teammates = [], onPresence, selfAvatarSeed }: Props) {
+export default function FloorView({ cluster, scenario, role, selected, comms, isLaptopOpen, isOverlayOpen, panic, laptopScreenRef, onInspect, onUseScreen, onToggleLaptop, onWhereabouts, onStep, teammates = [], onPresence, selfAvatarSeed, isPaged = false }: Props) {
   const wrapper = useRef<HTMLDivElement>(null);
   const [start] = useState(() => startFor(role));
   const isLaptopOpenRef = useRef(isLaptopOpen);
@@ -125,19 +134,36 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
     dragDistance: 0,
   });
   const [focusedKey, setFocusedKey] = useState<string | null>(null);
-  // Everything you can press E on: live racks and the role rooms' wall screens.
+  const getPlayer = useCallback(() => controls.current.player, []);
+  const career = useCareer();
+  const seating = useSeating(getPlayer);
+  const coffee = useCoffee();
+  const smallTalk = useSmallTalk(panic);
+  const noteWall = useStickyWall();
+  const standup = useStandup(isPaged, career.title);
+
+  const inspect = useCallback((rack: Rack | null) => {
+    if (rack?.node) onInspect(rack.node);
+  }, [onInspect]);
+  // Everything you can press E on: live racks, the role rooms' wall screens, and the office itself.
   const usables = useMemo<Usable[]>(
     () => [
-      ...racks.flatMap((rack) => (rack.node ? [{ key: rack.key, footprint: rack.footprint, verb: "Inspect", label: rack.label, target: { kind: "rack" as const, rack } }] : [])),
-      ...WALL_SCREENS.map((screen) => ({ key: screen.id, footprint: screenFootprint(screen), verb: "Discuss at", label: screen.title.split(" · ")[0], target: { kind: "screen" as const, screen } })),
+      ...racks.flatMap((rack) => (rack.node ? [{ key: rack.key, footprint: rack.footprint, verb: "Inspect", label: rack.label, use: () => inspect(rack) }] : [])),
+      ...WALL_SCREENS.map((screen) => ({ key: screen.id, footprint: screenFootprint(screen), verb: "Discuss at", label: screen.title.split(" · ")[0], use: () => onUseScreen(screen) })),
+      ...seating.usables,
+      ...coffee.usables,
+      ...smallTalk.usables,
+      ...noteWall.usables,
+      ...standup.usables,
     ],
-    [racks],
+    [coffee.usables, inspect, noteWall.usables, onUseScreen, racks, seating.usables, smallTalk.usables, standup.usables],
   );
-  const focused = usables.find((usable) => usable.key === focusedKey) ?? null;
+  // Sitting, the only thing to do with E is get up again.
+  const focused = seating.standUsable ?? usables.find((usable) => usable.key === focusedKey) ?? null;
   const lookPointer = useRef<{ id: number; x: number; y: number } | null>(null);
 
   // While the laptop is up you're typing, not walking; when it goes down, the hall takes the keyboard back.
-  const isBusy = isLaptopOpen || isOverlayOpen;
+  const isBusy = isLaptopOpen || isOverlayOpen || noteWall.isOpen;
   useEffect(() => {
     isLaptopOpenRef.current = isBusy;
     controls.current.keys.clear();
@@ -166,6 +192,7 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
     rackFootprintsRef.current = rackFootprints;
   }, [rackFootprints]);
   const lastWhere = useRef<string>("");
+  const [isAwayFromDesk, setAwayFromDesk] = useState(true);
   const strideLeft = useRef(STRIDE_METRES);
   const onPlayerMove = useCallback(
     (player: Player) => {
@@ -177,6 +204,8 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
         lastWhere.current = key;
         onWhereabouts?.(where);
       }
+      const isAway = Math.hypot(player.x - PLAYER_DESK.x, player.z - PLAYER_DESK.z) > DESK_HINT_DISTANCE;
+      setAwayFromDesk((current) => (current === isAway ? current : isAway));
       const moved = Math.hypot(player.x - previous.x, player.z - previous.z);
       if (moved > 0.001 || Math.abs(player.yaw - previous.yaw) > 0.01) onPresence?.({ x: player.x, z: player.z, yaw: player.yaw });
       strideLeft.current -= moved;
@@ -187,29 +216,17 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
     },
     [onPresence, onStep, onWhereabouts],
   );
-  const getPlayer = useCallback(() => controls.current.player, []);
-
   const moveStick = useCallback((x: number, y: number) => {
     controls.current.stick = { x, y };
   }, []);
 
-  const inspect = useCallback((rack: Rack | null) => {
-    if (rack?.node) onInspect(rack.node);
-  }, [onInspect]);
-  const use = useCallback(
-    (usable: Usable | null) => {
-      if (!usable) return;
-      if (usable.target.kind === "rack") inspect(usable.target.rack);
-      else onUseScreen(usable.target.screen);
-    },
-    [inspect, onUseScreen],
-  );
-
   const onKey = (isDown: boolean) => (event: KeyboardEvent<HTMLDivElement>) => {
     const key = event.key.toLowerCase();
-    if (["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright", "q", "e"].includes(key)) event.preventDefault();
-    if (isDown && !event.repeat && (key === "e" || key === "enter")) use(focused);
+    if (["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright", "q", "e", "c"].includes(key)) event.preventDefault();
+    if (isDown && !event.repeat && (key === "e" || key === "enter")) focused?.use();
     if (isDown && !event.repeat && key === "l") onToggleLaptop();
+    if (isDown && !event.repeat && key === "c") coffee.sip();
+    if (isDown && !event.repeat && key === "escape" && !isLaptopOpen) seating.stand();
     if (isDown) controls.current.keys.add(key);
     else controls.current.keys.delete(key);
   };
@@ -233,6 +250,21 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
   const onPointerUp = (event: PointerEvent<HTMLDivElement>) => {
     if (lookPointer.current?.id === event.pointerId) lookPointer.current = null;
   };
+
+  const openTerminalAtDesk = useCallback(
+    (event: ThreeEvent<MouseEvent>) => {
+      event.stopPropagation();
+      const { player, dragDistance } = controls.current;
+      if (dragDistance > DRAG_SLOP || isLaptopOpen) return;
+      if (Math.hypot(PLAYER_DESK.x - player.x, PLAYER_DESK.z - player.z) <= CLICK_REACH) onToggleLaptop();
+    },
+    [isLaptopOpen, onToggleLaptop],
+  );
+  const rig = useMemo<RigControl>(
+    () => ({ stance: seating.readStance, takeTeleport: seating.takeTeleport, pace: coffee.pace, standUp: seating.stand }),
+    [coffee.pace, seating.readStance, seating.stand, seating.takeTeleport],
+  );
+  const cup = coffee.coffee.cup;
 
   const onRackClick = useCallback(
     (rack: Rack, event: ThreeEvent<MouseEvent>) => {
@@ -264,7 +296,7 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
       className="floor"
       tabIndex={0}
       role="application"
-      aria-label="Server hall. W A S D or arrow keys to walk, drag to look, E to inspect the rack in front of you, L to raise your laptop."
+      aria-label="The office. W A S D or arrow keys to walk, drag to look, E to use what's in front of you (sit at a desk, make coffee, chat, inspect a rack), C to sip your coffee, L to raise your laptop."
       onKeyDown={onKey(true)}
       onKeyUp={onKey(false)}
       onBlur={() => controls.current.keys.clear()}
@@ -277,14 +309,18 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
         dpr={[...settings.dpr]}
         shadows={settings.hasShadows ? "percentage" : false}
         gl={gl}
-        camera={{ fov: 70, near: 0.05, far: 80, position: [start.x, EYE_HEIGHT, start.z] }}
+        camera={{ fov: 70, near: 0.05, far: 80, position: [start.x, eyeHeightOf({ kind: "standing" }), start.z] }}
       >
         <color attach="background" args={[0, 0, 0]} />
         <PerformanceMonitor onDecline={stepDown} onFallback={stepDown} />
         <Office panic={panic} reduceMotion={reduceMotion} hasShadows={settings.hasShadows} />
-        <People comms={comms} now={cluster.t} getPlayer={getPlayer} reduceMotion={reduceMotion} panic={panic} teammates={teammates} />
+        <People comms={comms} now={cluster.t} getPlayer={getPlayer} reduceMotion={reduceMotion} panic={panic} teammates={teammates} conversation={smallTalk.conversation} />
         <Teammates teammates={teammates} reduceMotion={reduceMotion} />
-        <SelfBody seed={selfAvatarSeed} getPlayer={getPlayer} reduceMotion={reduceMotion} />
+        <SelfBody seed={selfAvatarSeed} getPlayer={getPlayer} getStance={seating.readStance} reduceMotion={reduceMotion} />
+        <MyDesk role={role} onOpenTerminal={openTerminalAtDesk} />
+        <PinnedNotes notes={noteWall.notes} />
+        {cup.kind === "brewing" && coffee.machine && <BrewingCup machine={coffee.machine} reduceMotion={reduceMotion} />}
+        <HeldCup isHeld={cup.kind === "holding"} sips={cup.kind === "holding" ? SIPS_PER_CUP - cup.sipsLeft : 0} isHandsBusy={isLaptopOpen} reduceMotion={reduceMotion} />
         {racks.map((rack) => (
           <RackModel
             key={rack.key}
@@ -302,15 +338,25 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
         <Beacon health={edgeHealth(cluster)} reduceMotion={reduceMotion} x={DATACENTRE_ORIGIN.x} z={DATACENTRE_ORIGIN.z} />
         <Laptop isOpen={isLaptopOpen} reduceMotion={reduceMotion} screenRef={laptopScreenRef} />
         {settings.hasEffects && <Effects />}
-        <PlayerRig start={start} racks={racks} usables={usables} readIntent={readIntent} onMove={onPlayerMove} onFocus={setFocusedKey} tremor={reduceMotion ? 0 : panic} />
+        <PlayerRig start={start} racks={racks} usables={usables} readIntent={readIntent} onMove={onPlayerMove} onFocus={setFocusedKey} tremor={reduceMotion ? 0 : panic} control={rig} reduceMotion={reduceMotion} />
       </Canvas>
 
       {!isBusy && <Stick onMove={moveStick} />}
       {!isBusy && focused && (
-        <button type="button" className="floor__prompt" onClick={() => use(focused)}>
-          <kbd>E</kbd> {focused.verb} {focused.label}
+        <button type="button" className="floor__prompt" onClick={() => focused.use()}>
+          <kbd>E</kbd> {`${focused.verb} ${focused.label}`.trim()}
         </button>
       )}
+      {!isBusy && (
+        <LifeHud
+          cup={cup}
+          caffeine={coffee.caffeineLeft()}
+          onSip={coffee.sip}
+          standup={standup.notice}
+          showDeskHint={isPaged && seating.stance.kind === "standing" && isAwayFromDesk}
+        />
+      )}
+      {noteWall.isOpen && <StickyWallPanel notes={noteWall.notes} onPin={noteWall.pin} onClose={noteWall.close} />}
       {!isBusy && (
         <button type="button" className="floor__laptop" onClick={onToggleLaptop}>
           <kbd>L</kbd> Laptop
@@ -325,6 +371,20 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
   );
 }
 
+/** How office life steers the rig: sitting pins you to a chair, coffee quickens your step. */
+type RigControl = {
+  stance: () => Stance;
+  /** A new pose to jump to (sitting down, standing up), taken once. */
+  takeTeleport: () => Player | null;
+  pace: () => number;
+  standUp: () => void;
+};
+
+/** Sitting down or getting up glides the camera instead of cutting. */
+const POSE_CHANGE_SECONDS = 0.6;
+/** Paged and further than this from your desk: the floor reminds you where it is. */
+const DESK_HINT_DISTANCE = 5;
+
 type RigProps = {
   start: Player;
   racks: readonly Rack[];
@@ -335,29 +395,48 @@ type RigProps = {
   onFocus: (key: string | null) => void;
   /** 0..1 camera tremor; zero for people who prefer reduced motion. */
   tremor: number;
+  control: RigControl;
+  reduceMotion: boolean;
 };
 
-function PlayerRig({ start, racks, usables, readIntent, onMove, onFocus, tremor }: RigProps) {
+function PlayerRig({ start, racks, usables, readIntent, onMove, onFocus, tremor, control, reduceMotion }: RigProps) {
   const player = useRef(start);
   const lastFocus = useRef<string | null>(null);
   const obstacles = useMemo(() => [...officeObstacles(), ...obstaclesOf(racks)], [racks]);
+  const glide = useRef<{ from: Vector3; startedAt: number } | null>(null);
+  const target = useMemo(() => new Vector3(), []);
 
   useFrame(({ camera }, delta) => {
     const seconds = Math.min(delta, 0.05);
-    player.current = walk(player.current, readIntent(seconds), seconds, obstacles, BUILDING);
+    const time = performance.now() / 1000;
+    const jump = control.takeTeleport();
+    if (jump) {
+      player.current = jump;
+      glide.current = reduceMotion ? null : { from: camera.position.clone(), startedAt: time };
+    }
+    const stance = control.stance();
+    const intent = readIntent(seconds);
+    if (stance.kind === "seated") {
+      if (wantsToWalk(intent)) control.standUp();
+      else player.current = lookWhileSeated(player.current, intent, stance.seat);
+    } else {
+      player.current = walk(player.current, intent, seconds, obstacles, BUILDING, control.pace());
+    }
     // A faint, irregular tremor once things are bad — adrenaline, not an earthquake.
     const shake = tremor > 0.6 ? (tremor - 0.6) * 0.012 : 0;
-    const time = performance.now() / 1000;
-    camera.position.set(
-      player.current.x + Math.sin(time * 23.1) * shake,
-      EYE_HEIGHT + Math.sin(time * 31.7) * shake,
-      player.current.z + Math.cos(time * 19.3) * shake,
-    );
+    target.set(player.current.x + Math.sin(time * 23.1) * shake, eyeHeightOf(stance) + Math.sin(time * 31.7) * shake, player.current.z + Math.cos(time * 19.3) * shake);
+    const move = glide.current;
+    const progress = move ? Math.min(1, (time - move.startedAt) / POSE_CHANGE_SECONDS) : 1;
+    if (move && progress < 1) camera.position.lerpVectors(move.from, target, MathUtils.smootherstep(progress, 0, 1));
+    else {
+      glide.current = null;
+      camera.position.copy(target);
+    }
     // Set all three angles: R3F aims the default camera at the origin, which would leave a roll behind.
     camera.rotation.set(player.current.pitch, player.current.yaw, 0, "YXZ");
     onMove(player.current);
 
-    const key = facing(player.current, usables)?.key ?? null;
+    const key = stance.kind === "seated" ? null : (facing(player.current, usables)?.key ?? null);
     if (key !== lastFocus.current) {
       lastFocus.current = key;
       onFocus(key);

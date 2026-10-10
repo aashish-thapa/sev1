@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AudioEngine } from "./engine.ts";
 import { createSoundSystem } from "./index.ts";
 import { createSoundscapeLoops } from "./loops.ts";
-import { doorOpen, failBuzz, footstep, keyClick, laptopOpen, notificationPing, pagerBuzz, successChime, typingBurst } from "./sfx.ts";
+import { chairCreak, coffeeBrew, doorOpen, failBuzz, footstep, keyClick, laptopOpen, notificationPing, pagerBuzz, successChime, typingBurst } from "./sfx.ts";
 import { soundscapeFor, type SoundscapeState, type Zone } from "./soundscape.ts";
 import type { SpeechBackend, SpeechVoice, UtteranceEnding, UtteranceEvents, UtteranceRequest } from "./speech.ts";
 import { fillNoise } from "./synth.ts";
@@ -87,6 +87,8 @@ const allSfx = (engine: AudioEngine) => {
   successChime(engine);
   failBuzz(engine);
   laptopOpen(engine);
+  coffeeBrew(engine);
+  chairCreak(engine);
 };
 
 describe("audio engine", () => {

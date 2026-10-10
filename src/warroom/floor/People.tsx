@@ -14,6 +14,9 @@ import { SpeechBubble } from "./people/SpeechBubble.tsx";
 import { StandIn } from "./people/StandIn.tsx";
 import { follow, STILL_SPEED, type Follower } from "./people/follow.ts";
 import { useVisit } from "./people/useVisit.ts";
+import type { Conversation } from "./interactions/useSmallTalk.ts";
+
+const always = () => true;
 
 type Props = {
   comms: readonly CommsMessage[];
@@ -25,11 +28,13 @@ type Props = {
   panic: number;
   /** Other players in a shared room; colleagues make room for them too. */
   teammates: readonly Teammate[];
+  /** Whoever you're chatting with turns to you, talks, and shows what they said. */
+  conversation: Conversation | null;
 };
 
 type Level = { readonly current: number };
 
-export function People({ comms, now, getPlayer, reduceMotion, panic, teammates }: Props) {
+export function People({ comms, now, getPlayer, reduceMotion, panic, teammates, conversation }: Props) {
   const panicLevel = useRef(panic);
   useEffect(() => {
     panicLevel.current = panic;
@@ -54,15 +59,28 @@ export function People({ comms, now, getPlayer, reduceMotion, panic, teammates }
   return (
     <>
       {PEOPLE.map((person) => (
-        <PersonModel key={person.id} person={person} comms={comms} now={now} getPlayer={getPlayer} reduceMotion={reduceMotion} panic={panicLevel} crowd={crowd} />
+        <PersonModel
+          key={person.id}
+          person={person}
+          comms={comms}
+          now={now}
+          getPlayer={getPlayer}
+          reduceMotion={reduceMotion}
+          panic={panicLevel}
+          crowd={crowd}
+          conversation={conversation?.colleagueId === person.id ? conversation : null}
+        />
       ))}
     </>
   );
 }
 
-type PersonProps = Omit<Props, "panic" | "teammates"> & { person: Person; panic: Level; crowd: { readonly current: Crowd } };
+type PersonProps = Omit<Props, "panic" | "teammates" | "conversation"> & { person: Person; panic: Level; crowd: { readonly current: Crowd }; conversation: Conversation | null };
 
-function PersonModel({ person, comms, now, getPlayer, reduceMotion, panic, crowd }: PersonProps) {
+/** A seated head is lower than a standing one; the bubble sits just above either. */
+const SEATED_HEAD = 1.32;
+
+function PersonModel({ person, comms, now, getPlayer, reduceMotion, panic, crowd, conversation }: PersonProps) {
   const body = useRef<Group>(null);
   // Metres to the right of their lane they've stepped to let someone pass.
   const sidestep = useRef(0);
@@ -70,6 +88,10 @@ function PersonModel({ person, comms, now, getPlayer, reduceMotion, panic, crowd
   const loop = useMemo(() => (person.kind === "walker" ? loopThrough(person.stops) : null), [person]);
   const visit = useVisit(person, comms, now, getPlayer);
   const motion = () => motionFor(situation.current, panic.current, reduceMotion);
+  const isTalking = useRef(false);
+  useEffect(() => {
+    isTalking.current = conversation !== null;
+  }, [conversation]);
 
   useFrame(({ clock }, delta) => {
     const group = body.current;
@@ -82,8 +104,11 @@ function PersonModel({ person, comms, now, getPlayer, reduceMotion, panic, crowd
       pose = { x: seat.x, z: seat.z, heading: person.desk.facing === 1 ? 0 : Math.PI, isWalking: false };
       situation.current = { state: "seated" };
     } else if (person.kind === "standing") {
-      pose = { x: person.x, z: person.z, heading: person.yaw, isWalking: false };
-      situation.current = { state: "standing", activity: person.activity };
+      const player = getPlayer();
+      // Mid-conversation they turn to face you; otherwise they face whatever they were doing.
+      const heading = isTalking.current ? Math.atan2(player.x - person.x, player.z - person.z) : person.yaw;
+      pose = { x: person.x, z: person.z, heading, isWalking: false };
+      situation.current = isTalking.current ? { state: "speaking" } : { state: "standing", activity: person.activity };
     } else if (person.kind === "walker" && loop) {
       pose = positionOnLoop(loop, time + person.offset * 7);
       situation.current = pose.isWalking ? { state: "walking", speed: WALK_SPEED } : { state: "standing", activity: "waiting" };
@@ -117,6 +142,7 @@ function PersonModel({ person, comms, now, getPlayer, reduceMotion, panic, crowd
         <Avatar id={person.avatar} motion={motion} />
       </Suspense>
       {person.kind === "messenger" && <SpeechBubble name={person.name} text={visit.message?.text ?? null} isShown={visit.isArrived} y={HEAD_HEIGHT + 0.26} />}
+      {conversation && <SpeechBubble name={conversation.name} text={conversation.line} isShown={always} y={(isSeated ? SEATED_HEAD : HEAD_HEIGHT) + 0.26} />}
     </group>
   );
 }

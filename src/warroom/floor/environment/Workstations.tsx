@@ -1,27 +1,15 @@
 import { useLayoutEffect, useMemo, useRef } from "react";
-import { BoxGeometry, CanvasTexture, CylinderGeometry, Matrix4, MeshBasicMaterial, MeshStandardMaterial, Object3D, SRGBColorSpace, type BufferGeometry, type InstancedMesh, type Material } from "three";
+import { BoxGeometry, CanvasTexture, CylinderGeometry, MeshBasicMaterial, MeshStandardMaterial, SRGBColorSpace, type BufferGeometry, type InstancedMesh, type Material, type Matrix4 } from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { DESK, DESKS, seatOf, type Desk } from "../office.ts";
 import { tokenColor } from "../tokens.ts";
 import { FINISHES, type FinishMaterials } from "./finishes.ts";
+import { MONITOR, MONITOR_Z, onDesk, SCREEN, SEAT_HEIGHT, TOP_THICKNESS } from "./deskLayout.ts";
 import { worldBox } from "./worldUv.ts";
 
-const TOP_THICKNESS = 0.025;
-const MONITOR = { width: 0.62, height: 0.37, depth: 0.022, lift: 0.13, inset: 0.12 } as const;
-const SCREEN = { width: 0.6, height: 0.345 } as const;
 const DIVIDER = { height: 0.36, thickness: 0.028 } as const;
-const SEAT_HEIGHT = 0.47;
 
 type Placed = { readonly desk: Desk; readonly matrix: Matrix4 };
-
-/** A transform in `desk`'s own frame (+x the occupant's right, +z where they look), turned into the building's. */
-function onDesk(desk: Desk, dx: number, y: number, dz: number): Matrix4 {
-  const dummy = new Object3D();
-  dummy.position.set(desk.x - dx * desk.facing, y, desk.z + dz * desk.facing);
-  dummy.rotation.set(0, desk.facing === 1 ? 0 : Math.PI, 0);
-  dummy.updateMatrix();
-  return dummy.matrix.clone();
-}
 
 /** Task chair, occupant facing +z: fabric seat and back, aluminium five-star base on casters. */
 function chairGeometries(): { fabric: BufferGeometry; frame: BufferGeometry } {
@@ -86,7 +74,7 @@ export function Workstations({ finishes }: { finishes: FinishMaterials }) {
   const parts = useMemo(() => {
     const surface = DESK.height;
     // Occupant-relative offsets: +dz is away from the occupant, toward the shared middle of the cluster.
-    const monitorZ = DESK.depth / 2 - MONITOR.inset;
+    const monitorZ = MONITOR_Z;
     const each = (dx: number, y: number, dz: number): Placed[] => DESKS.map((desk) => ({ desk, matrix: onDesk(desk, dx, y, dz) }));
     return {
       top: each(0, surface - TOP_THICKNESS / 2, 0),

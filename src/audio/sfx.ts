@@ -364,3 +364,84 @@ export function laptopOpen(target: SfxTarget): void {
     fanEnd + 0.05,
   );
 }
+
+/** Burr grinder whirring, the pump's gurgling pour, then the machine's two-note "ready". About four seconds. */
+export function coffeeBrew(target: SfxTarget): void {
+  const output = sfxOutput(target);
+  if (!output) return;
+  const { context, destination } = output;
+  const at = startTime(output);
+
+  // Grinder: a motor drone, and beans rattling through the burrs as amplitude-modulated noise.
+  const grindEnd = at + 1.4;
+  const motor = startOscillator(context, "sawtooth", 118, at);
+  const motorTone = filter(context, "lowpass", 420);
+  const motorLevel = gainOf(context, 0);
+  hold(motorLevel.gain, at, 0.12, 0.08, 1.15, 0.15);
+  chain(motor, motorTone, motorLevel, destination);
+  const beans = startNoise(context, "white", at);
+  const beansBand = filter(context, "bandpass", 2200, 1.4);
+  const rattle = gainOf(context, 0);
+  const flutter = startOscillator(context, "square", 38, at);
+  const flutterDepth = gainOf(context, 0.5);
+  flutter.connect(flutterDepth);
+  flutterDepth.connect(rattle.gain);
+  const beansLevel = gainOf(context, 0);
+  hold(beansLevel.gain, at, 0.16, 0.05, 1.2, 0.12);
+  chain(beans, beansBand, rattle, beansLevel, destination);
+
+  // Pour: the pump's hum and a gurgle whose resonance wanders as the cup fills.
+  const pourAt = grindEnd + 0.25;
+  const pourEnd = pourAt + 2.1;
+  const pump = startOscillator(context, "triangle", 62, pourAt);
+  const pumpLevel = gainOf(context, 0);
+  hold(pumpLevel.gain, pourAt, 0.1, 0.1, 1.8, 0.2);
+  chain(pump, pumpLevel, destination);
+  const stream = startNoise(context, "pink", pourAt);
+  const streamBand = filter(context, "bandpass", 700, 3);
+  for (let step = 0; step <= 20; step += 1) streamBand.frequency.linearRampToValueAtTime(600 + random() * 500 + step * 25, pourAt + step * 0.1);
+  const streamLevel = gainOf(context, 0);
+  hold(streamLevel.gain, pourAt, 0.22, 0.15, 1.65, 0.3);
+  chain(stream, streamBand, streamLevel, destination);
+
+  // Ready: two soft sine beeps, the second a fourth higher.
+  const readyAt = pourEnd + 0.2;
+  const ready = startOscillator(context, "sine", 1318.5, readyAt);
+  ready.frequency.setValueAtTime(1760, readyAt + 0.16);
+  const readyLevel = gainOf(context, 0);
+  hold(readyLevel.gain, readyAt, 0.1, 0.005, 0.09, 0.03);
+  const readyEnd = hold(readyLevel.gain, readyAt + 0.16, 0.1, 0.005, 0.12, 0.05);
+  chain(ready, readyLevel, destination);
+
+  release([flutter, motor, beans, pump, stream, ready], [motorTone, motorLevel, beansBand, rattle, flutterDepth, beansLevel, pumpLevel, streamBand, streamLevel, readyLevel], readyEnd + 0.05);
+}
+
+/** Gas-lift chair: a short squeak of the swivel and the seat taking weight. */
+export function chairCreak(target: SfxTarget): void {
+  const output = sfxOutput(target);
+  if (!output) return;
+  const { context, destination } = output;
+  const at = startTime(output);
+
+  const squeak = startOscillator(context, "triangle", 760 * jitter(random, 0.08), at);
+  squeak.frequency.linearRampToValueAtTime(520, at + 0.14);
+  const squeakBand = filter(context, "bandpass", 900, 6);
+  const squeakLevel = gainOf(context, 0);
+  strike(squeakLevel.gain, at, 0.08, 0.02, 0.14);
+  chain(squeak, squeakBand, squeakLevel, destination);
+
+  const settleAt = at + 0.08;
+  const cushion = startNoise(context, "pink", settleAt);
+  const cushionTone = filter(context, "lowpass", 380);
+  const cushionLevel = gainOf(context, 0);
+  strike(cushionLevel.gain, settleAt, 0.3, 0.01, 0.22);
+  chain(cushion, cushionTone, cushionLevel, destination);
+
+  const hiss = startNoise(context, "white", settleAt + 0.05);
+  const hissBand = filter(context, "highpass", 4000);
+  const hissLevel = gainOf(context, 0);
+  const end = strike(hissLevel.gain, settleAt + 0.05, 0.03, 0.02, 0.3);
+  chain(hiss, hissBand, hissLevel, destination);
+
+  release([squeak, cushion, hiss], [squeakBand, squeakLevel, cushionTone, cushionLevel, hissBand, hissLevel], end + 0.05);
+}

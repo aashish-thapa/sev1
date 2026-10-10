@@ -230,6 +230,7 @@ function Immersive({ scenario, incident, comms, hud, selected, onSelect, termina
           onStep={onStep}
           teammates={team?.teammates ?? []}
           selfAvatarSeed={team?.selfId ?? role}
+          isPaged={isPaged}
           onPresence={team?.onPresence}
           onToggleLaptop={toggleLaptop}
         />

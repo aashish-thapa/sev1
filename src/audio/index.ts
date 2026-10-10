@@ -4,6 +4,8 @@ import { VoiceDirector, type VoiceDirectorOptions } from "./voice.ts";
 
 export { AudioEngine, type AudioContextFactory, type BusName } from "./engine.ts";
 export {
+  chairCreak,
+  coffeeBrew,
   doorOpen,
   failBuzz,
   footstep,

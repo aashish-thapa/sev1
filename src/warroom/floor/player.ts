@@ -12,14 +12,14 @@ const BODY_RADIUS = 0.3;
 const MAX_PITCH = 1.2;
 const WALL_MARGIN = 0.5;
 
-/** One frame of walking: turn, move, then slide out of any rack or wall it hit. */
-export function walk(player: Player, intent: Intent, seconds: number, obstacles: readonly Footprint[], bounds?: Bounds): Player {
+/** One frame of walking: turn, move, then slide out of any rack or wall it hit. `pace` scales the walking speed. */
+export function walk(player: Player, intent: Intent, seconds: number, obstacles: readonly Footprint[], bounds?: Bounds, pace = 1): Player {
   const yaw = player.yaw + intent.yawDelta;
   const pitch = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, player.pitch + intent.pitchDelta));
   const length = Math.hypot(intent.forward, intent.strafe);
   const scale = length > 1 ? 1 / length : 1;
-  const forward = intent.forward * scale * WALK_SPEED * seconds;
-  const strafe = intent.strafe * scale * WALK_SPEED * seconds;
+  const forward = intent.forward * scale * WALK_SPEED * pace * seconds;
+  const strafe = intent.strafe * scale * WALK_SPEED * pace * seconds;
 
   // Camera looks down -z at yaw 0; strafe is perpendicular to the view direction.
   let x = player.x - Math.sin(yaw) * forward + Math.cos(yaw) * strafe;

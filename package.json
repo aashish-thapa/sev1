@@ -15,7 +15,7 @@
     "assets:build": "node scripts/assets/build.ts",
     "dev:worker": "vite build && wrangler d1 migrations apply sev1 --local && wrangler dev",
     "db:migrate": "wrangler d1 migrations apply sev1 --remote",
-    "release": "pnpm build && wrangler deploy"
+    "release": "bash scripts/release.sh"
   },
   "dependencies": {
     "@fontsource-variable/bricolage-grotesque": "^5.3.0",

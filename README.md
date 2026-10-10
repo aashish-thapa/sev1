@@ -79,5 +79,5 @@ The game runs live at https://sev1.aashish-thapa.workers.dev on Cloudflare's fre
 ```sh
 pnpm exec wrangler login --device   # once; the device flow works over SSH
 pnpm db:migrate                     # apply new worker/migrations to the live D1
-pnpm release                        # build + deploy
+pnpm release                        # test, build and deploy the committed HEAD (never uncommitted work)
 ```

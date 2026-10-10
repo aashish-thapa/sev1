@@ -3,18 +3,30 @@ import { z } from "zod";
 import {
   BuyRoomRequestSchema,
   BuyServerRequestSchema,
+  COMPANIES_PATH,
   COMPANY_PATH,
+  CompanyListSchema,
+  InterviewResultSchema,
+  InterviewSchema,
+  POSTINGS_PATH,
+  TOP_COMPANIES_PATH,
   FoundResponseSchema,
   InviteRequestSchema,
   MyCompanySchema,
   SetMemberRequestSchema,
   WorkDaySettlementSchema,
+  type CompanySummary,
   type FoundRequest,
+  type Interview,
+  type InterviewAnswers,
+  type InterviewResult,
+  type OpenPostingRequest,
   type MyCompany,
   type SettleRequest,
   type WorkDaySettlement,
 } from "./company-protocol.ts";
 import { API_ERRORS, type ApiError } from "./account-protocol.ts";
+import type { CategoryId } from "../domain/company/catalog.ts";
 
 export type CompanyOutcome<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: ApiError | "unreachable"; readonly message: string };
 
@@ -27,6 +39,16 @@ export interface CompanyApi {
   setMember(request: z.input<typeof SetMemberRequestSchema>): Promise<CompanyOutcome<unknown>>;
   respond(invitationId: string, answer: "accept" | "decline"): Promise<CompanyOutcome<unknown>>;
   settleWorkDay(request: SettleRequest): Promise<CompanyOutcome<WorkDaySettlement>>;
+  /** The leaderboard: top companies by revenue over their last 7 work days. */
+  top(signal?: AbortSignal): Promise<CompanyOutcome<readonly CompanySummary[]>>;
+  search(query: string, category: CategoryId | null, signal?: AbortSignal): Promise<CompanyOutcome<readonly CompanySummary[]>>;
+  openPosting(request: OpenPostingRequest): Promise<CompanyOutcome<unknown>>;
+  closePosting(postingId: string): Promise<CompanyOutcome<unknown>>;
+  /** Starts (or resumes) the interview for a posting; the questions come without their answers. */
+  apply(postingId: string): Promise<CompanyOutcome<Interview>>;
+  /** Graded on the server; the application is created with its score. */
+  answerInterview(interviewId: string, answers: InterviewAnswers): Promise<CompanyOutcome<InterviewResult>>;
+  decide(applicationId: string, decision: "hire" | "reject"): Promise<CompanyOutcome<unknown>>;
 }
 
 const ErrorSchema = z.object({ error: z.enum(API_ERRORS), message: z.string().optional() });
@@ -58,6 +80,33 @@ export class HttpCompanyApi implements CompanyApi {
   settleWorkDay(request: SettleRequest) {
     return call(`${COMPANY_PATH}/workday`, "POST", request, WorkDaySettlementSchema);
   }
+  async top(signal?: AbortSignal) {
+    return companies(await call(TOP_COMPANIES_PATH, "GET", undefined, CompanyListSchema, signal));
+  }
+  async search(query: string, category: CategoryId | null, signal?: AbortSignal) {
+    const params = new URLSearchParams({ query });
+    if (category) params.set("category", category);
+    return companies(await call(`${COMPANIES_PATH}?${params}`, "GET", undefined, CompanyListSchema, signal));
+  }
+  openPosting(request: OpenPostingRequest) {
+    return call(POSTINGS_PATH, "POST", request, Anything);
+  }
+  closePosting(postingId: string) {
+    return call(`${POSTINGS_PATH}/${encodeURIComponent(postingId)}/close`, "POST", {}, Anything);
+  }
+  apply(postingId: string) {
+    return call(`/api/postings/${encodeURIComponent(postingId)}/apply`, "POST", {}, InterviewSchema);
+  }
+  answerInterview(interviewId: string, answers: InterviewAnswers) {
+    return call(`/api/interviews/${encodeURIComponent(interviewId)}/answers`, "POST", answers, InterviewResultSchema);
+  }
+  decide(applicationId: string, decision: "hire" | "reject") {
+    return call(`/api/applications/${encodeURIComponent(applicationId)}/${decision}`, "POST", {}, Anything);
+  }
+}
+
+function companies(outcome: CompanyOutcome<z.output<typeof CompanyListSchema>>): CompanyOutcome<readonly CompanySummary[]> {
+  return outcome.ok ? { ok: true, value: outcome.value.companies } : outcome;
 }
 
 async function call<T extends z.ZodType>(

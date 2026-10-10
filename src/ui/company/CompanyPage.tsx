@@ -3,7 +3,11 @@ import { AccountContext } from "../../app/useAccount.ts";
 import type { Role } from "../../domain/incident.ts";
 import { formatCents } from "../../domain/economy.ts";
 import type { CompanyApi, CompanyOutcome } from "../../storage/company-api.ts";
-import type { MyCompany, PendingPayout } from "../../storage/company-protocol.ts";
+import type { Interview, InterviewAnswers, MyCompany, PendingPayout, Posting } from "../../storage/company-protocol.ts";
+import { ROLE_INFO } from "../../domain/roles.ts";
+import { InterviewView } from "../work/InterviewView.tsx";
+import { CompanyDirectory } from "./CompanyDirectory.tsx";
+import { MyApplications } from "./MyApplications.tsx";
 import type { Task } from "../../domain/work/task.ts";
 import { companyErrorText } from "./errors.ts";
 import { FoundCompany } from "./FoundCompany.tsx";
@@ -40,6 +44,31 @@ export function CompanyPage(props: CompanyPageProps) {
   };
 
   const refresh = useCallback(async () => setMine(await api.mine()), [api]);
+  const [interview, setInterview] = useState<{ interview: Interview; heading: string } | null>(null);
+  const [isSubmitting, setSubmitting] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const apply = async (posting: Posting, companyName: string) => {
+    setNotice(null);
+    // Applying again returns the interview already under way, so leaving one doesn't lose it.
+    const started = await api.apply(posting.id);
+    if (started.ok) setInterview({ interview: started.value, heading: `${ROLE_INFO[posting.role].label} at ${companyName}` });
+    else setNotice(companyErrorText(started.error, started.message));
+  };
+
+  const submit = async (taken: Interview, answers: InterviewAnswers["answers"]) => {
+    setSubmitting(true);
+    const graded = await api.answerInterview(taken.id, { answers });
+    setSubmitting(false);
+    setInterview(null);
+    if (!graded.ok) return setNotice(companyErrorText(graded.error, graded.message));
+    const { result, application } = graded.value;
+    setNotice(
+      `You got ${result.correct} of ${result.total} (${result.score}%). ` +
+        (application.status === "rejected" ? `That’s under ${application.companyName}’s pass mark, so not this time.` : `${application.companyName} will decide; it shows under Your applications.`),
+    );
+    void refresh();
+  };
 
   useEffect(() => {
     if (!isSignedIn) return;
@@ -77,9 +106,30 @@ export function CompanyPage(props: CompanyPageProps) {
   if (!mine) return <p className="admin__note">Loading your company…</p>;
   if (!mine.ok) return <p className="admin__note">{companyErrorText(mine.error, mine.message)}</p>;
 
-  const { company, invitations } = mine.value;
+  const { company, invitations, applications } = mine.value;
+  if (interview) {
+    return (
+      <section className="company" aria-label="Interview">
+        <InterviewView
+          interview={interview.interview}
+          heading={interview.heading}
+          isSubmitting={isSubmitting}
+          onSubmit={(answers) => void submit(interview.interview, answers)}
+          onLeave={() => setInterview(null)}
+        />
+      </section>
+    );
+  }
   return (
     <section className="company" aria-label="Your company">
+      {notice && (
+        <p className="company__warning" role="status">
+          {notice}
+        </p>
+      )}
+      {company === null && <MyApplications applications={applications} />}
+      {/* Without a company, joining one is the likelier first step: most players can't afford to found yet. */}
+      {company === null && <CompanyDirectory api={api} onApply={(posting, name) => void apply(posting, name)} myApplications={applications} />}
       {invitations.length > 0 && <Invitations api={api} invitations={invitations} hasCompany={company !== null} onAnswered={refresh} />}
       {company === null ? (
         <FoundCompany
@@ -113,6 +163,7 @@ export function CompanyPage(props: CompanyPageProps) {
       ) : (
         <Headquarters api={api} company={company} username={props.username} onChanged={refresh} tasks={props.tasks} day={props.day} />
       )}
+      {company !== null && <CompanyDirectory api={api} onApply={null} myApplications={applications} />}
     </section>
   );
 }

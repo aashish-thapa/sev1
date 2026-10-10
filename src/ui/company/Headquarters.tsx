@@ -10,6 +10,8 @@ import type { Company, WorkDaySettlement } from "../../storage/company-protocol.
 import type { Task } from "../../domain/work/task.ts";
 import { useWorkLog } from "../work/useWorkLog.ts";
 import { WorkBoard } from "../work/WorkBoard.tsx";
+import { atDifficulty, companyLevel, difficultiesFor } from "../../domain/company/levels.ts";
+import { Hiring } from "./Hiring.tsx";
 
 type Props = {
   api: CompanyApi;
@@ -43,7 +45,12 @@ export function Headquarters({ api, company, username, onChanged, tasks, day }: 
   const myRole = company.members.find((member) => member.username === username)?.role ?? null;
   const [notice, setNotice] = useState<string | null>(null);
   const [isBusy, setBusy] = useState(false);
-  const isFounder = company.members.some((member) => member.isFounder && member.username === username);
+  const me = company.members.find((member) => member.username === username) ?? null;
+  const isFounder = me?.isFounder ?? false;
+  const canHire = isFounder || (me?.canHire ?? false);
+  // The level is the server's; `next` only explains how far off the next one is.
+  const nextLevel = companyLevel({ lifetimeRevenueCents: company.lifetimeRevenueCents, workDays: company.workDay }).next;
+  const levelTasks = myRole ? atDifficulty(tasks.filter((task) => task.role === myRole), difficultiesFor(company.level)) : [];
   const category = categoryById(company.category);
   // The page checks the same rules as the server to explain a disabled button; the server is still the one that decides.
   const book: CompanyBook = {
@@ -74,8 +81,14 @@ export function Headquarters({ api, company, username, onChanged, tasks, day }: 
       <header className="hq__head">
         <h1 className="home__title company__title">{company.name}</h1>
         <p className="company__lede">
-          {category.title} · work day {company.workDay} · {isFounder ? "you founded it" : "you work here"}
+          {category.title} · {company.levelTitle} · work day {company.workDay} · {isFounder ? "you founded it" : "you work here"}
         </p>
+        {nextLevel && (
+          <p className="company__note">
+            {nextLevel.title} at {formatCents(nextLevel.minRevenueCents)} lifetime revenue and {nextLevel.minWorkDays} work days ({formatCents(company.lifetimeRevenueCents)} and{" "}
+            {company.workDay} so far). Harder work comes with it, and it pays more.
+          </p>
+        )}
       </header>
 
       <dl className="admin__tiles">
@@ -114,7 +127,7 @@ export function Headquarters({ api, company, username, onChanged, tasks, day }: 
 
       {myRole && (
         <WorkBoard
-          tasks={tasks}
+          tasks={levelTasks}
           role={myRole}
           category={company.category}
           day={day}
@@ -142,6 +155,24 @@ export function Headquarters({ api, company, username, onChanged, tasks, day }: 
                 <th scope="row">
                   {member.username}
                   {member.isFounder && <span className="admin__dim"> · founder</span>}
+                  {!member.isFounder && member.canHire && <span className="admin__dim"> · hiring manager</span>}
+                  {isFounder && !member.isFounder && (
+                    <label className="hq__toggle">
+                      <input
+                        type="checkbox"
+                        checked={member.canHire}
+                        disabled={isBusy}
+                        onChange={(event) => {
+                          const next = event.target.checked;
+                          void act(
+                            () => api.setMember({ username: member.username, role: member.role, payCents: member.payCents, canHire: next }),
+                            () => (next ? `${member.username} can now open roles and hire.` : `${member.username} no longer hires.`),
+                          );
+                        }}
+                      />{" "}
+                      Can hire
+                    </label>
+                  )}
                 </th>
                 <td>{ROLE_INFO[member.role].label}</td>
                 <td>
@@ -180,6 +211,8 @@ export function Headquarters({ api, company, username, onChanged, tasks, day }: 
           />
         )}
       </section>
+
+      {canHire && <Hiring api={api} company={company} isBusy={isBusy} act={act} />}
 
       {isFounder && (
         <section className="company__panel" aria-labelledby="shop-title">

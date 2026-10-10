@@ -5,6 +5,7 @@ import "./styles/tokens.css";
 import "./styles/app.css";
 import "./styles/home.css";
 import "./styles/voice.css";
+import "./styles/admin.css";
 
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -13,6 +14,7 @@ import { reloadOnStaleBuild } from "./app/staleBuild.ts";
 import { createLibrary } from "./content/library.ts";
 import { localDateOf } from "./domain/calendar.ts";
 import { HttpAccountApi } from "./storage/account-api.ts";
+import { HttpAdminApi } from "./storage/admin-api.ts";
 import { HttpBillingApi, IS_PRO_ON_SALE } from "./storage/billing-api.ts";
 import type { ProSale } from "./ui/ProPanel.tsx";
 import { BrowserProgressStore } from "./storage/progress-store.ts";
@@ -35,7 +37,7 @@ if (!root) throw new Error("index.html is missing #root");
 
 createRoot(root).render(
   <StrictMode>
-    <Root library={library} store={store} sync={store} accounts={accounts} today={today} shareUrl={window.location.origin} proSale={proSale} />
+    <Root library={library} store={store} sync={store} accounts={accounts} today={today} shareUrl={window.location.origin} proSale={proSale} adminApi={new HttpAdminApi()} />
   </StrictMode>,
 );
 

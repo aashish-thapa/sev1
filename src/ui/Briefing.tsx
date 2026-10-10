@@ -10,6 +10,9 @@ import { useLeaderboard, type FetchLeaderboard } from "../storage/leaderboard-ap
 import { AccountPanel } from "./AccountPanel.tsx";
 import { BadgeMark } from "./Badges.tsx";
 import { TagMarks } from "./TagMark.tsx";
+import { AdminDashboard } from "./admin/AdminDashboard.tsx";
+import { isAdmin } from "../domain/tags.ts";
+import type { AdminApi } from "../storage/admin-api.ts";
 import { LeaderboardPanel } from "./LeaderboardPanel.tsx";
 import { Profile } from "./Profile.tsx";
 import type { ProSale } from "./ProPanel.tsx";
@@ -22,6 +25,7 @@ type Props = {
   onFeatureBadge: (badgeId: string | null) => void;
   fetchLeaderboard: FetchLeaderboard;
   proSale: ProSale;
+  adminApi: AdminApi;
   rooms: {
     status: string;
     error: string | null;
@@ -33,17 +37,20 @@ type Props = {
 
 const NAME_LIMIT = 24;
 const ACCOUNT_PANEL_ID = "account-panel";
-/** The profile lives at its own hash, so Back returns to the lobby and the page can be linked. */
+/** The profile and the admin dashboard live at their own hashes, so Back returns to the lobby and pages can be linked. */
 const PROFILE_HASH = "#profile";
+const ADMIN_HASH = "#admin";
 
-function useIsProfileOpen(): boolean {
+type LobbyView = "home" | "profile" | "admin";
+
+function useLobbyView(): LobbyView {
   const [hash, setHash] = useState(() => window.location.hash);
   useEffect(() => {
     const follow = () => setHash(window.location.hash);
     window.addEventListener("hashchange", follow);
     return () => window.removeEventListener("hashchange", follow);
   }, []);
-  return hash === PROFILE_HASH;
+  return hash === PROFILE_HASH ? "profile" : hash === ADMIN_HASH ? "admin" : "home";
 }
 
 /** What sev1 looks like, in the order a shift goes. */
@@ -54,7 +61,7 @@ const SCREENS = [
 ] as const;
 
 /** The lobby: what the game is, who you are in it, the three ways to start, and the board. Your profile opens in its place. */
-export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, fetchLeaderboard, rooms, proSale }: Props) {
+export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, fetchLeaderboard, rooms, proSale, adminApi }: Props) {
   const session = useContext(AccountContext);
   const role = roles.chosen ?? "infrastructure";
   // Until the player types, rooms use their account name, which may arrive after the first render.
@@ -67,7 +74,10 @@ export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, fetch
   const setAccountOpen = (isOpen: boolean) => setOpenedAs(isOpen ? (session?.status ?? null) : null);
   const shown = featuredBadge(progress);
   const leaderboard = useLeaderboard(fetchLeaderboard, `${session?.status}:${session?.account?.username ?? ""}`);
-  const isProfileOpen = useIsProfileOpen();
+  const view = useLobbyView();
+  const isProfileOpen = view === "profile";
+  // Only a link for admins; the server refuses everyone else's dashboard requests regardless.
+  const canAdmin = isSignedIn && isAdmin(session?.account?.tags ?? []);
 
   return (
     <main className="home">
@@ -77,6 +87,11 @@ export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, fetch
         </a>
         <div className="home__bar-end">
           <WalletChip />
+          {canAdmin && (
+            <a className="button button--ghost home__account-toggle" href={ADMIN_HASH} aria-current={view === "admin" ? "page" : undefined}>
+              Dashboard
+            </a>
+          )}
           <a className="button button--ghost home__account-toggle" href={PROFILE_HASH} aria-current={isProfileOpen ? "page" : undefined}>
             {isSignedIn ? session?.account?.username : "Profile"}
             {isSignedIn && <TagMarks ids={session?.account?.tags ?? []} />}
@@ -113,7 +128,9 @@ export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, fetch
         </p>
       )}
 
-      {isProfileOpen ? (
+      {view === "admin" ? (
+        canAdmin ? <AdminDashboard api={adminApi} /> : <p className="admin__note">The dashboard is for admins.</p>
+      ) : isProfileOpen ? (
         <Profile progress={progress} onFeatureBadge={onFeatureBadge} proSale={proSale} />
       ) : (
         <>

@@ -10,7 +10,9 @@ import { fraudModelRegression } from "./scenarios/fraud-model-regression.ts";
 import { scorerOf } from "./scenarios/fraud-scorer.ts";
 import { FRAUD_CAPTURE_BOUND, fraudThresholdFailOpen } from "./scenarios/fraud-threshold-fail-open.ts";
 import { refundDoubleCharges, SETTLEMENT_CUTOFF } from "./scenarios/refund-double-charges.ts";
+import { SCENARIOS, unlockedWarRooms } from "./scenarios/index.ts";
 import { scaledToZero } from "./scenarios/scaled-to-zero.ts";
+import { FEATURE_DAG, staleFraudFeatures } from "./scenarios/stale-fraud-features.ts";
 import { airflowCompact, airflowLine } from "./shell/commands/pipelines.ts";
 import { SSO_GROUPS } from "./shell/identity.ts";
 import { completeLine, runLine } from "./shell/shell.ts";
@@ -20,6 +22,8 @@ import type { Commerce, FraudScoring } from "./sim/commerce.ts";
 import { FEATURE_MAX_AGE_SECONDS, fraudDeclines, NO_FRAUD, scoredAt, stepFraud } from "./sim/fraud.ts";
 
 const HOUR = 3600;
+/** How `solutions.test.ts` tells the shell or a tool turning a command down from red log lines. */
+const REFUSAL = /^(bash:|error:|Error from server|usage:|ERROR:|psql: error|[a-z-]+: )/;
 const ORGANIC_CHECKOUTS = 300 * 0.4;
 
 const SCORER: FraudScoring = {
@@ -100,7 +104,7 @@ function workedSolution(scenario: Scenario) {
   let incident = playTo(scenario, 20, openIncident(scenario));
   for (const step of scenario.solution.data ?? []) {
     const result = shellOn(scenario, incident, step.command);
-    expect(result.errors, step.command).toEqual([]);
+    expect(result.errors.filter((text) => REFUSAL.test(text)), step.command).toEqual([]);
     incident = play(scenario, 8, result.incident);
   }
   const settled = play(scenario, 180, incident);
@@ -559,4 +563,100 @@ describe("tier 3: the threshold nobody tuned", () => {
   });
 
   it("offers chips the data laptop can run", () => expectChipsToRun(scenario));
+});
+
+describe("tier 4: every model declines them", () => {
+  const scenario = staleFraudFeatures;
+  const loss = (incident: Incident) => alertRate(scenario, incident.cluster);
+  const refresh = `pipelines run ${FEATURE_DAG}`;
+
+  it("opens with a stale feature declining regulars, and declines double as the DAG's next feature goes stale", () => {
+    const opened = openIncident(scenario);
+    expect(loss(opened)).toBeCloseTo(0.115, 9);
+    expect(opened.cluster.errorRate).toBe(0);
+    const twoMinutes = playTo(scenario, 120, opened);
+    const tenMinutes = playTo(scenario, 600, twoMinutes);
+    expect(loss(twoMinutes)).toBeCloseTo(0.115, 9);
+    expect(loss(tenMinutes)).toBeCloseTo(0.225, 9);
+    expect(tenMinutes.cluster.failedCheckouts).toBeGreaterThan(twoMinutes.cluster.failedCheckouts * 6);
+    expect(debrief(tenMinutes, scenario, true).points).toBeLessThan(debrief(twoMinutes, scenario, true).points);
+  });
+
+  it("keeps last night's failed task log, verbatim from Airflow and Postgres", () => {
+    const log = shellOn(scenario, openIncident(scenario), `pipelines logs ${FEATURE_DAG}`).text.split("\n");
+    expect(log).toContain("[2026-10-10T02:10:10.570+0000] {taskinstance.py:3313} ERROR - Task failed with exception");
+    expect(log).toContain("psycopg2.errors.UndefinedColumn: column o.placed_at does not exist");
+    const line = log.findIndex((text) => text.startsWith("LINE 5: "));
+    expect(log[line]).toBe("LINE 5:   and o.placed_at >= current_date - 90");
+    expect(log[line + 1].indexOf("^")).toBe(log[line].indexOf("o.placed_at"));
+    expect(log).toContain('HINT:  Perhaps you meant to reference the column "o.updated_at".');
+    expect(log.some((text) => text.endsWith("{taskinstance.py:1226} INFO - Marking task as FAILED. dag_id=features_customer_daily, task_id=build_customer_orders_90d, run_id=scheduled__2026-10-09T02:00:00+00:00, execution_date=20261009T020000, start_date=20261010T021007, end_date=20261010T021010"))).toBe(true);
+  });
+
+  it("shows declined regulars were scored on zero recent orders until the features refresh", () => {
+    expect(shellOn(scenario, openIncident(scenario), "warehouse run declined-checkouts").text).toMatch(/3\+ paid orders\s+\|\s+\d+\s+\|\s+0\s+\|\s+7/);
+    const refreshed = scripted(scenario, [[30, refresh]], 100);
+    expect(shellOn(scenario, refreshed, "warehouse run declined-checkouts").text).toMatch(/3\+ paid orders\s+\|\s+\d+\s+\|\s+7\s+\|\s+7/);
+  });
+
+  it("closes at S or A with the worked solution", () => {
+    const { result } = workedSolution(scenario);
+    expect(result.isRootCauseFixed).toBe(true);
+    expect(["S", "A"]).toContain(result.grade);
+  });
+
+  it("rolling back does nothing: every version reads the stale feature", () => {
+    const rolledBack = shellOn(scenario, playTo(scenario, 30, openIncident(scenario)), "models rollback fraud-scorer");
+    expect(rolledBack.changed).toBe(true);
+    expect(scorerOf(rolledBack.incident.cluster)?.active).toBe("v13");
+    const later = playTo(scenario, 150, rolledBack.incident);
+    expect(loss(later)).toBeCloseTo(0.115, 9);
+    expect(declareResolved(later, scenario).notice?.kind).toBe("refused");
+    expect(scenario.isRootCauseFixed(later.cluster)).toBe(false);
+  });
+
+  it("failing open floods the gateway with the card-testing bots", () => {
+    const failedOpen = scripted(scenario, [[30, "models mode fraud-scorer fail-open"]], 150);
+    const fixed = scripted(scenario, [[30, refresh]], 150);
+    expect(commerceOf(failedOpen).gateway.timeoutShare).toBe(1);
+    expect(failedOpen.cluster.errorRate).toBeGreaterThan(0.3);
+    expect(loss(failedOpen)).toBeGreaterThan(0.9);
+    expect(commerceOf(failedOpen).ledger.fraudulentCaptures).toBeGreaterThan((commerceOf(fixed).ledger.fraudulentCaptures ?? 0) * 10);
+    expect(declareResolved(failedOpen, scenario).notice?.kind).toBe("refused");
+    expect(debrief(failedOpen, scenario, true).points).toBeLessThan(debrief(fixed, scenario, true).points - 30);
+  });
+
+  it("is deterministic", () => {
+    const steps = [[45, refresh]] as const;
+    expect(scripted(scenario, steps, 200)).toEqual(scripted(scenario, steps, 200));
+  });
+
+  it("round-trips through multiplayer frames while a refresh runs and lands", () => {
+    const server = expectFramesToRoundTrip(scenario, [[40, refresh]], 120);
+    expect(scorerOf(server.cluster)?.features.every((feature) => feature.refresh === null)).toBe(true);
+    expect(scenario.isRootCauseFixed(server.cluster)).toBe(true);
+  });
+
+  it("offers chips the data laptop can run", () => expectChipsToRun(scenario));
+});
+
+describe("the data ladder", () => {
+  const ladder = [refundDoubleCharges, fraudModelRegression, fraudThresholdFailOpen, staleFraudFeatures];
+
+  it("climbs one tier per career level, and adds the cross-team incident at Staff", () => {
+    expect(ladder.map((scenario) => scenario.tier)).toEqual([1, 2, 3, 4]);
+    for (const level of [0, 1, 2, 3] as const) expect(unlockedWarRooms("data", level)).toEqual(ladder.slice(0, level + 1).toReversed());
+    expect(unlockedWarRooms("data", 4)).toEqual([checkoutMeltdown, ...ladder.toReversed()]);
+    for (const scenario of ladder) expect(SCENARIOS).toContain(scenario);
+  });
+
+  it.each(ladder.map((scenario) => [scenario.id, scenario] as const))("%s pages data alone, with a postmortem whose answer length gives nothing away", (_id, scenario) => {
+    expect(scenario.roles).toEqual(["data"]);
+    expect(scenario.releasedAt).toBeUndefined();
+    expect(scenario.teamPlaybook).toBeUndefined();
+    const { options, answerIndex } = scenario.postmortem;
+    expect(options).toHaveLength(4);
+    const longestOther = Math.max(...options.filter((_, index) => index !== answerIndex).map((option) => option.length));
+    expect(options[answerIndex].length - longestOther).toBeLessThanOrEqual(4);
+  });
 });

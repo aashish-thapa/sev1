@@ -8,8 +8,8 @@ import { commerceCommand, count, percent, runEvidence, viewNames, WINDOW_SECONDS
 import { COMPANY_DOMAIN, ssoRefusal } from "../identity.ts";
 import { dim, err, out, table, type OutputLine, type ShellContext, type ShellResult } from "../types.ts";
 
-/** Chrome's console line for any response with an HTTP error status (Blink `FrameConsole::ReportResourceResponseReceived`). */
-const CHROME_500 = "Failed to load resource: the server responded with a status of 500 (Internal Server Error)";
+/** Chrome's console line for an HTTP error status (Blink `FrameConsole::ReportResourceResponseReceived`); HTTP/2 has no reason phrase, so the parentheses stay empty. */
+const CHROME_500 = "Failed to load resource: the server responded with a status of 500 ()";
 
 type WebView = {
   readonly segment: SegmentStats;

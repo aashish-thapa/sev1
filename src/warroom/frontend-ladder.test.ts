@@ -176,7 +176,7 @@ describe("tier 2: address-autocomplete-500s", () => {
   it("names the failing field in RUM, and the flag that fills it flipped when the errors began", () => {
     const opened = openIncident(scenario);
     const errors = shell(scenario, opened, "rum errors").text;
-    expect(errors).toContain("Failed to load resource: the server responded with a status of 500 (Internal Server Error)");
+    expect(errors).toContain("Failed to load resource: the server responded with a status of 500 ()");
     expect(errors).toContain('unknown region \\"California\\"');
     expect(shell(scenario, opened, "flags list").text).toMatch(/checkout\.address_autocomplete\s+on\s+team-checkout-web\s+13:09:00/);
   });

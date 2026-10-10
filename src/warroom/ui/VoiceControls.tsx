@@ -1,6 +1,7 @@
 import type { Voice } from "../../multiplayer/voice/useVoice.ts";
+import { TagMarks } from "../../ui/TagMark.tsx";
 
-type Member = { readonly id: string; readonly name: string; readonly isMicOn: boolean };
+type Member = { readonly id: string; readonly name: string; readonly isMicOn: boolean; readonly tags: readonly string[] };
 
 type Props = {
   voice: Voice;
@@ -31,6 +32,7 @@ export function VoiceControls({ voice, selfId, members }: Props) {
               <span className="voice__light" aria-hidden="true" style={{ opacity: isTalking ? 0.45 + level * 0.55 : undefined }} />
               <span className="voice__name">
                 {member.name}
+                <TagMarks ids={member.tags} />
                 {isSelf && " (you)"}
               </span>
               <span className="voice__state">

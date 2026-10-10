@@ -9,6 +9,7 @@ import { usePublicRooms, type ListPublicRooms } from "../multiplayer/usePublicRo
 import { useLeaderboard, type FetchLeaderboard } from "../storage/leaderboard-api.ts";
 import { AccountPanel } from "./AccountPanel.tsx";
 import { BadgeMark } from "./Badges.tsx";
+import { TagMarks } from "./TagMark.tsx";
 import { LeaderboardPanel } from "./LeaderboardPanel.tsx";
 import { Profile } from "./Profile.tsx";
 import type { ProSale } from "./ProPanel.tsx";
@@ -78,6 +79,7 @@ export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, fetch
           <WalletChip />
           <a className="button button--ghost home__account-toggle" href={PROFILE_HASH} aria-current={isProfileOpen ? "page" : undefined}>
             {isSignedIn ? session?.account?.username : "Profile"}
+            {isSignedIn && <TagMarks ids={session?.account?.tags ?? []} />}
             {shown && <BadgeMark badge={shown} />}
           </a>
           {session?.status === "anonymous" && (

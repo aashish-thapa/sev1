@@ -1,6 +1,7 @@
 import { badgeById } from "../domain/achievements.ts";
 import type { LeaderboardView } from "../storage/leaderboard-api.ts";
 import { BadgeMark } from "./Badges.tsx";
+import { TagMarks } from "./TagMark.tsx";
 
 type Props = {
   view: LeaderboardView;
@@ -35,6 +36,7 @@ export function LeaderboardPanel({ view, you, onSignUp }: Props) {
                     <span className="leaderboard__who">
                       <strong>
                         {entry.username}
+                        <TagMarks ids={entry.tags} />
                         {badge && (
                           <span className="leaderboard__badge" title={badge.title}>
                             <BadgeMark badge={badge} />

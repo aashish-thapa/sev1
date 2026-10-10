@@ -7,6 +7,7 @@ import type { Progress } from "../domain/progress.ts";
 import { AccountPanel } from "./AccountPanel.tsx";
 import { BadgeMark, BadgeShelf } from "./Badges.tsx";
 import { CareerLadder } from "./Career.tsx";
+import { TagMarks } from "./TagMark.tsx";
 import { ProPanel, type ProSale } from "./ProPanel.tsx";
 
 type Props = {
@@ -35,7 +36,10 @@ export function Profile({ progress, onFeatureBadge, proSale }: Props) {
     <section className="profile" aria-labelledby="profile-title">
       <header className="profile__head">
         <h1 id="profile-title" className="home__title profile__name">
-          <span>{session?.status === "signed-in" ? session.account?.username : "Guest"}</span>
+          <span>
+            {session?.status === "signed-in" ? session.account?.username : "Guest"}
+            {session?.status === "signed-in" && <TagMarks ids={session.account?.tags ?? []} />}
+          </span>
           {shown && (
             <span className="profile__shown">
               <BadgeMark badge={shown} /> {shown.title}

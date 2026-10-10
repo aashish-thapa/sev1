@@ -24,6 +24,8 @@ export type Teammate = {
   readonly roleLabel: string;
   /** The badge they chose to show (an achievements catalog id), or null. */
   readonly badge: string | null;
+  /** Granted tags (e.g. "creator") from the server; render with knownTags, which skips permissions. */
+  readonly tags: readonly string[];
   /** Where they are and what they're doing; null until their first update arrives. */
   readonly position: PlayerPresence | null;
 };

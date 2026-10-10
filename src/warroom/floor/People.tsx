@@ -15,6 +15,8 @@ import { SpeechBubble } from "./people/SpeechBubble.tsx";
 import { StandIn } from "./people/StandIn.tsx";
 import { follow, STILL_SPEED, type Follower } from "./people/follow.ts";
 import { HeldLaptop } from "./people/HeldLaptop.tsx";
+import { SpeakingRing } from "./people/SpeakingRing.tsx";
+import { useSpeakingLevels } from "../../multiplayer/voice/context.ts";
 import { useVisit } from "./people/useVisit.ts";
 import type { Conversation } from "./interactions/useSmallTalk.ts";
 
@@ -175,6 +177,12 @@ function TeammateModel({ teammate, reduceMotion }: { teammate: Teammate; reduceM
   const isSeated = target?.stance === "seated";
   const isOnLaptop = target?.isOnLaptop ?? false;
   const follower = useRef<Follower>({ x: target?.x ?? 0, z: target?.z ?? 0, speed: 0 });
+  // Levels refresh several times a second; read them per frame instead of re-rendering the body.
+  const levels = useSpeakingLevels();
+  const levelsRef = useRef(levels);
+  useEffect(() => {
+    levelsRef.current = levels;
+  }, [levels]);
   const badge = teammate.badge === null ? undefined : badgeById(teammate.badge);
   const status = statusOf(target);
   const tag = useMemo(() => {
@@ -207,6 +215,7 @@ function TeammateModel({ teammate, reduceMotion }: { teammate: Teammate; reduceM
       <Suspense fallback={<StandIn isSeated={false} />}>
         <Avatar id={avatarFor(teammate.id)} motion={motion} />
       </Suspense>
+      <SpeakingRing level={() => levelsRef.current.get(teammate.id) ?? 0} />
       {isOnLaptop && <HeldLaptop position={isSeated ? LAPTOP_ON_DESK : LAPTOP_IN_HANDS} />}
       <sprite position={[0, HEAD_HEIGHT + 0.37 - (isSeated ? SEATED_TAG_DROP : 0), 0]} scale={[0.3 * aspect, 0.3, 1]}>
         <spriteMaterial map={tag} transparent depthWrite={false} />

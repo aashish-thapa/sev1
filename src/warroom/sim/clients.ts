@@ -127,7 +127,7 @@ export function policyMix(source: PolicySource, commerce: Commerce, t: number): 
 }
 
 /** Share of clients holding a value `fires` matches, while the latest change spreads over `window` seconds. */
-function firingShare<Value>(change: ConfigChange<Value>, t: number, window: number, fires: (value: Value) => boolean): number {
+export function firingShare<Value>(change: ConfigChange<Value>, t: number, window: number, fires: (value: Value) => boolean): number {
   const before = fires(change.from);
   const after = fires(change.to);
   if (before === after) return after ? 1 : 0;

@@ -1,0 +1,1123 @@
+[
+  {
+    "id": "ios-force-unwrap-eta-fractional-seconds",
+    "kind": "find-line",
+    "topic": "mobile",
+    "difficulty": 1,
+    "alert": {
+      "service": "ShopApp iOS",
+      "title": "Crashlytics: new fatal issue in OrderStatusViewModel.swift line 25",
+      "severity": "SEV2",
+      "firedAt": "18:57"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "Crash report (iOS 18.6, ShopApp 9.4.1)",
+        "lines": [
+          {
+            "ts": "18:41:07",
+            "level": "FATAL",
+            "text": "Exception Type:  EXC_BREAKPOINT (SIGTRAP)"
+          },
+          {
+            "ts": "18:41:07",
+            "level": "FATAL",
+            "text": "Termination Signal: Trace/BPT trap: 5"
+          },
+          {
+            "ts": "18:41:07",
+            "level": "FATAL",
+            "text": "Termination Reason: Namespace SIGNAL, Code 0x5"
+          },
+          {
+            "ts": "18:41:07",
+            "level": "INFO",
+            "text": "Thread 0 name:  Dispatch queue: com.apple.main-thread"
+          },
+          {
+            "ts": "18:41:07",
+            "level": "FATAL",
+            "text": "Thread 0 Crashed:"
+          },
+          {
+            "ts": "18:41:07",
+            "level": "FATAL",
+            "text": "0   ShopApp   0x0000000100f2c1a4 OrderStatusViewModel.init(order:now:) (in ShopApp) (OrderStatusViewModel.swift:25)"
+          },
+          {
+            "ts": "18:41:07",
+            "level": "FATAL",
+            "text": "1   ShopApp   0x0000000100f2b8e0 OrderTrackingViewController.render(_:) (in ShopApp) (OrderTrackingViewController.swift:88)"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Context",
+        "items": [
+          {
+            "key": "First crash",
+            "value": "18:41 — no app release today; 9.4.1 shipped last week"
+          },
+          {
+            "key": "orders-api deploy",
+            "value": "18:38, serializer upgrade"
+          },
+          {
+            "key": "estimated_delivery before",
+            "value": "\"2026-10-09T19:20:00Z\""
+          },
+          {
+            "key": "estimated_delivery now",
+            "value": "\"2026-10-09T19:20:00.000Z\""
+          },
+          {
+            "key": "Affected",
+            "value": "every user who opens Track Order"
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "label": "OrderStatusViewModel.swift",
+        "language": "swift",
+        "startLine": 12,
+        "lines": [
+          "struct OrderStatusViewModel {",
+          "    let title: String",
+          "    let etaText: String",
+          "    let isLate: Bool",
+          "",
+          "    private static let isoFormatter = ISO8601DateFormatter()",
+          "    private static let etaFormatter: DateFormatter = {",
+          "        let formatter = DateFormatter()",
+          "        formatter.timeStyle = .short",
+          "        return formatter",
+          "    }()",
+          "",
+          "    init(order: Order, now: Date = Date()) {",
+          "        let eta = Self.isoFormatter.date(from: order.estimatedDelivery)!",
+          "        title = order.status.localizedTitle",
+          "        etaText = Self.etaFormatter.string(from: eta)",
+          "        isLate = eta < now && order.status != .delivered",
+          "    }",
+          "}"
+        ]
+      }
+    ],
+    "question": "Tap the line that crashes the app.",
+    "answer": {
+      "evidence": 2,
+      "line": 13
+    },
+    "explanation": {
+      "cause": "A force-unwrapped date parse returns nil once the API adds fractional seconds",
+      "why": "ISO8601DateFormatter's default options (.withInternetDateTime) don't accept fractional seconds, so date(from:) returns nil for \"…19:20:00.000Z\". The ! turns that nil into a Swift runtime trap (EXC_BREAKPOINT on ARM) on every Track Order screen, with no app release involved.",
+      "tell": "Frame 0 points at OrderStatusViewModel.swift:25, the only force unwrap, and crashes began three minutes after orders-api started sending milliseconds."
+    },
+    "source": {
+      "title": "Apple Developer — Addressing crashes from Swift runtime errors",
+      "url": "https://developer.apple.com/documentation/xcode/addressing-crashes-from-swift-runtime-errors"
+    }
+  },
+  {
+    "id": "ios-ats-http-partner-banners",
+    "kind": "find-line",
+    "topic": "mobile",
+    "difficulty": 1,
+    "alert": {
+      "service": "RideApp iOS",
+      "title": "Sentry: ImageLoadError spike, NSURLErrorDomain -1022 (promo banners)",
+      "severity": "SEV3",
+      "firedAt": "11:20"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "Xcode console, QA device, RideApp 5.3.0",
+        "lines": [
+          {
+            "ts": "11:02:14.208",
+            "level": "INFO",
+            "source": "PromoCarousel",
+            "text": "Home: loading 6 partner banners"
+          },
+          {
+            "ts": "11:02:14.311",
+            "level": "INFO",
+            "source": "ImageLoader",
+            "text": "Loaded avatar https://static.rideapp.example/avatars/u_8812.jpg (200, 14 KB)"
+          },
+          {
+            "ts": "11:02:14.316",
+            "level": "ERROR",
+            "text": "App Transport Security has blocked a cleartext HTTP (http://) resource load since it is insecure. Temporary exceptions can be configured via your app's Info.plist file."
+          },
+          {
+            "ts": "11:02:14.317",
+            "level": "ERROR",
+            "source": "ImageLoader",
+            "text": "Banner load failed: Error Domain=NSURLErrorDomain Code=-1022 \"The resource could not be loaded because the App Transport Security policy requires the use of a secure connection.\""
+          },
+          {
+            "ts": "11:02:14.402",
+            "level": "INFO",
+            "source": "ImageLoader",
+            "text": "Loaded map tile https://tiles.rideapp.example/15/5241/12663.png (200, 38 KB)"
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "label": "PartnerImageURLBuilder.swift (added in 5.3.0)",
+        "language": "swift",
+        "startLine": 8,
+        "lines": [
+          "struct PartnerImageURLBuilder {",
+          "    private let host = \"img.partnercdn.example\"",
+          "",
+          "    func bannerURL(for promo: Promo, scale: CGFloat) -> URL? {",
+          "        var components = URLComponents()",
+          "        components.scheme = \"http\"",
+          "        components.host = host",
+          "        components.path = \"/banners/\\(promo.partnerID)/\\(promo.assetID).jpg\"",
+          "        components.queryItems = [",
+          "            URLQueryItem(name: \"w\", value: String(Int(promo.width * scale))),",
+          "            URLQueryItem(name: \"fmt\", value: \"jpg\")",
+          "        ]",
+          "        return components.url",
+          "    }",
+          "}"
+        ]
+      }
+    ],
+    "question": "Tap the line that makes every partner banner fail to load.",
+    "answer": {
+      "evidence": 1,
+      "line": 5
+    },
+    "explanation": {
+      "cause": "Partner banner URLs are built with http://, which ATS blocks by default",
+      "why": "App Transport Security rejects cleartext loads through URLSession unless Info.plist grants an exception. The new builder hard-codes the http scheme, so each banner request fails immediately with -1022 and never reaches the network, while the https avatars and map tiles on the same screen load fine.",
+      "tell": "The ATS console message and NSURLErrorDomain -1022 appear only on banner loads, and the one line that sets a scheme sets it to \"http\"."
+    },
+    "source": {
+      "title": "Apple Developer — Preventing Insecure Network Connections",
+      "url": "https://developer.apple.com/documentation/security/preventing-insecure-network-connections"
+    }
+  },
+  {
+    "id": "ios-label-update-off-main-thread",
+    "kind": "find-line",
+    "topic": "mobile",
+    "difficulty": 2,
+    "alert": {
+      "service": "ShopApp iOS",
+      "title": "Crashlytics: NSInternalInconsistencyException in 9.5.0 (Track Order)",
+      "severity": "SEV2",
+      "firedAt": "14:12"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "Crashlytics event, ShopApp 9.5.0",
+        "lines": [
+          {
+            "ts": "13:58:31",
+            "level": "FATAL",
+            "text": "Fatal Exception: NSInternalInconsistencyException"
+          },
+          {
+            "ts": "13:58:31",
+            "level": "FATAL",
+            "text": "Modifications to the layout engine must not be performed from a background thread after it has been accessed from the main thread."
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Triage notes",
+        "items": [
+          {
+            "key": "Crashing thread",
+            "value": "URLSession delegate queue, not com.apple.main-thread"
+          },
+          {
+            "key": "Debug repro",
+            "value": "Main Thread Checker: UI API called on a background thread: -[UILabel setText:]"
+          },
+          {
+            "key": "OrderAPIClient",
+            "value": "calls completion on the URLSession delegate queue"
+          },
+          {
+            "key": "9.5.0 change",
+            "value": "status refresh moved from Combine .receive(on:) to a callback"
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "label": "OrderTrackingViewController.swift",
+        "language": "swift",
+        "startLine": 31,
+        "lines": [
+          "final class OrderTrackingViewController: UIViewController {",
+          "    @IBOutlet private var statusLabel: UILabel!",
+          "    @IBOutlet private var retryBanner: UIView!",
+          "    private let client = OrderAPIClient.shared",
+          "    private var lastStatus: OrderStatus?",
+          "    var orderID: Order.ID?",
+          "",
+          "    func refreshStatus() {",
+          "        guard let orderID else { return }",
+          "        client.fetchStatus(orderID: orderID) { [weak self] result in",
+          "            guard let self else { return }",
+          "            switch result {",
+          "            case .success(let status):",
+          "                self.lastStatus = status",
+          "                Analytics.track(.orderStatusViewed(status.rawValue))",
+          "                self.statusLabel.text = status.localizedTitle",
+          "            case .failure(let error):",
+          "                Logger.orders.error(\"status refresh failed: \\(error.localizedDescription)\")",
+          "                DispatchQueue.main.async {",
+          "                    self.retryBanner.isHidden = false",
+          "                }",
+          "            }",
+          "        }",
+          "    }"
+        ]
+      }
+    ],
+    "question": "Tap the line that crashes the app.",
+    "answer": {
+      "evidence": 2,
+      "line": 15
+    },
+    "explanation": {
+      "cause": "The success branch sets a UILabel's text from the URLSession background queue",
+      "why": "UIKit is main-thread-only. Setting statusLabel.text invalidates Auto Layout, and touching the layout engine off the main thread after the main thread has used it raises NSInternalInconsistencyException. The failure branch hops to the main queue; the success branch was never wrapped when Combine's .receive(on:) went away.",
+      "tell": "Main Thread Checker names -[UILabel setText:], the crash is on the URLSession queue, and statusLabel.text is the only UI write in the callback outside DispatchQueue.main."
+    }
+  },
+  {
+    "id": "ios-watchdog-sync-flags-on-launch",
+    "kind": "diagnose",
+    "topic": "mobile",
+    "difficulty": 2,
+    "alert": {
+      "service": "ShopApp iOS",
+      "title": "Xcode Organizer: launch terminations up 9x in 9.6.0 vs 9.5.2",
+      "severity": "SEV2",
+      "firedAt": "09:30"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "Launch terminations per 1k cold launches",
+        "unit": "/1k",
+        "points": [
+          0.4,
+          0.5,
+          0.4,
+          0.4,
+          0.5,
+          0.4,
+          0.5,
+          0.4,
+          1.9,
+          3.1,
+          3.6,
+          3.8,
+          3.5,
+          3.9,
+          3.7,
+          3.8,
+          4.0,
+          3.6
+        ],
+        "markAt": 8
+      },
+      {
+        "type": "log",
+        "label": "Crash report, ShopApp 9.6.0 (iPhone 13, LTE)",
+        "lines": [
+          {
+            "ts": "08:12:44",
+            "level": "FATAL",
+            "text": "Exception Type:  EXC_CRASH (SIGKILL)"
+          },
+          {
+            "ts": "08:12:44",
+            "level": "FATAL",
+            "text": "Exception Codes: 0x0000000000000000, 0x0000000000000000"
+          },
+          {
+            "ts": "08:12:44",
+            "level": "FATAL",
+            "text": "Termination Reason: Namespace SPRINGBOARD, Code 0x8badf00d"
+          },
+          {
+            "ts": "08:12:44",
+            "level": "INFO",
+            "text": "scene-create watchdog transgression: application<com.shopapp.ios>:412"
+          },
+          {
+            "ts": "08:12:44",
+            "level": "INFO",
+            "text": "exhausted real (wall clock) time allowance of 19.97 seconds"
+          },
+          {
+            "ts": "08:12:44",
+            "level": "INFO",
+            "text": "\"Elapsed application CPU time (seconds): 0.288, 1% CPU\""
+          },
+          {
+            "ts": "08:12:44",
+            "level": "FATAL",
+            "text": "Thread 0 Crashed:"
+          },
+          {
+            "ts": "08:12:44",
+            "level": "INFO",
+            "text": "0   libsystem_kernel.dylib   0x00000001c22f8670 semaphore_wait_trap + 8"
+          },
+          {
+            "ts": "08:12:44",
+            "level": "INFO",
+            "text": "3   CFNetwork   0x00000001c57d9d34 CFURLConnectionSendSynchronousRequest + 388"
+          },
+          {
+            "ts": "08:12:44",
+            "level": "INFO",
+            "text": "7   libswiftFoundation.dylib   0x00000001f712738c String.init+ 680844 (contentsOf:) + 96"
+          },
+          {
+            "ts": "08:12:44",
+            "level": "INFO",
+            "text": "8   ShopApp   0x00000001009d31e0 RemoteFlags.loadBlocking() (in ShopApp) (RemoteFlags.swift:41)"
+          },
+          {
+            "ts": "08:12:44",
+            "level": "INFO",
+            "text": "9   ShopApp   0x00000001009c2a14 AppDelegate.application(_:didFinishLaunchingWithOptions:) (in ShopApp) (AppDelegate.swift:27)"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Breakdown",
+        "items": [
+          {
+            "key": "Network at termination",
+            "value": "86% cellular, 14% Wi-Fi"
+          },
+          {
+            "key": "Memory footprint",
+            "value": "142 MB at termination, no jetsam reports"
+          },
+          {
+            "key": "9.6.0 change",
+            "value": "remote flags read before first frame to avoid UI flicker"
+          }
+        ]
+      }
+    ],
+    "question": "Why is 9.6.0 getting killed at launch?",
+    "options": [
+      "Jetsam killed the app for exceeding its launch memory limit",
+      "Main thread deadlocked on a DispatchQueue.main.sync call",
+      "A sync flag fetch on the main thread outlasted the watchdog",
+      "An expired background task assertion terminated the app"
+    ],
+    "answer": 2,
+    "explanation": {
+      "cause": "9.6.0 fetches remote flags synchronously on the main thread during launch",
+      "why": "String(contentsOf:) with a remote URL makes a blocking NSURLConnection request. On slow cellular it can outlast the roughly 20-second scene-create allowance, so the watchdog kills the app with 0x8badf00d. The main thread is waiting on a semaphore, not computing, hence 1% app CPU.",
+      "tell": "0x8badf00d with a scene-create transgression, CFURLConnectionSendSynchronousRequest under RemoteFlags.loadBlocking on thread 0, 1% CPU, and a skew to cellular."
+    },
+    "source": {
+      "title": "Apple Developer — Addressing watchdog terminations",
+      "url": "https://developer.apple.com/documentation/xcode/addressing-watchdog-terminations"
+    }
+  },
+  {
+    "id": "ios-keychain-locked-background-refresh",
+    "kind": "diagnose",
+    "topic": "mobile",
+    "difficulty": 3,
+    "alert": {
+      "service": "FitApp iOS",
+      "title": "Support spike: \"logged out every morning\" since FitApp 3.8.0",
+      "severity": "SEV2",
+      "firedAt": "09:05"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "Forced sign-outs per day",
+        "unit": "k",
+        "points": [
+          0.3,
+          0.3,
+          0.2,
+          0.3,
+          0.3,
+          0.2,
+          0.3,
+          2.4,
+          6.8,
+          9.1,
+          9.6,
+          9.4,
+          9.8,
+          9.5
+        ],
+        "markAt": 7
+      },
+      {
+        "type": "log",
+        "label": "Device log from a user report (3.8.0)",
+        "lines": [
+          {
+            "ts": "22:47:10",
+            "level": "INFO",
+            "source": "SessionManager",
+            "text": "Signed in, session saved to keychain"
+          },
+          {
+            "ts": "23:15:02",
+            "level": "INFO",
+            "source": "AppLifecycle",
+            "text": "App entered background"
+          },
+          {
+            "ts": "03:12:08",
+            "level": "INFO",
+            "source": "SyncScheduler",
+            "text": "BGAppRefreshTask com.fitapp.sync started"
+          },
+          {
+            "ts": "03:12:08",
+            "level": "ERROR",
+            "source": "KeychainStore",
+            "text": "SecItemCopyMatching failed: OSStatus -25308"
+          },
+          {
+            "ts": "03:12:08",
+            "level": "WARN",
+            "source": "SessionManager",
+            "text": "No access token available, signing out"
+          },
+          {
+            "ts": "03:12:09",
+            "level": "INFO",
+            "source": "SessionManager",
+            "text": "Cleared session and cached workouts"
+          },
+          {
+            "ts": "07:41:22",
+            "level": "INFO",
+            "source": "AppLifecycle",
+            "text": "App launched (foreground), no session, showing login"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "3.8.0 changes and scope",
+        "items": [
+          {
+            "key": "Token storage",
+            "value": "moved from a 3rd-party wrapper to in-house KeychainStore"
+          },
+          {
+            "key": "KeychainStore SecItemAdd",
+            "value": "kSecClass, kSecAttrService, kSecAttrAccount, kSecValueData"
+          },
+          {
+            "key": "Old wrapper's default",
+            "value": "kSecAttrAccessibleAfterFirstUnlock"
+          },
+          {
+            "key": "Background App Refresh off",
+            "value": "no forced sign-outs"
+          },
+          {
+            "key": "Auth server",
+            "value": "no revocations; refresh tokens valid 90 days"
+          }
+        ]
+      }
+    ],
+    "question": "Why are 3.8.0 users being signed out overnight?",
+    "options": [
+      "Backend revoked sessions when refresh tokens expired overnight",
+      "New keychain access group, so reads return errSecItemNotFound",
+      "Data Protection locks the UserDefaults plist until first unlock",
+      "Token is now WhenUnlocked; locked-phone refresh can't read it"
+    ],
+    "answer": 3,
+    "explanation": {
+      "cause": "Tokens saved with default WhenUnlocked accessibility are unreadable while locked",
+      "why": "With no kSecAttrAccessible, a keychain item defaults to kSecAttrAccessibleWhenUnlocked. Background refresh runs at night on a locked device, so SecItemCopyMatching fails with errSecInteractionNotAllowed (-25308), and SessionManager treats any read failure as \"no token\" and signs the user out.",
+      "tell": "-25308 (interaction not allowed, not -25300 item not found) only inside the 03:12 background refresh, a SecItemAdd with no accessibility attribute, and no sign-outs when Background App Refresh is off."
+    },
+    "source": {
+      "title": "Apple Developer — kSecAttrAccessibleWhenUnlocked",
+      "url": "https://developer.apple.com/documentation/security/ksecattraccessiblewhenunlocked"
+    }
+  },
+  {
+    "id": "android-network-on-main-token-refresh",
+    "kind": "find-line",
+    "topic": "mobile",
+    "difficulty": 1,
+    "alert": {
+      "service": "RideApp Android",
+      "title": "Crashlytics: NetworkOnMainThreadException, new in 7.2.0",
+      "severity": "SEV2",
+      "firedAt": "10:44"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "logcat, AndroidRuntime (Android 14, trimmed)",
+        "lines": [
+          {
+            "ts": "10:31:52.114",
+            "level": "FATAL",
+            "source": "AndroidRuntime",
+            "text": "FATAL EXCEPTION: main"
+          },
+          {
+            "ts": "10:31:52.114",
+            "level": "FATAL",
+            "source": "AndroidRuntime",
+            "text": "Process: com.rideapp, PID: 21877"
+          },
+          {
+            "ts": "10:31:52.114",
+            "level": "FATAL",
+            "source": "AndroidRuntime",
+            "text": "android.os.NetworkOnMainThreadException"
+          },
+          {
+            "ts": "10:31:52.114",
+            "level": "FATAL",
+            "source": "AndroidRuntime",
+            "text": "at android.os.StrictMode$AndroidBlockGuardPolicy.onNetwork(StrictMode.java:1675)"
+          },
+          {
+            "ts": "10:31:52.114",
+            "level": "FATAL",
+            "source": "AndroidRuntime",
+            "text": "at libcore.io.BlockGuardOs.android_getaddrinfo(BlockGuardOs.java:220)"
+          },
+          {
+            "ts": "10:31:52.114",
+            "level": "FATAL",
+            "source": "AndroidRuntime",
+            "text": "at libcore.io.ForwardingOs.android_getaddrinfo(ForwardingOs.java:133)"
+          },
+          {
+            "ts": "10:31:52.114",
+            "level": "FATAL",
+            "source": "AndroidRuntime",
+            "text": "at java.net.Inet6AddressImpl.lookupHostByName(Inet6AddressImpl.java:135)"
+          },
+          {
+            "ts": "10:31:52.114",
+            "level": "FATAL",
+            "source": "AndroidRuntime",
+            "text": "at java.net.Inet6AddressImpl.lookupAllHostAddr(Inet6AddressImpl.java:103)"
+          },
+          {
+            "ts": "10:31:52.114",
+            "level": "FATAL",
+            "source": "AndroidRuntime",
+            "text": "at java.net.InetAddress.getAllByName(InetAddress.java:1152)"
+          },
+          {
+            "ts": "10:31:52.114",
+            "level": "FATAL",
+            "source": "AndroidRuntime",
+            "text": "at okhttp3.Dns$Companion$DnsSystem.lookup(Dns.kt:49)"
+          },
+          {
+            "ts": "10:31:52.114",
+            "level": "FATAL",
+            "source": "AndroidRuntime",
+            "text": "at okhttp3.internal.connection.RealCall.execute(RealCall.kt:154)"
+          },
+          {
+            "ts": "10:31:52.114",
+            "level": "FATAL",
+            "source": "AndroidRuntime",
+            "text": "at com.rideapp.session.SessionStore.refreshIfExpired(SessionStore.kt:58)"
+          },
+          {
+            "ts": "10:31:52.114",
+            "level": "FATAL",
+            "source": "AndroidRuntime",
+            "text": "at com.rideapp.ui.home.HomeActivity.onResume(HomeActivity.kt:73)"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Triage notes",
+        "items": [
+          {
+            "key": "Repro",
+            "value": "reopen the app after the access token expires (60 min idle)"
+          },
+          {
+            "key": "7.2.0 change",
+            "value": "token refresh moved from an OkHttp Authenticator into SessionStore"
+          },
+          {
+            "key": "QA pass",
+            "value": "green; test sessions never sat idle long enough to expire"
+          }
+        ]
+      }
+    ],
+    "question": "Tap the frame where the app makes the blocking network call.",
+    "answer": {
+      "evidence": 0,
+      "line": 11
+    },
+    "explanation": {
+      "cause": "SessionStore refreshes the token with a synchronous OkHttp execute() on the main thread",
+      "why": "For apps targeting Honeycomb or later, network I/O on the main thread always throws NetworkOnMainThreadException; it isn't just a debug StrictMode warning. HomeActivity.onResume runs on main, refreshIfExpired calls Call.execute(), and the first DNS lookup throws. Only expired tokens take that path, so QA missed it.",
+      "tell": "The first app frame under RealCall.execute is SessionStore.refreshIfExpired; everything above it is OkHttp's DNS lookup and StrictMode's guard."
+    }
+  },
+  {
+    "id": "android-transaction-too-large-saved-results",
+    "kind": "find-line",
+    "topic": "mobile",
+    "difficulty": 2,
+    "alert": {
+      "service": "ShopApp Android",
+      "title": "Crashlytics: TransactionTooLargeException on app background, 6.4.0",
+      "severity": "SEV2",
+      "firedAt": "16:20"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "Crashlytics stack trace (Android 15)",
+        "lines": [
+          {
+            "ts": "16:03:41",
+            "level": "FATAL",
+            "text": "java.lang.RuntimeException: android.os.TransactionTooLargeException: data parcel size 1183412 bytes"
+          },
+          {
+            "ts": "16:03:41",
+            "level": "FATAL",
+            "text": "Bundle stats:"
+          },
+          {
+            "ts": "16:03:41",
+            "level": "FATAL",
+            "text": "  android:viewHierarchyState [size=5236]"
+          },
+          {
+            "ts": "16:03:41",
+            "level": "FATAL",
+            "text": "  search_results [size=1176844]"
+          },
+          {
+            "ts": "16:03:41",
+            "level": "FATAL",
+            "text": "PersistableBundle stats:"
+          },
+          {
+            "ts": "16:03:41",
+            "level": "FATAL",
+            "text": "  [null]"
+          },
+          {
+            "ts": "16:03:41",
+            "level": "FATAL",
+            "text": "at android.app.servertransaction.PendingTransactionActions$StopInfo.run(PendingTransactionActions.java:146)"
+          },
+          {
+            "ts": "16:03:41",
+            "level": "FATAL",
+            "text": "Caused by: android.os.TransactionTooLargeException: data parcel size 1183412 bytes"
+          },
+          {
+            "ts": "16:03:41",
+            "level": "FATAL",
+            "text": "at android.os.BinderProxy.transactNative(Native Method)"
+          },
+          {
+            "ts": "16:03:41",
+            "level": "FATAL",
+            "text": "at android.os.BinderProxy.transact(BinderProxy.java:592)"
+          },
+          {
+            "ts": "16:03:41",
+            "level": "FATAL",
+            "text": "at android.app.ActivityClient.activityStopped(ActivityClient.java:100)"
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "label": "SearchActivity.kt",
+        "language": "kotlin",
+        "startLine": 64,
+        "lines": [
+          "override fun onSaveInstanceState(outState: Bundle) {",
+          "    super.onSaveInstanceState(outState)",
+          "    outState.putString(KEY_QUERY, binding.searchInput.text.toString())",
+          "    outState.putStringArrayList(KEY_FILTERS, ArrayList(viewModel.selectedFilters))",
+          "    outState.putParcelableArrayList(KEY_RESULTS, ArrayList(adapter.currentList))",
+          "    outState.putInt(KEY_SCROLL, layoutManager.findFirstVisibleItemPosition())",
+          "}",
+          "",
+          "override fun onRestoreInstanceState(savedInstanceState: Bundle) {",
+          "    super.onRestoreInstanceState(savedInstanceState)",
+          "    viewModel.restore(",
+          "        query = savedInstanceState.getString(KEY_QUERY).orEmpty(),",
+          "        filters = savedInstanceState.getStringArrayList(KEY_FILTERS).orEmpty(),",
+          "    )",
+          "}",
+          "",
+          "companion object {",
+          "    private const val KEY_QUERY = \"search_query\"",
+          "    private const val KEY_FILTERS = \"search_filters\"",
+          "    private const val KEY_RESULTS = \"search_results\"",
+          "    private const val KEY_SCROLL = \"search_scroll\"",
+          "}"
+        ]
+      }
+    ],
+    "question": "Tap the line that crashes the app when the user presses Home.",
+    "answer": {
+      "evidence": 1,
+      "line": 4
+    },
+    "explanation": {
+      "cause": "SearchActivity puts the entire paged result list into its instance-state Bundle",
+      "why": "When an activity stops, its saved state is sent to system_server over Binder, whose transaction buffer is about 1 MB per process. A few hundred Parcelable products exceed it. Apps targeting API 24+ get a crash instead of silently dropped state, so pressing Home after a long scroll kills the app.",
+      "tell": "Bundle stats put 1.17 MB under search_results, the key written by the putParcelableArrayList line; the query, filters and scroll position are a few bytes each."
+    }
+  },
+  {
+    "id": "android-fragment-commit-after-state-saved",
+    "kind": "diagnose",
+    "topic": "mobile",
+    "difficulty": 2,
+    "alert": {
+      "service": "GroceryApp Android",
+      "title": "Crashlytics: IllegalStateException in CheckoutActivity, 5.9.0",
+      "severity": "SEV2",
+      "firedAt": "19:08"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "Crashlytics stack trace",
+        "lines": [
+          {
+            "ts": "18:52:16",
+            "level": "FATAL",
+            "text": "Fatal Exception: java.lang.IllegalStateException: Can not perform this action after onSaveInstanceState"
+          },
+          {
+            "ts": "18:52:16",
+            "level": "FATAL",
+            "text": "at androidx.fragment.app.FragmentManager.checkStateLoss(FragmentManager.java:1632)"
+          },
+          {
+            "ts": "18:52:16",
+            "level": "FATAL",
+            "text": "at androidx.fragment.app.FragmentManager.enqueueAction(FragmentManager.java:1672)"
+          },
+          {
+            "ts": "18:52:16",
+            "level": "FATAL",
+            "text": "at androidx.fragment.app.BackStackRecord.commitInternal(BackStackRecord.java:341)"
+          },
+          {
+            "ts": "18:52:16",
+            "level": "FATAL",
+            "text": "at androidx.fragment.app.BackStackRecord.commit(BackStackRecord.java:306)"
+          },
+          {
+            "ts": "18:52:16",
+            "level": "FATAL",
+            "text": "at com.groceryapp.checkout.CheckoutActivity.showConfirmation(CheckoutActivity.kt:118)"
+          },
+          {
+            "ts": "18:52:16",
+            "level": "FATAL",
+            "text": "at com.groceryapp.checkout.CheckoutActivity$onPayClicked$1.invokeSuspend(CheckoutActivity.kt:97)"
+          },
+          {
+            "ts": "18:52:16",
+            "level": "FATAL",
+            "text": "at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:33)"
+          },
+          {
+            "ts": "18:52:16",
+            "level": "FATAL",
+            "text": "at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:106)"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Crashlytics breadcrumbs and scope",
+        "items": [
+          {
+            "key": "Breadcrumbs",
+            "value": "pay_tapped → 3ds_redirect → app_backgrounded → payment_ok"
+          },
+          {
+            "key": "5.9.0 change",
+            "value": "3-D Secure moved from an in-app WebView to the bank's app"
+          },
+          {
+            "key": "Affected checkouts",
+            "value": "only those that needed 3-D Secure"
+          },
+          {
+            "key": "Rotation / dark mode toggles",
+            "value": "none in crashing sessions"
+          },
+          {
+            "key": "androidx.fragment",
+            "value": "1.6.2"
+          }
+        ]
+      }
+    ],
+    "question": "Why does checkout crash after the payment succeeds?",
+    "options": [
+      "Fragment commit runs after state is saved, user is in bank app",
+      "Process death wiped the ViewModel holding the payment result",
+      "ConfirmationFragment has no no-arg constructor; restore fails",
+      "Config change destroyed the FragmentManager before commit"
+    ],
+    "answer": 0,
+    "explanation": {
+      "cause": "The payment result commits a fragment transaction while the activity is stopped",
+      "why": "Since 5.9.0, 3-D Secure opens the bank's app, so CheckoutActivity stops and saves its state. The lifecycleScope coroutine keeps running and calls commit() when the result arrives; FragmentManager rejects any transaction after onSaveInstanceState because it would be lost if the process died.",
+      "tell": "checkStateLoss in the trace and app_backgrounded between 3ds_redirect and payment_ok. A destroyed FragmentManager or a missing constructor throws different messages."
+    }
+  },
+  {
+    "id": "android-r8-full-mode-gson-typetoken",
+    "kind": "diagnose",
+    "topic": "mobile",
+    "difficulty": 3,
+    "alert": {
+      "service": "NewsApp Android",
+      "title": "Play Console vitals: user-perceived crash rate 9.8% on 12.0.0 (5%)",
+      "severity": "SEV1",
+      "firedAt": "12:15"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "Crash-free users, 12.0.0 staged rollout",
+        "unit": "%",
+        "points": [
+          99.7,
+          99.8,
+          99.7,
+          99.7,
+          99.8,
+          99.7,
+          93.1,
+          90.6,
+          90.2,
+          90.4,
+          90.1,
+          90.3
+        ],
+        "markAt": 6
+      },
+      {
+        "type": "log",
+        "label": "Crashlytics, deobfuscated (release build)",
+        "lines": [
+          {
+            "ts": "11:48:03",
+            "level": "FATAL",
+            "text": "java.lang.IllegalStateException: TypeToken must be created with a type argument: new TypeToken<...>() {}; When using code shrinkers (ProGuard, R8, ...) make sure that generic signatures are preserved."
+          },
+          {
+            "ts": "11:48:03",
+            "level": "FATAL",
+            "text": "at com.google.gson.reflect.TypeToken.getTypeTokenTypeArgument(TypeToken.java:100)"
+          },
+          {
+            "ts": "11:48:03",
+            "level": "FATAL",
+            "text": "at com.google.gson.reflect.TypeToken.<init>(TypeToken.java:70)"
+          },
+          {
+            "ts": "11:48:03",
+            "level": "FATAL",
+            "text": "at com.newsapp.feed.FeedCache$readSaved$type$1.<init>(FeedCache.kt:44)"
+          },
+          {
+            "ts": "11:48:03",
+            "level": "FATAL",
+            "text": "at com.newsapp.feed.FeedCache.readSaved(FeedCache.kt:44)"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "12.0.0 build changes",
+        "items": [
+          {
+            "key": "Android Gradle Plugin",
+            "value": "7.4.2 → 8.1.4"
+          },
+          {
+            "key": "gradle.properties",
+            "value": "android.enableR8.fullMode not set"
+          },
+          {
+            "key": "proguard-rules.pro",
+            "value": "unchanged: -keep class com.newsapp.model.** { *; }"
+          },
+          {
+            "key": "FeedCache.kt:44",
+            "value": "unchanged since 10.3: object : TypeToken<List<Article>>() {}.type"
+          },
+          {
+            "key": "Debug / QA builds",
+            "value": "no crash (isMinifyEnabled = false)"
+          },
+          {
+            "key": "Gson",
+            "value": "2.10.1 (unchanged)"
+          }
+        ]
+      }
+    ],
+    "question": "Why does 12.0.0 crash only in release builds?",
+    "options": [
+      "FeedCache builds a raw TypeToken after the Kotlin 1.9 migration",
+      "AGP 8 made R8 full mode default, stripping TypeToken signature",
+      "R8 renamed Article's fields, so cached JSON no longer maps",
+      "Gson can't build Kotlin data classes without no-arg constructor"
+    ],
+    "answer": 1,
+    "explanation": {
+      "cause": "AGP 8 turned on R8 full mode, which strips the anonymous TypeToken's generic signature",
+      "why": "Gson reads List<Article> from the Signature attribute of the anonymous TypeToken subclass. AGP 8.0 defaults android.enableR8.fullMode to true, and full mode keeps attributes only on classes matched by keep rules. The model rule doesn't cover FeedCache$readSaved$type$1, so it looks raw.",
+      "tell": "Release-only crash that started with the AGP 7.4 → 8.1 bump, unchanged source and keep rules, and Gson's own message pointing at code shrinkers and generic signatures."
+    },
+    "source": {
+      "title": "Android Gradle plugin 8.0.0 release notes — build option default changes",
+      "url": "https://developer.android.com/build/releases/past-releases/agp-8-0-0-release-notes"
+    }
+  },
+  {
+    "id": "android-14-fgs-missing-service-type",
+    "kind": "diagnose",
+    "topic": "mobile",
+    "difficulty": 3,
+    "alert": {
+      "service": "RideApp Android",
+      "title": "Play Console vitals: crash rate 4.1% on 8.0.0, Android 14+ only",
+      "severity": "SEV1",
+      "firedAt": "08:40"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "Crash-free users, Android 14 and 15",
+        "unit": "%",
+        "points": [
+          99.6,
+          99.7,
+          99.6,
+          99.6,
+          99.7,
+          99.6,
+          99.6,
+          97.2,
+          95.8,
+          95.9,
+          95.7,
+          95.9,
+          95.8
+        ],
+        "markAt": 7
+      },
+      {
+        "type": "log",
+        "label": "Crashlytics, top of stack (Android 14)",
+        "lines": [
+          {
+            "ts": "08:21:37",
+            "level": "FATAL",
+            "text": "Fatal Exception: android.app.MissingForegroundServiceTypeException: Starting FGS without a type  callerApp=ProcessRecord{82af9ba 26943:com.rideapp/u0a532} targetSDK=34"
+          },
+          {
+            "ts": "08:21:37",
+            "level": "INFO",
+            "text": "Top app frame: com.rideapp.trip.TripTrackingService.onStartCommand(TripTrackingService.kt:52)"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "8.0.0 release",
+        "items": [
+          {
+            "key": "targetSdkVersion",
+            "value": "33 → 34"
+          },
+          {
+            "key": "Manifest service",
+            "value": "<service android:name=\".trip.TripTrackingService\" android:exported=\"false\" />"
+          },
+          {
+            "key": "Manifest permissions",
+            "value": "FOREGROUND_SERVICE, ACCESS_FINE_LOCATION, POST_NOTIFICATIONS"
+          },
+          {
+            "key": "Android 13 and below",
+            "value": "0 crashes on 8.0.0"
+          },
+          {
+            "key": "When",
+            "value": "driver taps Start trip with the app in the foreground"
+          }
+        ]
+      }
+    ],
+    "question": "Why does starting a trip crash on Android 14+?",
+    "options": [
+      "Android 14 blocks starting foreground services from background",
+      "Missing FOREGROUND_SERVICE_LOCATION permission for trip FGS",
+      "Android 14 requires POST_NOTIFICATIONS for foreground services",
+      "targetSdk 34 needs a foregroundServiceType on the trip service"
+    ],
+    "answer": 3,
+    "explanation": {
+      "cause": "Targeting API 34 requires every foreground service to declare a foregroundServiceType",
+      "why": "Apps targeting Android 14 must declare android:foregroundServiceType for each foreground service. TripTrackingService declares none, so startForeground() throws MissingForegroundServiceTypeException on Android 14+ only. The fix is foregroundServiceType=\"location\" plus the FOREGROUND_SERVICE_LOCATION permission.",
+      "tell": "\"Starting FGS without a type\" with targetSDK=34, crashes only on 14+, and a service element with no type. A missing type permission would be a SecurityException."
+    },
+    "source": {
+      "title": "Android Developers — Foreground service types are required (Android 14)",
+      "url": "https://developer.android.com/about/versions/14/changes/fgs-types-required"
+    }
+  }
+]

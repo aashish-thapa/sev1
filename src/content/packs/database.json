@@ -1,0 +1,1122 @@
+[
+  {
+    "id": "db-too-many-clients-after-scale-out",
+    "kind": "diagnose",
+    "topic": "database",
+    "difficulty": 1,
+    "alert": {
+      "service": "checkout-api",
+      "title": "checkout-api: 5xx rate > 8% on POST /checkout",
+      "severity": "SEV1",
+      "firedAt": "19:04"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "checkout-api replicas",
+        "unit": "pods",
+        "points": [
+          12,
+          12,
+          12,
+          13,
+          12,
+          14,
+          16,
+          18,
+          22,
+          25,
+          27,
+          30,
+          34,
+          38,
+          40,
+          40,
+          40,
+          40
+        ],
+        "markAt": 9
+      },
+      {
+        "type": "log",
+        "label": "checkout-api + orders-db",
+        "lines": [
+          {
+            "ts": "19:03:41.207",
+            "level": "INFO",
+            "source": "hpa/checkout-api",
+            "text": "SuccessfulRescale New size: 27; reason: cpu resource utilization (percentage of request) above target"
+          },
+          {
+            "ts": "19:03:52.881",
+            "level": "ERROR",
+            "source": "checkout-api",
+            "text": "failed to connect to `user=checkout database=orders`: 10.40.3.12:5432 (orders-db.internal): server error: FATAL: sorry, too many clients already (SQLSTATE 53300)"
+          },
+          {
+            "ts": "19:03:52.884",
+            "level": "FATAL",
+            "source": "postgres",
+            "text": "[61803] FATAL:  sorry, too many clients already"
+          },
+          {
+            "ts": "19:03:53.117",
+            "level": "WARN",
+            "source": "checkout-api",
+            "text": "POST /checkout status=503 dur=1843ms"
+          },
+          {
+            "ts": "19:03:54.006",
+            "level": "FATAL",
+            "source": "postgres",
+            "text": "[61822] FATAL:  remaining connection slots are reserved for roles with the SUPERUSER attribute"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "orders-db at 19:04",
+        "items": [
+          {
+            "key": "max_connections",
+            "value": "500 (3 reserved for superuser)"
+          },
+          {
+            "key": "checkout-api pool",
+            "value": "pgxpool max_conns=20 per pod, direct to Postgres"
+          },
+          {
+            "key": "DB CPU",
+            "value": "31% (unchanged since 18:30)"
+          },
+          {
+            "key": "Last deploy",
+            "value": "checkout-api v2.41, 3 days ago"
+          }
+        ]
+      }
+    ],
+    "question": "Why are checkouts failing?",
+    "options": [
+      "Postgres CPU saturated by sale traffic, refusing new work",
+      "Connection leak in checkout-api holding sessions open",
+      "New pods × per-pod pool size now exceed max_connections",
+      "Slow queries holding connections longer under load"
+    ],
+    "answer": 2,
+    "explanation": {
+      "cause": "Autoscaling to 40 pods × 20 conns asks for 800 sessions; Postgres allows 500.",
+      "why": "Every pod opens its own pool straight to Postgres. Past ~25 pods the fleet can request more backends than max_connections, so new connections are refused with SQLSTATE 53300. The database isn’t busy — it’s out of slots. Fix with a pooler (PgBouncer) or cap pool size × maxReplicas.",
+      "tell": "Errors start as replicas pass 25 — and 25 × 20 = 500 — while DB CPU sits flat at 31% and nothing has shipped in 3 days."
+    }
+  },
+  {
+    "id": "db-pool-leak-on-error-path",
+    "kind": "diagnose",
+    "topic": "database",
+    "difficulty": 2,
+    "alert": {
+      "service": "ledger",
+      "title": "ledger: p99 latency > 30s on POST /entries",
+      "severity": "SEV2",
+      "firedAt": "10:17"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "hikaricp_connections_active (ledger-0)",
+        "unit": "conn",
+        "points": [
+          3,
+          4,
+          3,
+          5,
+          6,
+          6,
+          8,
+          9,
+          9,
+          11,
+          12,
+          12,
+          14,
+          15,
+          15,
+          17,
+          18,
+          18,
+          19,
+          20,
+          20,
+          20,
+          20,
+          20
+        ],
+        "markAt": 19
+      },
+      {
+        "type": "log",
+        "label": "ledger",
+        "lines": [
+          {
+            "ts": "10:15:44.902",
+            "level": "WARN",
+            "source": "ledger",
+            "text": "fx-rates GET /v2/rates?base=EUR failed: 503 Service Unavailable (attempt 3/3)"
+          },
+          {
+            "ts": "10:16:31.118",
+            "level": "INFO",
+            "source": "ledger",
+            "text": "POST /entries 201 dur=41ms"
+          },
+          {
+            "ts": "10:16:58.204",
+            "level": "ERROR",
+            "source": "ledger",
+            "text": "java.sql.SQLTransientConnectionException: HikariPool-1 - Connection is not available, request timed out after 30001ms (total=20, active=20, idle=0, waiting=41)"
+          },
+          {
+            "ts": "10:17:02.733",
+            "level": "WARN",
+            "source": "ledger",
+            "text": "fx-rates GET /v2/rates?base=GBP failed: 503 Service Unavailable (attempt 3/3)"
+          },
+          {
+            "ts": "10:17:03.019",
+            "level": "ERROR",
+            "source": "ledger",
+            "text": "java.sql.SQLTransientConnectionException: HikariPool-1 - Connection is not available, request timed out after 30000ms (total=20, active=20, idle=0, waiting=44)"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "At 10:15",
+        "items": [
+          {
+            "key": "Postgres CPU",
+            "value": "7% (normal daytime: 20–40%)"
+          },
+          {
+            "key": "pg_stat_activity (ledger-0)",
+            "value": "20 sessions, state=idle, last state_change 40–190 min ago"
+          },
+          {
+            "key": "ledger request rate",
+            "value": "~140/s, flat since 07:00"
+          },
+          {
+            "key": "Last deploy",
+            "value": "ledger v3.18 at 06:52 — retry wrapper for fx-rates client"
+          }
+        ]
+      }
+    ],
+    "question": "What is starving ledger of connections?",
+    "options": [
+      "Slow queries holding connections; the DB can’t keep up",
+      "Connections leaked on an error path that never closes them",
+      "maximumPoolSize too small for current request volume",
+      "Open transactions holding row locks and blocking others"
+    ],
+    "answer": 1,
+    "explanation": {
+      "cause": "A failure path added in v3.18 checks out a connection and never returns it.",
+      "why": "When the fx-rates call fails after a connection is borrowed, the new retry wrapper throws before close() runs. Each failure strands one connection; Hikari never reclaims it, so active creeps up in steps until all 20 are pinned and every request waits 30s for a slot.",
+      "tell": "Active climbs stepwise at flat traffic and never falls, while Postgres sees those 20 sessions as plain idle for hours — a full pool in front of an idle database."
+    }
+  },
+  {
+    "id": "db-alter-table-lock-queue",
+    "kind": "diagnose",
+    "topic": "database",
+    "difficulty": 2,
+    "alert": {
+      "service": "orders-api",
+      "title": "orders-api: p99 > 10s and error rate 34%",
+      "severity": "SEV1",
+      "firedAt": "14:06"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "orders-db (log_lock_waits = on)",
+        "lines": [
+          {
+            "ts": "14:05:31.204",
+            "level": "INFO",
+            "source": "postgres",
+            "text": "[3054] LOG:  process 3054 still waiting for AccessExclusiveLock on relation 16502 of database 16384 after 1000.118 ms"
+          },
+          {
+            "ts": "14:05:31.204",
+            "level": "INFO",
+            "source": "postgres",
+            "text": "[3054] DETAIL:  Process holding the lock: 2988. Wait queue: 3054."
+          },
+          {
+            "ts": "14:05:31.204",
+            "level": "INFO",
+            "source": "postgres",
+            "text": "[3054] STATEMENT:  ALTER TABLE orders ADD COLUMN gift_note text"
+          },
+          {
+            "ts": "14:05:32.877",
+            "level": "INFO",
+            "source": "postgres",
+            "text": "[3121] LOG:  process 3121 still waiting for AccessShareLock on relation 16502 of database 16384 after 1000.093 ms"
+          },
+          {
+            "ts": "14:05:32.877",
+            "level": "INFO",
+            "source": "postgres",
+            "text": "[3121] DETAIL:  Process holding the lock: 2988. Wait queue: 3054, 3121."
+          },
+          {
+            "ts": "14:05:33.410",
+            "level": "INFO",
+            "source": "postgres",
+            "text": "[3127] LOG:  process 3127 still waiting for RowExclusiveLock on relation 16502 of database 16384 after 1000.071 ms"
+          },
+          {
+            "ts": "14:05:33.410",
+            "level": "INFO",
+            "source": "postgres",
+            "text": "[3127] DETAIL:  Process holding the lock: 2988. Wait queue: 3054, 3121, 3127."
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "pg_stat_activity, pid 2988",
+        "items": [
+          {
+            "key": "application_name",
+            "value": "bi-reports"
+          },
+          {
+            "key": "backend_type",
+            "value": "client backend"
+          },
+          {
+            "key": "state",
+            "value": "active"
+          },
+          {
+            "key": "query_start",
+            "value": "13:18:04 (47 min ago)"
+          },
+          {
+            "key": "query",
+            "value": "SELECT date_trunc('day', o.created_at), count(*) FROM orders o JOIN …"
+          }
+        ]
+      },
+      {
+        "type": "metric",
+        "label": "orders-db CPU",
+        "unit": "%",
+        "points": [
+          24,
+          26,
+          23,
+          25,
+          27,
+          24,
+          26,
+          25,
+          23,
+          25,
+          14,
+          9,
+          8,
+          9,
+          7,
+          8,
+          8,
+          9
+        ],
+        "markAt": 10
+      }
+    ],
+    "question": "Why is all traffic to orders stuck?",
+    "options": [
+      "ADD COLUMN is rewriting the whole orders table on disk",
+      "Row-lock contention from the evening checkout write burst",
+      "Autovacuum on orders is holding a conflicting table lock",
+      "ALTER waits on a long query; everything queues behind it"
+    ],
+    "answer": 3,
+    "explanation": {
+      "cause": "ALTER TABLE queued behind a 47-min report query; all traffic queued behind it.",
+      "why": "ALTER TABLE needs ACCESS EXCLUSIVE, so it waits for pid 2988’s ACCESS SHARE lock. Postgres queues every later lock request on orders behind the pending ALTER — even plain SELECTs. Run DDL with a short lock_timeout so it fails fast and retries instead of freezing the table.",
+      "tell": "The ALTER is waiting, not running, and every waiter names the same holder — 2988, a 47-min BI report query — with the ALTER first in the queue. CPU drops: nothing can run."
+    },
+    "source": {
+      "title": "GoCardless: Zero-downtime Postgres migrations — the hard parts",
+      "url": "https://gocardless.com/blog/zero-downtime-postgres-migrations-the-hard-parts/"
+    }
+  },
+  {
+    "id": "db-replica-replay-blocked-by-report",
+    "kind": "find-line",
+    "topic": "database",
+    "difficulty": 2,
+    "alert": {
+      "service": "orders-api",
+      "title": "orders-api: GET /orders/{id} 404 rate > 5%",
+      "severity": "SEV2",
+      "firedAt": "09:42"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "orders-db-replica-1 replay lag",
+        "unit": "s",
+        "points": [
+          0.2,
+          0.1,
+          0.3,
+          0.2,
+          0.2,
+          0.4,
+          0.3,
+          2.1,
+          8,
+          17,
+          29,
+          41,
+          52,
+          66,
+          78,
+          90,
+          103,
+          115,
+          127,
+          140,
+          152,
+          166,
+          178,
+          190
+        ],
+        "markAt": 7
+      },
+      {
+        "type": "log",
+        "label": "orders-api + orders-db",
+        "lines": [
+          {
+            "ts": "09:30:58.412",
+            "level": "INFO",
+            "source": "orders-db-primary",
+            "text": "[2210] LOG:  checkpoints are occurring too frequently (24 seconds apart)"
+          },
+          {
+            "ts": "09:31:03.877",
+            "level": "INFO",
+            "source": "orders-db-replica-1",
+            "text": "[58] LOG:  recovery still waiting after 1000.212 ms: recovery conflict on snapshot"
+          },
+          {
+            "ts": "09:33:20.551",
+            "level": "ERROR",
+            "source": "orders-db-replica-1",
+            "text": "[40562] ERROR:  canceling statement due to statement timeout"
+          },
+          {
+            "ts": "09:38:40.981",
+            "level": "INFO",
+            "source": "orders-api",
+            "text": "POST /orders 201 id=ord_2Xk9fQ dur=42ms"
+          },
+          {
+            "ts": "09:38:41.090",
+            "level": "WARN",
+            "source": "orders-api",
+            "text": "GET /orders/ord_2Xk9fQ 404 order not found (pool=replica) dur=18ms"
+          },
+          {
+            "ts": "09:40:12.330",
+            "level": "ERROR",
+            "source": "orders-api",
+            "text": "GET /orders/ord_2Ym1aR 404 after 3 attempts (pool=replica)"
+          },
+          {
+            "ts": "09:41:55.004",
+            "level": "FATAL",
+            "source": "orders-db-replica-1",
+            "text": "[40571] FATAL:  terminating connection due to idle-in-transaction timeout"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "orders-db-replica-1",
+        "items": [
+          {
+            "key": "WAL receive lag",
+            "value": "0.3s"
+          },
+          {
+            "key": "hot_standby_feedback",
+            "value": "off"
+          },
+          {
+            "key": "max_standby_streaming_delay",
+            "value": "-1 (changed Monday so BI exports stop failing)"
+          }
+        ]
+      }
+    ],
+    "question": "Tap the line that explains why new orders 404.",
+    "answer": {
+      "evidence": 1,
+      "line": 1
+    },
+    "explanation": {
+      "cause": "A long query on the replica is blocking WAL replay, so replica reads are minutes stale.",
+      "why": "Replay reached a vacuum cleanup record removing rows a replica query’s snapshot still needs. With max_standby_streaming_delay = -1 the startup process waits forever instead of canceling the query, so replay stops and every read routed to the replica sees pre-09:31 data.",
+      "tell": "The replica’s startup process logs a snapshot conflict wait at the exact moment lag starts climbing in a straight line — while WAL is still received in 0.3s. Replay is paused, not slow."
+    },
+    "source": {
+      "title": "PostgreSQL docs: Hot Standby — Handling Query Conflicts",
+      "url": "https://www.postgresql.org/docs/current/hot-standby.html#HOT-STANDBY-CONFLICT"
+    }
+  },
+  {
+    "id": "db-xid-wraparound-orphaned-prepared-xact",
+    "kind": "diagnose",
+    "topic": "database",
+    "difficulty": 3,
+    "alert": {
+      "service": "ledger",
+      "title": "ledger-db: write error rate 100% (SQLSTATE 54000)",
+      "severity": "SEV1",
+      "firedAt": "02:12"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "ledger-db (PostgreSQL 16)",
+        "lines": [
+          {
+            "ts": "02:09:52.611",
+            "level": "INFO",
+            "source": "postgres",
+            "text": "[88412] LOG:  automatic aggressive vacuum to prevent wraparound of table \"ledger.public.entries\": index scans: 1"
+          },
+          {
+            "ts": "02:09:52.611",
+            "level": "INFO",
+            "source": "postgres",
+            "text": "removable cutoff: 1871203, which was 2144480211 XIDs old when operation ended"
+          },
+          {
+            "ts": "02:11:07.330",
+            "level": "WARN",
+            "source": "postgres",
+            "text": "[90211] WARNING:  database \"ledger\" must be vacuumed within 3000517 transactions"
+          },
+          {
+            "ts": "02:11:09.004",
+            "level": "ERROR",
+            "source": "postgres",
+            "text": "[90230] ERROR:  database is not accepting commands to avoid wraparound data loss in database \"ledger\""
+          },
+          {
+            "ts": "02:11:09.010",
+            "level": "ERROR",
+            "source": "ledger",
+            "text": "insert entry failed: SQLSTATE 54000, retrying in 200ms"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Who holds the xmin horizon?",
+        "items": [
+          {
+            "key": "oldest xact_start",
+            "value": "01:58:40 today, pid 87120 (13 min)"
+          },
+          {
+            "key": "pg_replication_slots",
+            "value": "ledger_standby_1: physical, active, xmin 2146340117"
+          },
+          {
+            "key": "pg_prepared_xacts",
+            "value": "1 row: transaction 1871203, prepared 2026-08-08 (63 days ago)"
+          },
+          {
+            "key": "autovacuum workers",
+            "value": "3 of 3 busy, all anti-wraparound on ledger tables"
+          }
+        ]
+      }
+    ],
+    "question": "Why can’t autovacuum get ledger out of this?",
+    "options": [
+      "An orphaned prepared transaction pins the xmin horizon",
+      "autovacuum_max_workers too low to freeze big tables in time",
+      "A hot_standby_feedback replica slot is holding back xmin",
+      "A long-running session transaction is blocking freezing"
+    ],
+    "answer": 0,
+    "explanation": {
+      "cause": "A 63-day-old prepared transaction stops vacuum from freezing anything newer than it.",
+      "why": "Vacuum can only freeze tuples older than the oldest XID still visible to someone. A prepared (2PC) transaction survives restarts and disconnects, so xid 1871203 pins the horizon ~2.14B XIDs back. Autovacuum keeps running and can’t advance relfrozenxid; ROLLBACK PREPARED it, then VACUUM.",
+      "tell": "The vacuum’s removable cutoff (1871203) is exactly the prepared transaction’s XID. The slot’s xmin and the oldest session are recent, so they can’t be the anchor."
+    },
+    "source": {
+      "title": "PostgreSQL docs: Preventing Transaction ID Wraparound Failures",
+      "url": "https://www.postgresql.org/docs/current/routine-vacuuming.html#VACUUM-FOR-WRAPAROUND"
+    }
+  },
+  {
+    "id": "db-seq-scan-unindexed-filter-after-deploy",
+    "kind": "diagnose",
+    "topic": "database",
+    "difficulty": 1,
+    "alert": {
+      "service": "storefront-api",
+      "title": "orders-db: CPU > 90% for 5m",
+      "severity": "SEV2",
+      "firedAt": "14:12"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "orders-db CPU",
+        "unit": "%",
+        "points": [
+          31,
+          29,
+          33,
+          30,
+          32,
+          28,
+          31,
+          30,
+          58,
+          84,
+          93,
+          96,
+          95,
+          97,
+          94,
+          96,
+          95,
+          97,
+          96,
+          95
+        ],
+        "markAt": 8
+      },
+      {
+        "type": "log",
+        "label": "orders-db slow query log (> 500 ms)",
+        "lines": [
+          {
+            "ts": "14:07:12.448",
+            "level": "INFO",
+            "source": "postgres",
+            "text": "[51207] LOG:  duration: 2841.502 ms  execute S_7: SELECT id, status, total_cents FROM orders WHERE customer_email = $1 ORDER BY created_at DESC LIMIT 20"
+          },
+          {
+            "ts": "14:07:12.913",
+            "level": "INFO",
+            "source": "postgres",
+            "text": "[51188] LOG:  duration: 3012.877 ms  execute S_7: SELECT id, status, total_cents FROM orders WHERE customer_email = $1 ORDER BY created_at DESC LIMIT 20"
+          },
+          {
+            "ts": "14:07:14.006",
+            "level": "INFO",
+            "source": "postgres",
+            "text": "[1170] LOG:  checkpoints are occurring too frequently (27 seconds apart)"
+          },
+          {
+            "ts": "14:07:15.391",
+            "level": "INFO",
+            "source": "postgres",
+            "text": "[51240] LOG:  duration: 2977.140 ms  execute S_7: SELECT id, status, total_cents FROM orders WHERE customer_email = $1 ORDER BY created_at DESC LIMIT 20"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "orders table",
+        "items": [
+          {
+            "key": "Release at 14:06",
+            "value": "storefront-api v5.12: order history for guest checkout"
+          },
+          {
+            "key": "Rows",
+            "value": "48.2M"
+          },
+          {
+            "key": "Indexes",
+            "value": "orders_pkey (id), orders_customer_created_idx (customer_id, created_at)"
+          },
+          {
+            "key": "seq_scan rate",
+            "value": "3/min before 14:06 → 410/min after"
+          }
+        ]
+      }
+    ],
+    "question": "What’s burning the database CPU?",
+    "options": [
+      "Autoanalyze after the deploy left bad planner statistics",
+      "Connection storm from pods restarting during the rollout",
+      "New query filters on an unindexed column, so it seq-scans",
+      "Cache stampede after the rollout flushed every pod cache"
+    ],
+    "answer": 2,
+    "explanation": {
+      "cause": "v5.12 queries orders by customer_email, which no index covers.",
+      "why": "With no index on customer_email, every guest order lookup reads all 48M rows and sorts the matches. Each takes ~3s of CPU and I/O, and at request volume that pins the box. Fix with CREATE INDEX CONCURRENTLY on (customer_email, created_at).",
+      "tell": "CPU jumps at the 14:06 release, every slow query is the same new statement filtering on customer_email, and seq_scans on orders go from 3 to 410 per minute."
+    }
+  },
+  {
+    "id": "db-wal-full-inactive-replication-slot",
+    "kind": "diagnose",
+    "topic": "database",
+    "difficulty": 2,
+    "alert": {
+      "service": "orders-db",
+      "title": "orders-db: free disk < 2% on /var/lib/postgresql",
+      "severity": "SEV1",
+      "firedAt": "04:47"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "pg_wal size, last 6 days",
+        "unit": "GB",
+        "points": [
+          2.1,
+          2.0,
+          2.2,
+          2.1,
+          4.8,
+          9.6,
+          14.3,
+          19.1,
+          23.8,
+          28.7,
+          33.2,
+          38.1,
+          42.9,
+          47.6,
+          52.4,
+          57.3,
+          61.9,
+          66.8,
+          71.5,
+          76.4,
+          81.2,
+          85.9,
+          90.7,
+          95.3
+        ],
+        "markAt": 4
+      },
+      {
+        "type": "facts",
+        "label": "orders-db at 04:45",
+        "items": [
+          {
+            "key": "pg_replication_slots",
+            "value": "cdc_orders: logical, active=f, restart_lsn 3A1/7C0021D8"
+          },
+          {
+            "key": "CDC connector",
+            "value": "task 0 FAILED since Tue 22:14"
+          },
+          {
+            "key": "pg_stat_archiver",
+            "value": "failed_count 0, last archived 04:44:58"
+          },
+          {
+            "key": "max_slot_wal_keep_size",
+            "value": "-1 (unlimited)"
+          },
+          {
+            "key": "base/ (table data)",
+            "value": "101 GB, +0.4 GB this week"
+          },
+          {
+            "key": "max_wal_size",
+            "value": "4GB (unchanged since March)"
+          }
+        ]
+      }
+    ],
+    "question": "What is filling the database volume?",
+    "options": [
+      "archive_command failing, so old WAL can’t be recycled",
+      "An inactive replication slot is pinning WAL since Tuesday",
+      "Table bloat from autovacuum falling behind on orders",
+      "max_wal_size raised too high in the last config push"
+    ],
+    "answer": 1,
+    "explanation": {
+      "cause": "The CDC connector died and its logical slot has retained every WAL segment since.",
+      "why": "A replication slot guarantees WAL is kept until its consumer confirms it. With the consumer gone and max_slot_wal_keep_size unlimited, Postgres can’t remove any segment after restart_lsn, so pg_wal grows with every write until the disk fills.",
+      "tell": "All growth is in pg_wal, not table data; the archiver is healthy; the slot is inactive and the growth starts right when the connector failed on Tuesday night."
+    },
+    "source": {
+      "title": "PostgreSQL docs: Replication Slots",
+      "url": "https://www.postgresql.org/docs/current/warm-standby.html#STREAMING-REPLICATION-SLOTS"
+    }
+  },
+  {
+    "id": "db-idle-in-transaction-blocks-vacuum",
+    "kind": "find-line",
+    "topic": "database",
+    "difficulty": 3,
+    "alert": {
+      "service": "jobs-worker",
+      "title": "jobs-worker: dequeue p99 > 2s (baseline 8ms)",
+      "severity": "SEV2",
+      "firedAt": "16:20"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "job_queue n_dead_tup",
+        "unit": "k rows",
+        "points": [
+          14,
+          11,
+          16,
+          12,
+          15,
+          13,
+          41,
+          182,
+          340,
+          512,
+          690,
+          871,
+          1040,
+          1230,
+          1405,
+          1590,
+          1770,
+          1950,
+          2140,
+          2320,
+          2510,
+          2700,
+          2914
+        ],
+        "markAt": 6
+      },
+      {
+        "type": "log",
+        "label": "jobs-db + jobs-worker",
+        "lines": [
+          {
+            "ts": "16:12:40.118",
+            "level": "ERROR",
+            "source": "postgres",
+            "text": "[71204] ERROR:  canceling autovacuum task"
+          },
+          {
+            "ts": "16:14:02.551",
+            "level": "INFO",
+            "source": "postgres",
+            "text": "[71388] LOG:  automatic vacuum of table \"jobs.public.job_queue\": index scans: 0"
+          },
+          {
+            "ts": "16:14:02.551",
+            "level": "INFO",
+            "source": "postgres",
+            "text": "pages: 0 removed, 41822 remain, 41822 scanned (100.00% of total)"
+          },
+          {
+            "ts": "16:14:02.551",
+            "level": "INFO",
+            "source": "postgres",
+            "text": "tuples: 0 removed, 18234 remain, 2914388 are dead but not yet removable"
+          },
+          {
+            "ts": "16:15:30.904",
+            "level": "WARN",
+            "source": "jobs-worker",
+            "text": "dequeue took 2318ms (batch=50, queue=default)"
+          },
+          {
+            "ts": "16:16:11.207",
+            "level": "INFO",
+            "source": "postgres",
+            "text": "[71402] LOG:  duration: 2290.114 ms  execute S_2: SELECT id, payload FROM job_queue WHERE state = 'ready' ORDER BY priority, id LIMIT 50 FOR UPDATE SKIP LOCKED"
+          },
+          {
+            "ts": "16:17:45.660",
+            "level": "ERROR",
+            "source": "jobs-worker",
+            "text": "job 88123901 failed: smtp 421 4.7.0 Try again later"
+          },
+          {
+            "ts": "16:18:03.002",
+            "level": "INFO",
+            "source": "postgres",
+            "text": "[1170] LOG:  checkpoints are occurring too frequently (22 seconds apart)"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "jobs-db at 16:19",
+        "items": [
+          {
+            "key": "autovacuum on job_queue",
+            "value": "completing every ~1 min"
+          },
+          {
+            "key": "oldest backend_xmin",
+            "value": "pid 60218 reconcile-cron, idle in transaction since 13:02"
+          },
+          {
+            "key": "replication slots",
+            "value": "none"
+          },
+          {
+            "key": "job_queue live rows",
+            "value": "~18k"
+          }
+        ]
+      }
+    ],
+    "question": "Tap the line that shows why job_queue keeps bloating.",
+    "answer": {
+      "evidence": 1,
+      "line": 3
+    },
+    "explanation": {
+      "cause": "A session idle in transaction since 13:02 stops vacuum from removing dead queue rows.",
+      "why": "A queue table churns constantly. Vacuum may only remove rows deleted before the oldest open snapshot, and reconcile-cron opened one at 13:02 and never committed. Autovacuum runs fine but frees nothing, so dequeue scans millions of dead tuples for 18k live ones.",
+      "tell": "Vacuum completed and removed 0 tuples, with 2.9M ‘dead but not yet removable’. The canceled autovacuum is a red herring — the next run finished and still couldn’t clean."
+    }
+  },
+  {
+    "id": "db-deadlock-inconsistent-lock-order",
+    "kind": "find-line",
+    "topic": "database",
+    "difficulty": 1,
+    "alert": {
+      "service": "inventory-svc",
+      "title": "inventory-svc: 5xx rate > 3% on POST /reservations",
+      "severity": "SEV3",
+      "firedAt": "11:23"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "inventory-svc + inventory-db",
+        "lines": [
+          {
+            "ts": "11:22:41.003",
+            "level": "INFO",
+            "source": "inventory-svc",
+            "text": "POST /reservations order=ord_51Ka skus=SKU-1182,SKU-0457"
+          },
+          {
+            "ts": "11:22:41.009",
+            "level": "INFO",
+            "source": "inventory-svc",
+            "text": "POST /reservations order=ord_51Kb skus=SKU-0457,SKU-1182"
+          },
+          {
+            "ts": "11:22:42.017",
+            "level": "ERROR",
+            "source": "postgres",
+            "text": "[4411] ERROR:  deadlock detected"
+          },
+          {
+            "ts": "11:22:42.019",
+            "level": "ERROR",
+            "source": "inventory-svc",
+            "text": "psycopg.errors.InFailedSqlTransaction: current transaction is aborted, commands ignored until end of transaction block"
+          },
+          {
+            "ts": "11:22:42.020",
+            "level": "ERROR",
+            "source": "inventory-svc",
+            "text": "POST /reservations 500 order=ord_51Kb dur=1017ms"
+          },
+          {
+            "ts": "11:22:42.388",
+            "level": "WARN",
+            "source": "inventory-svc",
+            "text": "POST /reservations 201 order=ord_51Ka dur=1385ms (slow)"
+          },
+          {
+            "ts": "11:22:47.902",
+            "level": "ERROR",
+            "source": "postgres",
+            "text": "[4436] ERROR:  canceling statement due to statement timeout"
+          }
+        ]
+      },
+      {
+        "type": "metric",
+        "label": "inventory-db deadlocks",
+        "unit": "/min",
+        "points": [
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          3,
+          5,
+          4,
+          7,
+          6,
+          8,
+          5,
+          7,
+          9,
+          6
+        ],
+        "markAt": 6
+      }
+    ],
+    "question": "Tap the line that explains the 500s.",
+    "answer": {
+      "evidence": 0,
+      "line": 2
+    },
+    "explanation": {
+      "cause": "Reservations lock the same SKUs in opposite order and deadlock each other.",
+      "why": "ord_51Ka locks SKU-1182 then wants SKU-0457; ord_51Kb holds SKU-0457 and wants SKU-1182. After deadlock_timeout (1s) Postgres aborts one transaction. Sort SKUs before locking so every transaction acquires rows in the same order.",
+      "tell": "Two reservations for the same SKUs in opposite order arrive 6ms apart; ~1s later one fails. ‘Transaction is aborted’ is fallout from the deadlock, not the cause."
+    },
+    "source": {
+      "title": "PostgreSQL docs: Explicit Locking — Deadlocks",
+      "url": "https://www.postgresql.org/docs/current/explicit-locking.html#LOCKING-DEADLOCKS"
+    }
+  },
+  {
+    "id": "db-failover-pool-pinned-to-demoted-primary",
+    "kind": "diagnose",
+    "topic": "database",
+    "difficulty": 3,
+    "alert": {
+      "service": "payments-api",
+      "title": "payments-api: 31% of POST /charges failing",
+      "severity": "SEV1",
+      "firedAt": "02:31"
+    },
+    "evidence": [
+      {
+        "type": "facts",
+        "label": "Switchover timeline",
+        "items": [
+          {
+            "key": "02:14:05",
+            "value": "pg-b promoted to writer; pg-a demoted"
+          },
+          {
+            "key": "02:14:09",
+            "value": "pg-a back up as replica, accepting read-only sessions"
+          },
+          {
+            "key": "02:14:31",
+            "value": "payments-db-rw.internal → pg-b (record TTL 5s)"
+          },
+          {
+            "key": "JVM DNS cache",
+            "value": "networkaddress.cache.ttl=60 (base image)"
+          },
+          {
+            "key": "Hikari",
+            "value": "maximumPoolSize 30, maxLifetime 30m"
+          },
+          {
+            "key": "Errors by pod",
+            "value": "4 of 12 pods at ~90%; the other 8 at 0%"
+          }
+        ]
+      },
+      {
+        "type": "log",
+        "label": "payments-api",
+        "lines": [
+          {
+            "ts": "02:14:06.112",
+            "level": "WARN",
+            "source": "payments-api",
+            "text": "HikariPool-1 - Failed to validate connection org.postgresql.jdbc.PgConnection@5d1c2a7f (This connection has been closed.). Possibly consider using a shorter maxLifetime value."
+          },
+          {
+            "ts": "02:30:12.448",
+            "level": "WARN",
+            "source": "payments-api",
+            "text": "o.h.engine.jdbc.spi.SqlExceptionHelper : SQL Error: 0, SQLState: 25006"
+          },
+          {
+            "ts": "02:30:12.448",
+            "level": "ERROR",
+            "source": "payments-api",
+            "text": "o.h.engine.jdbc.spi.SqlExceptionHelper : ERROR: cannot execute INSERT in a read-only transaction"
+          },
+          {
+            "ts": "02:30:12.871",
+            "level": "INFO",
+            "source": "payments-api",
+            "text": "POST /charges 201 dur=88ms pod=payments-api-7c9f-x2k4q"
+          }
+        ]
+      },
+      {
+        "type": "metric",
+        "label": "POST /charges error rate",
+        "unit": "%",
+        "points": [
+          0.1,
+          0.2,
+          0.1,
+          0.1,
+          0.2,
+          38,
+          33,
+          31,
+          30,
+          32,
+          31,
+          29,
+          31,
+          30,
+          32,
+          31
+        ],
+        "markAt": 5
+      }
+    ],
+    "question": "Why are writes still failing 17 minutes after the switchover?",
+    "options": [
+      "Pods reconnected to pg-a via cached DNS; pools kept them",
+      "pg-b is still in recovery after promotion, rejecting writes",
+      "default_transaction_read_only was left on after switchover",
+      "Pre-failover connections to pg-a were never evicted"
+    ],
+    "answer": 0,
+    "explanation": {
+      "cause": "Pods with stale DNS refilled their pools on pg-a after it came back read-only.",
+      "why": "The switchover killed every connection and Hikari refilled pools at once. Pods whose JVM still cached the old IP for up to 60s connected to pg-a, now a replica. Those sessions are healthy, so Hikari keeps them until maxLifetime — every write on them fails with 25006 for up to 30 min.",
+      "tell": "Errors are read-only (25006), not connection failures, and confined to 4 pods. Old connections were already evicted at 02:14:06, and the 8 healthy pods prove pg-b takes writes."
+    },
+    "source": {
+      "title": "Amazon Aurora docs: Fast failover with Aurora PostgreSQL",
+      "url": "https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraPostgreSQL.BestPractices.FastFailover.html"
+    }
+  }
+]

@@ -1,0 +1,1037 @@
+[
+  {
+    "id": "fe-cors-wildcard-credentials",
+    "kind": "diagnose",
+    "topic": "frontend",
+    "difficulty": 1,
+    "alert": {
+      "service": "web-checkout",
+      "title": "Sentry: fetch TypeErrors ×2,318 in 15m — all browsers",
+      "severity": "SEV1",
+      "firedAt": "14:12"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "Session API fetch failures (RUM)",
+        "unit": "%",
+        "points": [
+          0.2,
+          0.1,
+          0.2,
+          0.3,
+          0.1,
+          0.2,
+          0.2,
+          0.1,
+          41,
+          97,
+          98,
+          97,
+          99,
+          98,
+          98,
+          97
+        ],
+        "markAt": 8
+      },
+      {
+        "type": "log",
+        "label": "Browser console (Firefox): www.shop.example",
+        "lines": [
+          {
+            "ts": "14:06:50.917",
+            "level": "INFO",
+            "source": "app",
+            "text": "[session] apiBase=https://api.shop.example credentials=include"
+          },
+          {
+            "ts": "14:06:51.388",
+            "level": "ERROR",
+            "source": "console",
+            "text": "Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at ‘https://api.shop.example/me’. (Reason: Credential is not supported if the CORS header ‘Access-Control-Allow-Origin’ is ‘*’)."
+          },
+          {
+            "ts": "14:06:51.390",
+            "level": "ERROR",
+            "source": "console",
+            "text": "Uncaught (in promise) TypeError: NetworkError when attempting to fetch resource."
+          },
+          {
+            "ts": "14:06:52.004",
+            "level": "WARN",
+            "source": "app",
+            "text": "[session] retry 1/3 in 800ms"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Response headers: GET /me",
+        "items": [
+          {
+            "key": "status",
+            "value": "200"
+          },
+          {
+            "key": "access-control-allow-origin",
+            "value": "*"
+          },
+          {
+            "key": "access-control-allow-credentials",
+            "value": "true"
+          },
+          {
+            "key": "cache-control",
+            "value": "private, no-store"
+          },
+          {
+            "key": "x-served-by",
+            "value": "api-gateway (migrated from /api on www, 14:05)"
+          }
+        ]
+      }
+    ],
+    "question": "Why is every session request failing in the browser?",
+    "options": [
+      "Gateway sends ACAO: * but fetch uses credentials: include",
+      "Preflight OPTIONS isn’t routed by the new API gateway",
+      "Session cookie is SameSite=Strict, so it’s never sent",
+      "API base URL is plain http://, blocked as mixed content"
+    ],
+    "answer": 0,
+    "explanation": {
+      "cause": "Moving the API cross-origin hit a gateway that answers credentialed requests with ACAO: *",
+      "why": "Same-origin /api calls never needed CORS. Once the API moved to api.*, every credentialed fetch became a CORS request, and the spec forbids the wildcard when credentials mode is 'include'. The server returns 200, but the browser withholds the response. Fix: echo the exact Origin with Vary: Origin.",
+      "tell": "The console states the wildcard + credentials reason verbatim. A preflight failure would say so, the hosts are same-site, and the URL is https — the other suspects don’t fit."
+    },
+    "source": {
+      "title": "MDN: Credential is not supported if the CORS header 'Access-Control-Allow-Origin' is '*'",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS/Errors/CORSNotSupportingCredentials"
+    }
+  },
+  {
+    "id": "fe-hydration-locale-date",
+    "kind": "find-line",
+    "topic": "frontend",
+    "difficulty": 1,
+    "alert": {
+      "service": "dashboard-ui",
+      "title": "Sentry: new issue — Minified React error #418 (1.2k users)",
+      "severity": "SEV3",
+      "firedAt": "09:41"
+    },
+    "evidence": [
+      {
+        "type": "facts",
+        "label": "Sentry issue tags",
+        "items": [
+          {
+            "key": "route",
+            "value": "/orders/[orderId]"
+          },
+          {
+            "key": "release",
+            "value": "dashboard-ui@4.12.0 (order summary redesign)"
+          },
+          {
+            "key": "browser.locale",
+            "value": "de-DE 46% · en-GB 31% · fr-FR 23%"
+          },
+          {
+            "key": "server",
+            "value": "Node 22, TZ=UTC, LANG=en_US.UTF-8"
+          },
+          {
+            "key": "repro",
+            "value": "Only when browser locale or time zone differs from the server"
+          }
+        ]
+      },
+      {
+        "type": "log",
+        "label": "Sentry event: dashboard-ui (production)",
+        "lines": [
+          {
+            "ts": "09:38:12.441",
+            "level": "INFO",
+            "source": "navigation",
+            "text": "GET /orders/A-20931 200 (SSR, 212ms)"
+          },
+          {
+            "ts": "09:38:13.087",
+            "level": "ERROR",
+            "source": "console",
+            "text": "Minified React error #418; visit https://react.dev/errors/418?args[]=text&args[]= for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+          },
+          {
+            "ts": "09:38:13.120",
+            "level": "INFO",
+            "source": "ui.click",
+            "text": "button.order-summary__download"
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "label": "components/OrderSummary.tsx",
+        "language": "tsx",
+        "lines": [
+          "\"use client\";",
+          "",
+          "import type { Order } from \"@/types/order\";",
+          "import { StatusBadge } from \"./StatusBadge\";",
+          "",
+          "export function OrderSummary({ order }: { order: Order }) {",
+          "  return (",
+          "    <section className=\"order-summary\">",
+          "      <h2>Order {order.number}</h2>",
+          "      <dl>",
+          "        <dt>Placed</dt>",
+          "        <dd>",
+          "          <time dateTime={order.placedAt}>{new Date(order.placedAt).toLocaleString()}</time>",
+          "        </dd>",
+          "        <dt>Items</dt>",
+          "        <dd>{order.lineItems.length}</dd>",
+          "        <dt>Status</dt>",
+          "        <dd><StatusBadge status={order.status} /></dd>",
+          "      </dl>",
+          "    </section>",
+          "  );",
+          "}"
+        ]
+      }
+    ],
+    "question": "Which line causes the hydration mismatch?",
+    "answer": {
+      "evidence": 2,
+      "line": 12
+    },
+    "explanation": {
+      "cause": "toLocaleString() renders different text on the UTC/en-US server and the user’s browser",
+      "why": "Client Components render twice: once on the server, once in the browser to hydrate. toLocaleString() uses the runtime’s default locale and time zone, so a de-DE user in Berlin gets “9.10.2026, 11:38:12” where the server sent “10/9/2026, 9:38:12 AM”. React throws #418 and re-renders the tree on the client.",
+      "tell": "#418 with args[]=text means a text node differed, and the tags show it only hits locales and time zones unlike the server’s. Only one line formats text from the environment."
+    },
+    "source": {
+      "title": "React: hydrateRoot — Handling different client and server content",
+      "url": "https://react.dev/reference/react-dom/client/hydrateRoot"
+    }
+  },
+  {
+    "id": "perf-cls-hero-dimensions",
+    "kind": "find-line",
+    "topic": "web-performance",
+    "difficulty": 1,
+    "alert": {
+      "service": "storefront",
+      "title": "Datadog RUM: CLS p75 0.27 on /product/* (threshold 0.1)",
+      "severity": "SEV3",
+      "firedAt": "16:20"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "CLS p75, /product/*",
+        "unit": "",
+        "points": [
+          0.04,
+          0.05,
+          0.04,
+          0.04,
+          0.05,
+          0.04,
+          0.05,
+          0.04,
+          0.19,
+          0.26,
+          0.27,
+          0.27,
+          0.26,
+          0.28,
+          0.27,
+          0.27
+        ],
+        "markAt": 8
+      },
+      {
+        "type": "facts",
+        "label": "web-vitals CLS attribution (p75 sample)",
+        "items": [
+          {
+            "key": "largestShiftTarget",
+            "value": "div.pdp-buybox"
+          },
+          {
+            "key": "largestShiftValue",
+            "value": "0.24"
+          },
+          {
+            "key": "loadState",
+            "value": "dom-content-loaded"
+          },
+          {
+            "key": "release",
+            "value": "storefront@7.3.0 — “Gallery: move inline styles to CSS”"
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "label": "ProductGallery.tsx (storefront@7.3.0)",
+        "language": "diff",
+        "startLine": 41,
+        "lines": [
+          "   return (",
+          "     <div className=\"pdp-gallery\">",
+          "-      <img",
+          "-        src={primary.url}",
+          "-        alt={primary.alt}",
+          "-        width={primary.width}",
+          "-        height={primary.height}",
+          "-        style={{ width: \"100%\", height: \"auto\" }}",
+          "-      />",
+          "+      <img src={primary.url} alt={primary.alt} className=\"pdp-gallery__img\" />",
+          "       <ThumbnailStrip images={images} selected={primary.id} onSelect={setPrimary} />",
+          "     </div>",
+          "   );"
+        ]
+      }
+    ],
+    "question": "Which line introduced the layout shift?",
+    "answer": {
+      "evidence": 2,
+      "line": 9
+    },
+    "explanation": {
+      "cause": "Hero <img> lost its width/height, so no space is reserved until the image loads",
+      "why": "With width and height attributes, browsers derive an aspect-ratio and reserve the box before any bytes arrive, even with CSS width: 100%; height: auto. Without them the img is 0px tall until it decodes, then pops open and shoves the buy box down — a large shift on every product view.",
+      "tell": "The shifting node is the buy box directly below the gallery, during load, starting with the release that rewrote the img tag without its dimension attributes."
+    },
+    "source": {
+      "title": "web.dev: Optimize Cumulative Layout Shift",
+      "url": "https://web.dev/articles/optimize-cls"
+    }
+  },
+  {
+    "id": "fe-chunk-load-error-after-deploy",
+    "kind": "diagnose",
+    "topic": "frontend",
+    "difficulty": 2,
+    "alert": {
+      "service": "account-portal",
+      "title": "Sentry: ChunkLoadError spiking after release account-portal@2.41.0",
+      "severity": "SEV2",
+      "firedAt": "11:07"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "ChunkLoadError events",
+        "unit": "/min",
+        "points": [
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          64,
+          188,
+          171,
+          142,
+          120,
+          97,
+          81,
+          66,
+          52,
+          44
+        ],
+        "markAt": 8
+      },
+      {
+        "type": "log",
+        "label": "Deploy job + Sentry + CDN access log",
+        "lines": [
+          {
+            "ts": "10:58:31.002",
+            "level": "INFO",
+            "source": "deploy",
+            "text": "aws s3 sync build/ s3://account-portal-web --delete (deleted: 214 files)"
+          },
+          {
+            "ts": "10:58:44.519",
+            "level": "INFO",
+            "source": "deploy",
+            "text": "CDN invalidation /index.html complete"
+          },
+          {
+            "ts": "11:04:09.371",
+            "level": "INFO",
+            "source": "cdn",
+            "text": "GET /static/js/4512.8f3c1a2b.chunk.js 200 content-type=text/html bytes=1874 x-cache=Hit"
+          },
+          {
+            "ts": "11:04:09.402",
+            "level": "ERROR",
+            "source": "console",
+            "text": "Uncaught SyntaxError: Unexpected token '<' (at 4512.8f3c1a2b.chunk.js:1:1)"
+          },
+          {
+            "ts": "11:04:09.405",
+            "level": "ERROR",
+            "source": "sentry",
+            "text": "ChunkLoadError: Loading chunk 4512 failed."
+          },
+          {
+            "ts": "11:04:09.405",
+            "level": "ERROR",
+            "source": "sentry",
+            "text": "(missing: https://app.portal.example/static/js/4512.8f3c1a2b.chunk.js)"
+          },
+          {
+            "ts": "11:04:12.880",
+            "level": "INFO",
+            "source": "build",
+            "text": "asset-manifest.json (2.41.0): static/js/4512.c07e9d11.chunk.js"
+          }
+        ]
+      }
+    ],
+    "question": "What’s causing the ChunkLoadErrors?",
+    "options": [
+      "CDN WAF rule now blocks requests for *.chunk.js files",
+      "Chunks grew too large and time out on mobile networks",
+      "Open tabs request old chunk hashes the deploy deleted",
+      "Script tags lack crossorigin, so CORS blocks the chunk"
+    ],
+    "answer": 2,
+    "explanation": {
+      "cause": "Deploy deleted the previous build’s chunks while open tabs still lazy-load them",
+      "why": "Tabs opened before 10:58 run the old runtime, which asks for 4512.8f3c1a2b. sync --delete removed it, and the SPA fallback answers with index.html as 200 — so the script “loads”, throws on '<', and webpack reports it as missing. Errors decay as tabs reload. Keep old assets for a few releases.",
+      "tell": "The requested hash (8f3c1a2b) isn’t the current build’s (c07e9d11), the CDN served it as text/html, and webpack says “missing”, not “timeout” or “error”."
+    }
+  },
+  {
+    "id": "fe-csp-nonce-disables-unsafe-inline",
+    "kind": "diagnose",
+    "topic": "frontend",
+    "difficulty": 3,
+    "alert": {
+      "service": "web-checkout",
+      "title": "Datadog: tag-manager purchase events −94% vs 7d; orders flat",
+      "severity": "SEV2",
+      "firedAt": "13:31"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "Tag-manager purchase events",
+        "unit": "/min",
+        "points": [
+          38,
+          41,
+          36,
+          40,
+          43,
+          39,
+          37,
+          42,
+          9,
+          3,
+          2,
+          2,
+          3,
+          2,
+          2,
+          3
+        ],
+        "markAt": 8
+      },
+      {
+        "type": "code",
+        "label": "middleware/securityHeaders.ts (13:02 deploy)",
+        "language": "diff",
+        "startLine": 8,
+        "lines": [
+          " export function buildCsp(nonce: string): string {",
+          "   return [",
+          "     \"default-src 'self'\",",
+          "-    \"script-src 'self' 'unsafe-inline' https://www.googletagmanager.com\",",
+          "+    `script-src 'self' 'unsafe-inline' 'nonce-${nonce}' https://www.googletagmanager.com`,",
+          "     \"connect-src 'self' https://*.google-analytics.com\",",
+          "     \"img-src 'self' data: https:\",",
+          "+    \"report-uri /api/csp-report\",",
+          "   ].join(\"; \");",
+          " }"
+        ]
+      },
+      {
+        "type": "log",
+        "label": "/api/csp-report collector",
+        "lines": [
+          {
+            "ts": "13:04:17.208",
+            "level": "WARN",
+            "source": "csp",
+            "text": "disposition=enforce effective-directive=script-src-elem blocked-uri=inline document-uri=https://www.shopfront.example/checkout line-number=14"
+          },
+          {
+            "ts": "13:04:17.209",
+            "level": "WARN",
+            "source": "csp",
+            "text": "disposition=enforce effective-directive=script-src-elem blocked-uri=inline document-uri=https://www.shopfront.example/checkout line-number=22"
+          },
+          {
+            "ts": "13:04:18.731",
+            "level": "WARN",
+            "source": "csp",
+            "text": "disposition=enforce effective-directive=img-src blocked-uri=http://img.legacy-promo.example/banner.gif"
+          },
+          {
+            "ts": "13:05:02.115",
+            "level": "INFO",
+            "source": "csp",
+            "text": "reports/min: 4,812 (script-src-elem 99.1%, img-src 0.9%)"
+          }
+        ]
+      }
+    ],
+    "question": "Why did the tag manager stop firing?",
+    "options": [
+      "googletagmanager.com fell out of the script-src allowlist",
+      "Adding a nonce makes browsers ignore 'unsafe-inline'",
+      "connect-src blocks the tag manager’s collect requests",
+      "report-uri flipped the whole policy to report-only"
+    ],
+    "answer": 1,
+    "explanation": {
+      "cause": "A nonce in script-src makes browsers ignore 'unsafe-inline'; bare inline tags get blocked",
+      "why": "'unsafe-inline' only survives as a fallback for CSP1 browsers: once a nonce or hash appears in the source list, modern browsers drop it. The tag-manager bootstrap snippet is an inline <script> without the nonce attribute, so it never runs, the container never loads and no events fire. Orders still work.",
+      "tell": "Reports say blocked-uri=inline under script-src-elem with disposition=enforce, while 'unsafe-inline' is still in the policy — only the new nonce explains that."
+    },
+    "source": {
+      "title": "MDN: Content-Security-Policy: script-src directive",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/script-src"
+    }
+  },
+  {
+    "id": "perf-lcp-lazy-hero",
+    "kind": "diagnose",
+    "topic": "web-performance",
+    "difficulty": 2,
+    "alert": {
+      "service": "storefront",
+      "title": "Datadog RUM: LCP p75 on / rose to 3.9s (budget 2.5s)",
+      "severity": "SEV3",
+      "firedAt": "10:15"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "LCP p75, home page",
+        "unit": "s",
+        "points": [
+          2.1,
+          2.0,
+          2.2,
+          2.1,
+          2.1,
+          2.0,
+          2.2,
+          2.1,
+          3.4,
+          3.8,
+          3.9,
+          3.9,
+          3.8,
+          4.0,
+          3.9,
+          3.9
+        ],
+        "markAt": 8
+      },
+      {
+        "type": "facts",
+        "label": "web-vitals LCP attribution (p75 sample)",
+        "items": [
+          {
+            "key": "target",
+            "value": "img.hero__image"
+          },
+          {
+            "key": "timeToFirstByte",
+            "value": "420 ms"
+          },
+          {
+            "key": "resourceLoadDelay",
+            "value": "1,910 ms"
+          },
+          {
+            "key": "resourceLoadDuration",
+            "value": "310 ms"
+          },
+          {
+            "key": "elementRenderDelay",
+            "value": "120 ms"
+          }
+        ]
+      },
+      {
+        "type": "log",
+        "label": "storefront@7.2.0 changelog",
+        "lines": [
+          {
+            "ts": "09:52:10",
+            "level": "INFO",
+            "source": "release",
+            "text": "Hero: switch raw <img> to shared <ResponsiveImage>"
+          },
+          {
+            "ts": "09:52:10",
+            "level": "INFO",
+            "source": "release",
+            "text": "ResponsiveImage: shared defaults (loading=lazy, decoding=async, srcset 640–1920w)"
+          },
+          {
+            "ts": "09:52:10",
+            "level": "INFO",
+            "source": "release",
+            "text": "Bump @fontsource/inter 5.0.18 → 5.1.0"
+          },
+          {
+            "ts": "09:52:10",
+            "level": "INFO",
+            "source": "release",
+            "text": "Add Product JSON-LD to <head>"
+          }
+        ]
+      }
+    ],
+    "question": "What regressed LCP on the home page?",
+    "options": [
+      "Hero image is too heavy; its download dominates LCP",
+      "Slower SSR response delays the HTML and all that follows",
+      "Render-blocking CSS holds the paint after the image loads",
+      "Hero is lazy-loaded, so its fetch waits on layout"
+    ],
+    "answer": 3,
+    "explanation": {
+      "cause": "Shared image component made the LCP hero loading=lazy, delaying when its request starts",
+      "why": "Lazy images aren’t fetched by the preload scanner; the browser must build layout and confirm the image is near the viewport first, so the request starts late. That’s resource load delay, not download time. Mark the hero loading=\"eager\" with fetchpriority=\"high\".",
+      "tell": "resourceLoadDelay (1.9s) dwarfs TTFB, download and render delay, and the release swapped the hero onto a component that lazy-loads by default."
+    },
+    "source": {
+      "title": "web.dev: The performance effects of too much lazy loading",
+      "url": "https://web.dev/articles/lcp-lazy-loading"
+    }
+  },
+  {
+    "id": "perf-inp-sync-filter-handler",
+    "kind": "diagnose",
+    "topic": "web-performance",
+    "difficulty": 3,
+    "alert": {
+      "service": "dashboard-ui",
+      "title": "Datadog RUM: INP p75 on /inventory 640ms (threshold 200ms)",
+      "severity": "SEV3",
+      "firedAt": "11:40"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "INP p75, /inventory",
+        "unit": "ms",
+        "points": [
+          170,
+          180,
+          175,
+          168,
+          182,
+          177,
+          171,
+          179,
+          520,
+          610,
+          640,
+          632,
+          648,
+          625,
+          641,
+          637
+        ],
+        "markAt": 8
+      },
+      {
+        "type": "facts",
+        "label": "web-vitals INP attribution (p75 sample)",
+        "items": [
+          {
+            "key": "interactionTarget",
+            "value": "#filters>button.apply-filters"
+          },
+          {
+            "key": "interactionType",
+            "value": "pointer"
+          },
+          {
+            "key": "inputDelay",
+            "value": "14 ms"
+          },
+          {
+            "key": "processingDuration",
+            "value": "588 ms"
+          },
+          {
+            "key": "presentationDelay",
+            "value": "46 ms"
+          },
+          {
+            "key": "loadState",
+            "value": "complete"
+          }
+        ]
+      },
+      {
+        "type": "log",
+        "label": "Changes shipped 11:02",
+        "lines": [
+          {
+            "ts": "11:02:14",
+            "level": "INFO",
+            "source": "release",
+            "text": "dashboard-ui@5.8.0: filter inventory client-side over full SKU list (drops /api/inventory/search)"
+          },
+          {
+            "ts": "11:02:14",
+            "level": "INFO",
+            "source": "release",
+            "text": "dashboard-ui@5.8.0: row highlight via CSS :has() selectors"
+          },
+          {
+            "ts": "11:05:40",
+            "level": "INFO",
+            "source": "tag-manager",
+            "text": "container v212 published: session-replay tag added (all pages)"
+          }
+        ]
+      }
+    ],
+    "question": "What is making the Apply Filters click slow?",
+    "options": [
+      "Session-replay tag hogs the main thread before input",
+      "Click handler filters the full SKU list synchronously",
+      ":has() selectors make post-click style recalcs slow",
+      "Clicks land while the page is still hydrating"
+    ],
+    "answer": 1,
+    "explanation": {
+      "cause": "Apply handler now filters and re-renders the full SKU list synchronously",
+      "why": "INP = input delay + processing + presentation. Here nearly all of it is processing: event callbacks (plus React’s synchronous re-render) ran for ~590ms before the browser could paint. Moving filtering server-side again, chunking with scheduler.yield(), or useDeferredValue for the results fixes it.",
+      "tell": "processingDuration is 588ms of ~650. Third-party or hydration contention would show as inputDelay (14ms) and loadState; :has() style cost would land in presentationDelay (46ms)."
+    },
+    "source": {
+      "title": "web.dev: Optimize Interaction to Next Paint",
+      "url": "https://web.dev/articles/optimize-inp"
+    }
+  },
+  {
+    "id": "fe-stale-order-polling-deps",
+    "kind": "find-line",
+    "topic": "frontend",
+    "difficulty": 2,
+    "alert": {
+      "service": "account-portal",
+      "title": "Datadog: order_status_mismatch > 50/h on /orders/:orderId",
+      "severity": "SEV3",
+      "firedAt": "15:22"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "RUM session: route + fetch events",
+        "lines": [
+          {
+            "ts": "15:14:02.118",
+            "level": "INFO",
+            "source": "router",
+            "text": "route /orders/:orderId orderId=A1042 (OrderPage mounted)"
+          },
+          {
+            "ts": "15:14:02.164",
+            "level": "INFO",
+            "source": "fetch",
+            "text": "GET /api/orders/A1042/status 200 (88ms)"
+          },
+          {
+            "ts": "15:14:07.170",
+            "level": "INFO",
+            "source": "fetch",
+            "text": "GET /api/orders/A1042/status 200 (91ms)"
+          },
+          {
+            "ts": "15:14:09.533",
+            "level": "INFO",
+            "source": "router",
+            "text": "route /orders/:orderId orderId=A1042 → A1077 (no remount)"
+          },
+          {
+            "ts": "15:14:12.169",
+            "level": "INFO",
+            "source": "fetch",
+            "text": "GET /api/orders/A1042/status 200 (85ms)"
+          },
+          {
+            "ts": "15:14:12.171",
+            "level": "WARN",
+            "source": "app",
+            "text": "order_status_mismatch route=A1077 shown=A1042 status=delivered"
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "label": "hooks/useOrderStatus.ts",
+        "language": "ts",
+        "startLine": 6,
+        "lines": [
+          "export function useOrderStatus(orderId: string): OrderStatus | null {",
+          "  const [status, setStatus] = useState<OrderStatus | null>(null);",
+          "",
+          "  useEffect(() => {",
+          "    let cancelled = false;",
+          "",
+          "    async function poll() {",
+          "      const res = await fetch(`/api/orders/${orderId}/status`);",
+          "      if (!res.ok) return;",
+          "      const body: { status: OrderStatus } = await res.json();",
+          "      if (!cancelled) setStatus(body.status);",
+          "    }",
+          "",
+          "    poll();",
+          "    const timer = setInterval(poll, 5000);",
+          "    return () => {",
+          "      cancelled = true;",
+          "      clearInterval(timer);",
+          "    };",
+          "  }, []);",
+          "",
+          "  return status;",
+          "}"
+        ]
+      }
+    ],
+    "question": "Which line makes the page show the previous order’s status?",
+    "answer": {
+      "evidence": 1,
+      "line": 19
+    },
+    "explanation": {
+      "cause": "Empty deps array: the effect never re-runs for a new orderId, so it polls the old order",
+      "why": "The router reuses the mounted OrderPage across orderIds, so only props change. With [] the effect ran once and its poll closure captured orderId=A1042 forever; the interval keeps fetching that order and setting its status on the A1077 page. Listing [orderId] tears down the old interval and starts a new one.",
+      "tell": "After the route changes to A1077 with no remount, requests keep going to A1042 on the same 5s cadence — a closure that never saw the new id."
+    },
+    "source": {
+      "title": "React: Removing Effect Dependencies",
+      "url": "https://react.dev/learn/removing-effect-dependencies"
+    }
+  },
+  {
+    "id": "fe-key-index-draft-note",
+    "kind": "find-line",
+    "topic": "frontend",
+    "difficulty": 3,
+    "alert": {
+      "service": "sales-console",
+      "title": "Sentry User Feedback: quote notes saved on the wrong SKU (14)",
+      "severity": "SEV2",
+      "firedAt": "17:03"
+    },
+    "evidence": [
+      {
+        "type": "facts",
+        "label": "QA repro, sales-console@3.9.0",
+        "items": [
+          {
+            "key": "steps",
+            "value": "Items A, B, C · type a note on B · remove A · click Save on row 2"
+          },
+          {
+            "key": "expected",
+            "value": "Row 2 shows C with an empty draft"
+          },
+          {
+            "key": "actual",
+            "value": "Row 2 shows SKU C holding B’s unsaved note; Save writes it to C"
+          },
+          {
+            "key": "network",
+            "value": "PUT /api/quotes/Q-881/items/C/note 204"
+          },
+          {
+            "key": "browsers",
+            "value": "All"
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "label": "QuoteLineItems.tsx",
+        "language": "tsx",
+        "startLine": 12,
+        "lines": [
+          "export function QuoteLineItems({ items, onRemove, onSaveNote }: Props) {",
+          "  return (",
+          "    <ul className=\"line-items\">",
+          "      {items.map((item, index) => (",
+          "        <LineItemRow key={index} item={item} onRemove={onRemove} onSaveNote={onSaveNote} />",
+          "      ))}",
+          "    </ul>",
+          "  );",
+          "}",
+          "",
+          "function LineItemRow({ item, onRemove, onSaveNote }: RowProps) {",
+          "  const [draft, setDraft] = useState(item.note ?? \"\");",
+          "",
+          "  return (",
+          "    <li className=\"line-item\">",
+          "      <span className=\"line-item__sku\">{item.sku}</span>",
+          "      <textarea value={draft} onChange={(e) => setDraft(e.target.value)} />",
+          "      <button type=\"button\" onClick={() => onSaveNote(item.id, draft)}>Save note</button>",
+          "      <button type=\"button\" onClick={() => onRemove(item.id)}>Remove</button>",
+          "    </li>",
+          "  );",
+          "}"
+        ]
+      }
+    ],
+    "question": "Which line moves B’s draft onto item C?",
+    "answer": {
+      "evidence": 1,
+      "line": 4
+    },
+    "explanation": {
+      "cause": "Rows keyed by array index, so React reuses B’s row state for C after A is removed",
+      "why": "React matches children by key. Removing A shifts every item up one index, so the component that held key 1 (B’s row, with B’s draft in useState) now receives item C as props. Its state survives, Save sends C’s id with B’s text. key={item.id} keeps each row’s state with its item.",
+      "tell": "The SKU label updates (it reads props) but the draft doesn’t (it’s state) — the signature of component state staying at a position while data moves under it."
+    },
+    "source": {
+      "title": "React: Rendering Lists — Keeping list items in order with key",
+      "url": "https://react.dev/learn/rendering-lists"
+    }
+  },
+  {
+    "id": "perf-render-blocking-vendor-script",
+    "kind": "find-line",
+    "topic": "web-performance",
+    "difficulty": 2,
+    "alert": {
+      "service": "storefront",
+      "title": "Lighthouse CI: FCP 4.1s on /product/* (budget 1.8s), build #8812",
+      "severity": "SEV3",
+      "firedAt": "12:48"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "FCP p75 (RUM), /product/*",
+        "unit": "s",
+        "points": [
+          1.4,
+          1.5,
+          1.4,
+          1.3,
+          1.5,
+          1.4,
+          1.4,
+          1.5,
+          3.2,
+          3.6,
+          3.4,
+          3.9,
+          3.5,
+          3.7,
+          3.6,
+          3.8
+        ],
+        "markAt": 8
+      },
+      {
+        "type": "log",
+        "label": "Resource timing, /product/blue-runner",
+        "lines": [
+          {
+            "ts": "+0ms",
+            "level": "INFO",
+            "source": "document",
+            "text": "GET /product/blue-runner 200 ttfb=380ms"
+          },
+          {
+            "ts": "+402ms",
+            "level": "INFO",
+            "source": "resource",
+            "text": "/assets/app-3f9a1c.css 140ms renderBlockingStatus=blocking"
+          },
+          {
+            "ts": "+404ms",
+            "level": "INFO",
+            "source": "resource",
+            "text": "/assets/app-81d2e4.js 210ms renderBlockingStatus=non-blocking"
+          },
+          {
+            "ts": "+405ms",
+            "level": "INFO",
+            "source": "resource",
+            "text": "googletagmanager.com/gtm.js 260ms renderBlockingStatus=non-blocking"
+          },
+          {
+            "ts": "+406ms",
+            "level": "INFO",
+            "source": "resource",
+            "text": "widgets.reviewly.example/v3/loader.js 2,310ms renderBlockingStatus=blocking"
+          },
+          {
+            "ts": "+2,731ms",
+            "level": "INFO",
+            "source": "paint",
+            "text": "first-contentful-paint"
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "label": "app/index.html",
+        "language": "html",
+        "lines": [
+          "<head>",
+          "  <meta charset=\"utf-8\" />",
+          "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />",
+          "  <title>Blue Runner — Storefront</title>",
+          "  <link rel=\"preconnect\" href=\"https://cdn.storefront.example\" crossorigin />",
+          "  <link rel=\"preload\" href=\"/fonts/inter-var.woff2\" as=\"font\" type=\"font/woff2\" crossorigin />",
+          "  <link rel=\"stylesheet\" href=\"/assets/app-3f9a1c.css\" />",
+          "  <script type=\"module\" src=\"/assets/app-81d2e4.js\"></script>",
+          "  <script async src=\"https://www.googletagmanager.com/gtm.js?id=GTM-K7Q2XWD\"></script>",
+          "  <script src=\"https://widgets.reviewly.example/v3/loader.js\"></script>",
+          "  <script type=\"application/ld+json\">{\"@context\":\"https://schema.org\",\"@type\":\"Product\"}</script>",
+          "</head>"
+        ]
+      }
+    ],
+    "question": "Which line is delaying first paint?",
+    "answer": {
+      "evidence": 2,
+      "line": 9
+    },
+    "explanation": {
+      "cause": "Third-party reviews loader added as a classic <head> script without async or defer",
+      "why": "A classic <script src> in <head> halts the parser until it downloads and runs, so no body content exists to paint. The vendor takes 2.3s, which lands straight on FCP. Module scripts defer by default and async ones don’t block parsing; the stylesheet blocks too, but only for 140ms.",
+      "tell": "Only two resources report renderBlockingStatus=blocking: the 140ms stylesheet and the 2.3s vendor loader. FCP fires right after the loader finishes."
+    },
+    "source": {
+      "title": "MDN: <script>: The Script element",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/script"
+    }
+  }
+]

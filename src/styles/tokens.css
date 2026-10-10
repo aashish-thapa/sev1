@@ -1,0 +1,102 @@
+/* Hallmark · route: custom (bespoke) · structure: single-card incident feed, answer pad in thumb zone · idea: "the card is the page — evidence first, chrome last"
+ * paper: oklch(16% 0.010 70) · accent: oklch(82% 0.150 74) · display: Bricolage Grotesque (condensed 800) · body: Geist · mono: JetBrains Mono (evidence only)
+ * axes: dark / display-condensed-bold / warm (sodium-amber) · gates: see README design notes · studied: no · context: inferred
+ * series colour validated with dataviz validate_palette.js (dark, surface paper-2): all checks pass
+ */
+:root {
+  color-scheme: dark;
+
+  /* Surfaces — elevation is lightness, never shadow */
+  --color-paper: oklch(16% 0.010 70);
+  --color-paper-2: oklch(20.5% 0.012 70);
+  --color-paper-3: oklch(25.5% 0.013 70);
+  /* The bastion shell sits one step below the page, like a real terminal window. */
+  --color-terminal: oklch(12.5% 0.009 70);
+  --color-rule-2: oklch(28.5% 0.012 70);
+  --color-rule: oklch(34% 0.013 70);
+  --color-rule-strong: oklch(53% 0.014 72);
+
+  /* Text */
+  --color-muted: oklch(70% 0.014 72);
+  --color-ink-2: oklch(83% 0.011 75);
+  --color-ink: oklch(95% 0.008 80);
+
+  /* Signal — one accent, a highlighter not a fill */
+  --color-accent: oklch(82% 0.150 74);
+  --color-accent-ink: oklch(16% 0.010 70);
+  --color-focus: oklch(86% 0.150 78);
+
+  /* Status — reserved for outcome + severity, always paired with a glyph and a word */
+  --color-critical: oklch(70% 0.175 30);
+  --color-critical-wash: oklch(30% 0.070 30);
+  --color-good: oklch(80% 0.150 155);
+  --color-good-wash: oklch(30% 0.060 155);
+
+  /* Data */
+  --color-series: oklch(66% 0.120 74);
+
+  /* World — materials and people in the 3D office (never used for UI chrome) */
+  --color-world-carpet: oklch(34% 0.018 250);
+  --color-world-tile: oklch(58% 0.008 80);
+  --color-world-wood: oklch(52% 0.06 60);
+  --color-world-raised: oklch(30% 0.006 250);
+  --color-world-wall: oklch(86% 0.012 85);
+  --color-world-glass: oklch(80% 0.03 220);
+  --color-world-desk: oklch(90% 0.01 85);
+  --color-world-metal: oklch(42% 0.01 260);
+  --color-world-leaf: oklch(52% 0.11 150);
+  --color-world-ceiling: oklch(94% 0.01 85);
+  --color-skin-1: oklch(82% 0.05 65);
+  --color-skin-2: oklch(66% 0.08 55);
+  --color-skin-3: oklch(48% 0.07 45);
+  --color-skin-4: oklch(36% 0.05 40);
+  --color-outfit-1: oklch(40% 0.08 255);
+  --color-outfit-2: oklch(60% 0.12 40);
+  --color-outfit-3: oklch(32% 0.02 260);
+  --color-outfit-4: oklch(56% 0.09 150);
+  --color-outfit-5: oklch(70% 0.06 85);
+  --color-outfit-6: oklch(48% 0.12 10);
+  --color-trousers: oklch(28% 0.02 260);
+  --color-hair: oklch(24% 0.03 50);
+
+  /* Type */
+  --font-display: "Bricolage Grotesque Variable", "Arial Narrow", sans-serif;
+  --font-body: "Geist Variable", ui-sans-serif, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+
+  --text-2xs: 0.6875rem;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-md: 1.25rem;
+  --text-lg: 1.5625rem;
+  --text-xl: 1.9531rem;
+  --text-display: clamp(2.75rem, 9vw + 1rem, 4.5rem);
+
+  /* Space — 4pt scale */
+  --space-3xs: 0.125rem;
+  --space-2xs: 0.25rem;
+  --space-xs: 0.5rem;
+  --space-sm: 0.75rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2.5rem;
+  --space-2xl: 4rem;
+
+  --radius-sm: 4px;
+  --radius-md: 10px;
+  --radius-lg: 18px;
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-micro: 110ms;
+  --dur-short: 220ms;
+  --dur-long: 420ms;
+
+  --z-base: 1;
+  --z-raised: 10;
+  --z-sticky: 200;
+  --z-toast: 500;
+}

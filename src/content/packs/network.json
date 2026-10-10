@@ -1,0 +1,535 @@
+[
+  {
+    "id": "net-conntrack-table-full",
+    "kind": "find-line",
+    "topic": "network",
+    "difficulty": 1,
+    "alert": {
+      "service": "edge-ingress",
+      "title": "edge-ingress: 3 of 8 nodes failing LB health checks",
+      "severity": "SEV2",
+      "firedAt": "21:04"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "Client connect timeouts, edge-ingress",
+        "unit": "/s",
+        "points": [2, 1, 3, 2, 2, 1, 3, 2, 48, 212, 390, 455, 431, 470, 462, 449, 481, 458],
+        "markAt": 8
+      },
+      {
+        "type": "log",
+        "label": "dmesg + kubelet: edge-ingress-07",
+        "lines": [
+          { "ts": "21:02:44.118", "level": "INFO", "source": "kernel", "text": "cni0: port 7(veth3a91f0c2) entered forwarding state" },
+          { "ts": "21:03:15.660", "level": "INFO", "source": "kernel", "text": "TCP: request_sock_TCP: Possible SYN flooding on port 0.0.0.0:443. Sending cookies." },
+          { "ts": "21:03:15.902", "level": "WARN", "source": "kernel", "text": "nf_conntrack: nf_conntrack: table full, dropping packet" },
+          { "ts": "21:03:20.911", "level": "WARN", "source": "kernel", "text": "net_ratelimit: 2417 callbacks suppressed" },
+          { "ts": "21:03:22.040", "level": "ERROR", "source": "kernel", "text": "IPVS: rr: TCP 10.96.0.10:53 - no destination available" },
+          { "ts": "21:03:41.288", "level": "WARN", "source": "kubelet", "text": "Readiness probe failed: Get \"http://10.244.7.31:10254/healthz\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)" }
+        ]
+      }
+    ],
+    "question": "Which line explains the connect timeouts?",
+    "answer": { "evidence": 1, "line": 2 },
+    "explanation": {
+      "cause": "Conntrack table full on ingress nodes; the kernel is dropping new flows",
+      "why": "A traffic surge filled nf_conntrack up to nf_conntrack_max. With no free entries the kernel can’t track new flows, so their SYNs are silently discarded — clients and LB health checks see connect timeouts, not resets. SYN cookies only relieve the listen backlog; they don’t bypass conntrack.",
+      "tell": "“table full, dropping packet” is the only line saying packets are actually discarded. The SYN-flood notice says cookies are being sent — connections are still answered."
+    }
+  },
+  {
+    "id": "net-ephemeral-port-exhaustion",
+    "kind": "find-line",
+    "topic": "network",
+    "difficulty": 2,
+    "alert": {
+      "service": "ledger-sync",
+      "title": "ledger-sync: rates-api call failures 31% (threshold 5%)",
+      "severity": "SEV2",
+      "firedAt": "03:14"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "TIME_WAIT sockets, ledger-sync pod",
+        "unit": "sockets",
+        "points": [1210, 1180, 1262, 1235, 1198, 1251, 3890, 9420, 15106, 20851, 25960, 28041, 28190, 28212, 28205, 28219, 28198, 28214],
+        "markAt": 6
+      },
+      {
+        "type": "facts",
+        "label": "ledger-sync",
+        "items": [
+          { "key": "Deploy", "value": "v4.18.0 at 02:51" },
+          { "key": "Calls to rates-api", "value": "~470/s, all to VIP 10.40.2.15:8080" },
+          { "key": "ip_local_port_range", "value": "32768 60999" },
+          { "key": "rates-api server 5xx", "value": "0.02% (unchanged)" }
+        ]
+      },
+      {
+        "type": "log",
+        "label": "ledger-sync logs",
+        "lines": [
+          { "ts": "03:13:57.882", "level": "INFO", "source": "ledger-sync", "text": "fx cache refresh: 1284 pairs loaded in 2.31s" },
+          { "ts": "03:13:58.104", "level": "WARN", "source": "ledger-sync", "text": "rates client: retrying attempt=2 err=\"Get \\\"http://rates-api.internal:8080/v1/fx?base=EUR\\\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)\"" },
+          { "ts": "03:13:58.311", "level": "ERROR", "source": "ledger-sync", "text": "sync batch 88412 aborted: rates unavailable after 3 attempts" },
+          { "ts": "03:13:58.402", "level": "ERROR", "source": "ledger-sync", "text": "rates client: Get \"http://rates-api.internal:8080/v1/fx?base=GBP\": dial tcp 10.40.2.15:8080: connect: cannot assign requested address" },
+          { "ts": "03:13:58.517", "level": "WARN", "source": "ledger-sync", "text": "circuit breaker rates-api: state=open failures=52/100 window=10s" },
+          { "ts": "03:13:59.003", "level": "ERROR", "source": "ledger-sync", "text": "pq: canceling statement due to user request" },
+          { "ts": "03:13:59.240", "level": "WARN", "source": "ledger-sync", "text": "sync lag 412s exceeds 300s threshold" }
+        ]
+      }
+    ],
+    "question": "Which line points at the root cause?",
+    "answer": { "evidence": 2, "line": 3 },
+    "explanation": {
+      "cause": "Ephemeral ports exhausted by TIME_WAIT churn to a single rates-api VIP",
+      "why": "v4.18.0 stopped reusing connections, so ledger-sync opens and closes one per call. Each active close parks the 4-tuple in TIME_WAIT for 60s; at ~470 calls/s to one ip:port that’s ~28k — the whole 32768–60999 range. connect() then fails locally with EADDRNOTAVAIL before a packet leaves.",
+      "tell": "“connect: cannot assign requested address” is a local error: no free source port. TIME_WAIT flatlines at ~28.2k, exactly the size of the port range, while rates-api sees no errors."
+    },
+    "source": {
+      "title": "How to stop running out of ephemeral ports and start to love long-lived connections",
+      "url": "https://blog.cloudflare.com/how-to-stop-running-out-of-ephemeral-ports-and-start-to-love-long-lived-connections/"
+    }
+  },
+  {
+    "id": "net-pmtud-black-hole",
+    "kind": "diagnose",
+    "topic": "network",
+    "difficulty": 3,
+    "alert": {
+      "service": "reconcile-worker",
+      "title": "reconcile-worker: 100% of calls to ledger-core (colo) failing",
+      "severity": "SEV1",
+      "firedAt": "03:02"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "reconcile-worker → ledger-core",
+        "lines": [
+          { "ts": "02:58:14.220", "level": "ERROR", "source": "reconcile-worker", "text": "Post \"https://ledger-core.colo.internal/v2/batches\": net/http: TLS handshake timeout" },
+          { "ts": "02:58:14.981", "level": "INFO", "source": "reconcile-worker", "text": "probe GET http://ledger-core.colo.internal:8081/healthz status=200 dur=7ms" },
+          { "ts": "02:58:24.233", "level": "ERROR", "source": "reconcile-worker", "text": "Get \"https://ledger-core.colo.internal/v2/accounts/88213\": net/http: TLS handshake timeout" },
+          { "ts": "02:58:24.240", "level": "WARN", "source": "reconcile-worker", "text": "retry budget exhausted for ledger-core (10/10)" }
+        ]
+      },
+      {
+        "type": "log",
+        "label": "ping -M do from a reconcile node",
+        "lines": [
+          { "ts": "03:04:11.002", "level": "INFO", "source": "shell", "text": "PING 10.60.4.20 (10.60.4.20) 1372(1400) bytes of data." },
+          { "ts": "03:04:11.014", "level": "INFO", "source": "shell", "text": "1380 bytes from 10.60.4.20: icmp_seq=1 ttl=61 time=12.4 ms" },
+          { "ts": "03:04:13.020", "level": "INFO", "source": "shell", "text": "--- 10.60.4.20 ping statistics ---" },
+          { "ts": "03:04:13.020", "level": "INFO", "source": "shell", "text": "3 packets transmitted, 3 received, 0% packet loss, time 2003ms" },
+          { "ts": "03:04:20.441", "level": "INFO", "source": "shell", "text": "PING 10.60.4.20 (10.60.4.20) 1472(1500) bytes of data." },
+          { "ts": "03:04:22.488", "level": "INFO", "source": "shell", "text": "--- 10.60.4.20 ping statistics ---" },
+          { "ts": "03:04:22.488", "level": "INFO", "source": "shell", "text": "3 packets transmitted, 0 received, 100% packet loss, time 2041ms" }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Cloud ↔ colo link",
+        "items": [
+          { "key": "Change 02:40", "value": "Colo perimeter firewall replaced, config migrated" },
+          { "key": "IPsec tunnel", "value": "UP since 02:41, 0 rekeys, 0 DPD failures" },
+          { "key": "ledger-core cert", "value": "Valid, unchanged since January" },
+          { "key": "Firewall sessions", "value": "41k of 2M" }
+        ]
+      }
+    ],
+    "question": "Why is every HTTPS call to ledger-core failing?",
+    "options": [
+      "IPsec tunnel rekeying and dropping in-flight sessions",
+      "New firewall’s session table is full, dropping new flows",
+      "Path MTU black hole: full-size DF packets silently dropped",
+      "ledger-core’s TLS certificate is rejected by cloud clients"
+    ],
+    "answer": 2,
+    "explanation": {
+      "cause": "Path MTU black hole on the new tunnel: big DF packets dropped, no ICMP back",
+      "why": "The tunnel’s MTU is under 1500, and the new firewall neither clamps MSS like the old one nor returns ICMP “fragmentation needed”. Small packets pass — SYNs, ClientHellos, health checks — but the server’s certificate flight fills full-size segments that vanish, so every TLS handshake stalls.",
+      "tell": "Handshakes time out rather than fail verification, plain-HTTP probes pass, and DF pings work at 1400 bytes but lose 100% at 1500 with no “Frag needed” reply."
+    }
+  },
+  {
+    "id": "net-bgp-anycast-dns-withdrawn",
+    "kind": "diagnose",
+    "topic": "network",
+    "difficulty": 2,
+    "alert": {
+      "service": "edge-dns",
+      "title": "Synthetics: shopfront.example SERVFAIL from all public resolvers",
+      "severity": "SEV1",
+      "firedAt": "15:42"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "Queries received, authoritative DNS",
+        "unit": "k/s",
+        "points": [182, 179, 185, 181, 188, 184, 180, 186, 41, 3.2, 0.4, 0, 0, 0, 0, 0],
+        "markAt": 8
+      },
+      {
+        "type": "log",
+        "label": "netops + edge-dns",
+        "lines": [
+          { "ts": "15:39:02.118", "level": "INFO", "source": "netops-automation", "text": "job backbone-capacity-audit #4471 dispatched to 212 backbone routers" },
+          { "ts": "15:39:31.770", "level": "WARN", "source": "edge-dns-health", "text": "ams1: dc reachability probes failing 14/14, marking site unhealthy" },
+          { "ts": "15:39:31.912", "level": "WARN", "source": "edge-dns-health", "text": "iad2: dc reachability probes failing 14/14, marking site unhealthy" },
+          { "ts": "15:40:05.330", "level": "ERROR", "source": "synthetics", "text": "dig www.shopfront.example @8.8.8.8: status SERVFAIL" },
+          { "ts": "15:40:06.004", "level": "INFO", "source": "edge-dns", "text": "ams1: resolver process healthy, answering on 127.0.0.1:53" }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Checked from outside the network",
+        "items": [
+          { "key": "dig @198.51.100.53", "value": ";; connection timed out; no servers could be reached" },
+          { "key": "Looking glass 198.51.100.0/24", "value": "% Network not in table" },
+          { "key": "Registrar delegation", "value": "Unchanged: ns1/ns2.shopfront.example" },
+          { "key": "Zone RRSIG expiry", "value": "In 19 days" }
+        ]
+      }
+    ],
+    "question": "Why can no resolver reach shopfront.example?",
+    "options": [
+      "DNSSEC signatures expired, so resolvers return SERVFAIL",
+      "Edge DNS sites withdrew their anycast prefixes from BGP",
+      "Registrar delegation changed; NS records point elsewhere",
+      "A volumetric DDoS is saturating the edge DNS links"
+    ],
+    "answer": 1,
+    "explanation": {
+      "cause": "Edge DNS saw the backbone as dead and withdrew its anycast routes from BGP",
+      "why": "The audit job cut every backbone link. Edge DNS hosts stop advertising their anycast prefix when they can’t reach the data centers — sensible for one sick site, fatal when every site does it at once. The servers stayed up, but no route to them existed, so resolvers had nowhere to ask.",
+      "tell": "Query volume drops to zero instead of spiking, dig to the anycast IP times out instead of answering, and the looking glass has no route for the prefix at all."
+    },
+    "source": {
+      "title": "More details about the October 4 outage — Engineering at Meta",
+      "url": "https://engineering.fb.com/2021/10/05/networking-traffic/outage-details/"
+    }
+  },
+  {
+    "id": "net-alb-keepalive-502",
+    "kind": "diagnose",
+    "topic": "network",
+    "difficulty": 2,
+    "alert": {
+      "service": "orders-api",
+      "title": "orders-api: ALB 5xx rate 0.4%, SLO burn rate 6x",
+      "severity": "SEV3",
+      "firedAt": "14:31"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "HTTPCode_ELB_502_Count",
+        "unit": "/min",
+        "points": [0, 0, 1, 0, 0, 0, 14, 19, 16, 22, 18, 15, 21, 17, 20, 19, 23, 18],
+        "markAt": 6
+      },
+      {
+        "type": "metric",
+        "label": "HTTPCode_Target_5XX_Count",
+        "unit": "/min",
+        "points": [2, 1, 0, 1, 2, 0, 1, 0, 1, 2, 0, 1, 1, 0, 2, 1, 0, 1]
+      },
+      {
+        "type": "facts",
+        "label": "orders-api",
+        "items": [
+          { "key": "Change 14:05", "value": "nginx sidecar removed; ALB now targets Node on :3000" },
+          { "key": "ALB idle timeout", "value": "60s (default)" },
+          { "key": "Target runtime", "value": "Node.js 20 http.Server, default timeouts" },
+          { "key": "Target p99 latency", "value": "46 ms (unchanged)" },
+          { "key": "Unhealthy targets", "value": "0 of 12" }
+        ]
+      }
+    ],
+    "question": "What’s producing the 502s?",
+    "options": [
+      "ALB idle timeout is too short for slow order requests",
+      "Pods draining during the rollout cut off in-flight calls",
+      "Responses carry malformed headers without the sidecar",
+      "Node closes idle keep-alive sockets before the ALB does"
+    ],
+    "answer": 3,
+    "explanation": {
+      "cause": "Node’s 5s keep-alive timeout is shorter than the ALB’s 60s idle timeout",
+      "why": "The ALB reuses idle backend connections for up to 60s; Node’s http.Server closes them after 5s (keepAliveTimeout). When the ALB sends a request on a socket Node is closing, the target never sees it and the ALB returns 502. The old nginx sidecar kept connections for 75s.",
+      "tell": "502s are ALB-generated while target 5xx stays flat, the rate holds steady long after the deploy finished, and the only change is a target with different keep-alive defaults."
+    },
+    "source": {
+      "title": "Troubleshoot your Application Load Balancers — HTTP 502: Bad gateway",
+      "url": "https://docs.aws.amazon.com/elasticloadbalancing/latest/application/load-balancer-troubleshooting.html"
+    }
+  },
+  {
+    "id": "tls-internal-wildcard-expired",
+    "kind": "diagnose",
+    "topic": "dns-tls",
+    "difficulty": 1,
+    "alert": {
+      "service": "auth-gateway",
+      "title": "auth-gateway: 87% 5xx, upstream TLS errors on every node",
+      "severity": "SEV1",
+      "firedAt": "12:02"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "auth-gateway 5xx",
+        "unit": "%",
+        "points": [0.2, 0.1, 0.3, 0.2, 0.2, 0.1, 0.3, 0.2, 86.4, 87.9, 88.1, 87.2, 88.6, 87.7],
+        "markAt": 8
+      },
+      {
+        "type": "log",
+        "label": "auth-gateway + session-svc",
+        "lines": [
+          { "ts": "12:00:31.207", "level": "ERROR", "source": "auth-gateway", "text": "Post \"https://identity.corp.internal/v1/introspect\": tls: failed to verify certificate: x509: certificate has expired or is not yet valid: current time 2026-04-06T12:00:31Z is after 2026-04-06T12:00:00Z" },
+          { "ts": "12:00:31.540", "level": "WARN", "source": "auth-gateway", "text": "circuit breaker identity: state=open failures=100/100" },
+          { "ts": "12:00:31.902", "level": "ERROR", "source": "session-svc", "text": "Get \"https://profile.corp.internal/v2/me\": tls: failed to verify certificate: x509: certificate has expired or is not yet valid: current time 2026-04-06T12:00:31Z is after 2026-04-06T12:00:00Z" }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Scope",
+        "items": [
+          { "key": "Affected callers", "value": "All services, all 3 regions" },
+          { "key": "Cert presented", "value": "CN=*.corp.internal, issued by Corp Issuing CA 2" },
+          { "key": "Node clock offset p99", "value": "< 4 ms from NTP" },
+          { "key": "Last deploy", "value": "Apr 3, 16:20" }
+        ]
+      }
+    ],
+    "question": "What broke internal traffic at noon?",
+    "options": [
+      "Shared *.corp.internal wildcard cert passed its notAfter",
+      "Clock skew on callers makes valid certs look expired",
+      "Internal CA was rotated and callers lack the new root",
+      "A revocation push marked service certificates revoked"
+    ],
+    "answer": 0,
+    "explanation": {
+      "cause": "The shared *.corp.internal wildcard certificate expired at 12:00:00",
+      "why": "One wildcard cert fronted most internal services. At its notAfter every client rejected the handshake, so service-to-service traffic stopped in the same second across all regions. Expiry monitoring didn’t cover every place the cert was deployed.",
+      "tell": "Every error ends “is after 2026-04-06T12:00:00Z” — one shared timestamp exactly on the hour, hitting all callers at once, with clocks within milliseconds of NTP."
+    }
+  },
+  {
+    "id": "tls-dst-root-x3-old-openssl",
+    "kind": "diagnose",
+    "topic": "dns-tls",
+    "difficulty": 2,
+    "alert": {
+      "service": "billing-export",
+      "title": "billing-export: partner upload failing on legacy batch hosts",
+      "severity": "SEV2",
+      "firedAt": "14:07"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "billing-export on batch-01 (CentOS 7)",
+        "lines": [
+          { "ts": "14:02:00.114", "level": "INFO", "source": "billing-export", "text": "starting hourly partner upload (3 files) to upload.partnerhub.example" },
+          { "ts": "14:02:01.390", "level": "ERROR", "source": "billing-export", "text": "curl: (60) SSL certificate problem: certificate has expired" },
+          { "ts": "14:02:01.391", "level": "WARN", "source": "billing-export", "text": "upload attempt 1/3 failed, retrying in 30s" }
+        ]
+      },
+      {
+        "type": "log",
+        "label": "openssl s_client on batch-01",
+        "lines": [
+          { "ts": "14:06:12.031", "level": "INFO", "source": "shell", "text": "depth=3 O = Digital Signature Trust Co., CN = DST Root CA X3" },
+          { "ts": "14:06:12.031", "level": "INFO", "source": "shell", "text": "verify error:num=10:certificate has expired" },
+          { "ts": "14:06:12.031", "level": "INFO", "source": "shell", "text": "notAfter=Sep 30 14:01:15 2021 GMT" },
+          { "ts": "14:06:12.031", "level": "INFO", "source": "shell", "text": "verify return:1" }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Comparison",
+        "items": [
+          { "key": "Partner leaf notAfter", "value": "Dec 1 09:12:44 2021 GMT" },
+          { "key": "Same upload from k8s jobs", "value": "Succeeds (OpenSSL 1.1.1)" },
+          { "key": "batch-01 OpenSSL", "value": "1.0.2k-fips" },
+          { "key": "batch-01 clock", "value": "In sync, chrony offset 2 ms" }
+        ]
+      }
+    ],
+    "question": "Why do only the legacy hosts reject the partner?",
+    "options": [
+      "Partner’s leaf certificate expired at 14:01 today",
+      "Partner stopped serving the R3 intermediate cert",
+      "Old OpenSSL chains to the expired DST Root CA X3",
+      "batch-01’s clock jumped past the cert’s notAfter"
+    ],
+    "answer": 2,
+    "explanation": {
+      "cause": "OpenSSL 1.0.2 builds its chain to the expired DST Root CA X3, not ISRG Root X1",
+      "why": "The partner serves Let’s Encrypt’s compatibility chain: leaf → R3 → ISRG Root X1 cross-signed by DST Root CA X3. OpenSSL 1.0.x follows it up to DST Root CA X3, which expired at 14:01:15 GMT, and fails instead of stopping at the trusted ISRG Root X1. OpenSSL 1.1.x finds the valid path.",
+      "tell": "s_client fails at depth=3 on DST Root CA X3, not the leaf; its notAfter is six minutes before the alert, and the same upload works from hosts running OpenSSL 1.1.1."
+    },
+    "source": {
+      "title": "DST Root CA X3 Expiration (September 2021) — Let’s Encrypt",
+      "url": "https://letsencrypt.org/docs/dst-root-ca-x3-expiration-september-2021/"
+    }
+  },
+  {
+    "id": "tls-ingress-default-cert",
+    "kind": "diagnose",
+    "topic": "dns-tls",
+    "difficulty": 1,
+    "alert": {
+      "service": "ledger-web",
+      "title": "ledger.example.com: HTTPS synthetic check failing since launch",
+      "severity": "SEV2",
+      "firedAt": "10:18"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "synthetics + manual curl",
+        "lines": [
+          { "ts": "10:15:02.441", "level": "ERROR", "source": "synthetics", "text": "Get \"https://ledger.example.com/healthz\": tls: failed to verify certificate: x509: certificate is valid for *.apps.example.com, apps.example.com, not ledger.example.com" },
+          { "ts": "10:15:40.006", "level": "INFO", "source": "synthetics", "text": "GET https://billing.apps.example.com/healthz 200 41ms" },
+          { "ts": "10:16:12.180", "level": "ERROR", "source": "shell", "text": "curl: (60) SSL: no alternative certificate subject name matches target host name 'ledger.example.com'" }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Shared ingress-nginx",
+        "items": [
+          { "key": "ledger.example.com A", "value": "203.0.113.40 (shared ingress LB)" },
+          { "key": "billing.apps.example.com A", "value": "203.0.113.40" },
+          { "key": "--default-ssl-certificate", "value": "edge/wildcard-apps (*.apps.example.com)" },
+          { "key": "Ingress ledger spec.tls", "value": "Not set" },
+          { "key": "Secret ledger-tls", "value": "Present: CN=ledger.example.com, valid 89 more days" }
+        ]
+      }
+    ],
+    "question": "Why does ledger.example.com present the wrong cert?",
+    "options": [
+      "ledger.example.com resolves to an old load balancer",
+      "Ingress lacks a TLS entry, so SNI gets the default cert",
+      "ledger’s new certificate is missing its intermediate",
+      "ledger’s certificate expired before the launch date"
+    ],
+    "answer": 1,
+    "explanation": {
+      "cause": "ledger’s Ingress has no tls block, so ingress-nginx serves its default cert",
+      "why": "ingress-nginx picks a certificate by matching SNI against hosts listed under spec.tls. ledger.example.com isn’t listed, so the controller falls back to --default-ssl-certificate, the *.apps.example.com wildcard. The ledger-tls Secret exists, but nothing references it.",
+      "tell": "The cert presented is the *.apps.example.com wildcard — the controller’s default — while ledger’s own valid Secret sits unused and the Ingress has no spec.tls."
+    }
+  },
+  {
+    "id": "tls-clock-skew-not-yet-valid",
+    "kind": "diagnose",
+    "topic": "dns-tls",
+    "difficulty": 3,
+    "alert": {
+      "service": "checkout-worker",
+      "title": "checkout-worker: recurring bursts of mTLS failures to payments-api",
+      "severity": "SEV2",
+      "firedAt": "09:52"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "mTLS handshake failures, checkout-worker",
+        "unit": "/s",
+        "points": [0, 1, 0, 0, 38, 41, 0, 1, 0, 0, 0, 1, 37, 40, 1, 0, 0, 0, 1, 0, 39, 42, 0, 0, 1, 0, 0, 0, 40, 38],
+        "markAt": 28
+      },
+      {
+        "type": "log",
+        "label": "checkout-worker, all nodes (sorted by ts)",
+        "lines": [
+          { "ts": "09:44:21.207", "level": "ERROR", "source": "ip-10-0-7-21", "text": "Post \"https://payments-api.mesh.internal:8443/v1/charge\": tls: failed to verify certificate: x509: certificate has expired or is not yet valid: current time 2026-03-14T09:44:21Z is before 2026-03-14T09:49:37Z" },
+          { "ts": "09:44:30.660", "level": "ERROR", "source": "ip-10-0-7-38", "text": "Post \"https://payments-api.mesh.internal:8443/v1/charge\": tls: failed to verify certificate: x509: certificate has expired or is not yet valid: current time 2026-03-14T09:44:30Z is before 2026-03-14T09:49:37Z" },
+          { "ts": "09:44:35.118", "level": "WARN", "source": "ip-10-0-7-21", "text": "payments-api: retry 3/3 failed, order 7731902 requeued" },
+          { "ts": "09:50:12.004", "level": "INFO", "source": "ip-10-0-3-11", "text": "charge ok order=7731877 latency=38ms" },
+          { "ts": "09:50:19.551", "level": "INFO", "source": "ip-10-0-5-02", "text": "charge ok order=7731880 latency=41ms" }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Context",
+        "items": [
+          { "key": "payments-api cert", "value": "Vault PKI, TTL 1h, renewed at ~40 min, backdated 30s" },
+          { "key": "Last renewal", "value": "09:50:07 (Vault server time)" },
+          { "key": "Failing callers", "value": "ip-10-0-7-21, ip-10-0-7-38 only (of 30 nodes)" },
+          { "key": "Node image", "value": "Those 2 run canary AMI v57; the rest run v56" }
+        ]
+      }
+    ],
+    "question": "Why do these bursts keep recurring?",
+    "options": [
+      "Vault agent renews too late, so certs lapse before swap",
+      "Two nodes kept a stale CA bundle from before a CA rotation",
+      "payments-api serves the old cert until its pods restart",
+      "Clocks on two nodes lag, so fresh certs aren’t valid yet"
+    ],
+    "answer": 3,
+    "explanation": {
+      "cause": "Clocks on two canary-AMI nodes run ~6 min slow; fresh certs look not-yet-valid",
+      "why": "Vault backdates notBefore by only 30s. After each renewal, a node whose clock lags ~6 min sees a certificate from its future and rejects it until its own clock passes notBefore — a burst every ~40 min. The canary AMI shipped without a working time sync client.",
+      "tell": "The error says “is before” (not yet valid), not “is after”; only two nodes fail; and their log timestamps sit ~6 min behind the 09:50 renewal they’re rejecting."
+    }
+  },
+  {
+    "id": "dns-negative-cache-before-create",
+    "kind": "find-line",
+    "topic": "dns-tls",
+    "difficulty": 3,
+    "alert": {
+      "service": "checkout-api",
+      "title": "checkout-api: payments-v2 cutover, 100% name resolution failures",
+      "severity": "SEV1",
+      "firedAt": "03:03"
+    },
+    "evidence": [
+      {
+        "type": "facts",
+        "label": "At 03:06:23, resolving payments-v2",
+        "items": [
+          { "key": "dig @10.20.0.2 (VPC resolver)", "value": "NOERROR, A 10.20.8.14" },
+          { "key": "dig @10.20.0.53 (dns-cache)", "value": "NXDOMAIN, SOA in authority with TTL 529" },
+          { "key": "Zone SOA", "value": "Record TTL 900, minimum 86400" },
+          { "key": "dns-cache", "value": "CoreDNS: forward + cache" }
+        ]
+      },
+      {
+        "type": "log",
+        "label": "deploy pipeline + dns-cache + checkout-api",
+        "lines": [
+          { "ts": "03:00:11.882", "level": "INFO", "source": "terraform", "text": "aws_route53_record.payments_v2: Creating..." },
+          { "ts": "03:00:12.104", "level": "INFO", "source": "coredns", "text": "[INFO] 10.20.4.31:41877 - 5120 \"A IN payments-v2.internal.example.com. udp 61 false 1232\" NXDOMAIN qr,rd,ra 141 0.002114233s" },
+          { "ts": "03:00:12.109", "level": "INFO", "source": "coredns", "text": "[INFO] 10.20.4.31:52210 - 6402 \"A IN payments-v2.internal.example.com.us-west-2.compute.internal. udp 88 false 1232\" NXDOMAIN qr,rd,ra 186 0.001804410s" },
+          { "ts": "03:00:21.903", "level": "INFO", "source": "terraform", "text": "aws_route53_record.payments_v2: Still creating... [10s elapsed]" },
+          { "ts": "03:00:52.410", "level": "INFO", "source": "terraform", "text": "aws_route53_record.payments_v2: Creation complete after 41s [id=Z08419273KXJ2Q9OD1P4Q_payments-v2.internal.example.com_A]" },
+          { "ts": "03:01:30.006", "level": "INFO", "source": "deploy", "text": "traffic shift checkout-api -> payments-v2: 100%" },
+          { "ts": "03:01:31.214", "level": "ERROR", "source": "checkout-api", "text": "dial tcp: lookup payments-v2.internal.example.com on 10.20.0.53:53: no such host" },
+          { "ts": "03:01:31.590", "level": "WARN", "source": "checkout-api", "text": "payments-v2 unreachable, no fallback configured for route; returning 503" }
+        ]
+      }
+    ],
+    "question": "Which line explains why lookups still fail after the record exists?",
+    "answer": { "evidence": 1, "line": 1 },
+    "explanation": {
+      "cause": "An NXDOMAIN cached before the record existed outlived the cutover",
+      "why": "A lookup at 03:00:12 hit dns-cache 40s before Terraform finished creating the record. Route 53 answered NXDOMAIN with its SOA, and the cache kept it for min(SOA TTL, SOA minimum) = 900s. Every lookup until ~03:15 gets the cached “no such host”, though the record exists.",
+      "tell": "The NXDOMAIN at 03:00:12 lands between “Creating...” and “Creation complete”, and dns-cache’s TTL of 529 at 03:06:23 counts down from exactly that moment."
+    },
+    "source": {
+      "title": "NS and SOA records that Amazon Route 53 creates for a public hosted zone",
+      "url": "https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/SOA-NSrecords.html"
+    }
+  }
+]

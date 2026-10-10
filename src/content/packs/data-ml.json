@@ -1,0 +1,985 @@
+[
+  {
+    "id": "data-spark-null-key-window-oom",
+    "kind": "diagnose",
+    "topic": "data-pipelines",
+    "difficulty": 1,
+    "alert": {
+      "service": "sessionize-events",
+      "title": "Airflow SLA miss: daily_sessions — sessionize_events failed",
+      "severity": "SEV2",
+      "firedAt": "04:31"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "spark driver + executor 9, stage 14",
+        "lines": [
+          {
+            "ts": "03:41:07.212",
+            "level": "INFO",
+            "source": "TaskSetManager",
+            "text": "Finished task 199.0 in stage 14.0 (TID 9473) in 38117 ms on 10.0.4.17 (executor 12) (199/200)"
+          },
+          {
+            "ts": "03:58:52.603",
+            "level": "INFO",
+            "source": "UnsafeExternalSorter",
+            "text": "Thread 87 spilling sort data of 1856.0 MiB to disk (23  times so far)"
+          },
+          {
+            "ts": "04:09:31.448",
+            "level": "INFO",
+            "source": "UnsafeExternalSorter",
+            "text": "Thread 87 spilling sort data of 1856.0 MiB to disk (24  times so far)"
+          },
+          {
+            "ts": "04:12:15.880",
+            "level": "WARN",
+            "source": "TaskSetManager",
+            "text": "Lost task 37.0 in stage 14.0 (TID 9311) (10.0.4.21 executor 9): java.lang.OutOfMemoryError: Java heap space"
+          },
+          {
+            "ts": "04:29:44.017",
+            "level": "WARN",
+            "source": "TaskSetManager",
+            "text": "Lost task 37.3 in stage 14.0 (TID 9688) (10.0.4.33 executor 17): java.lang.OutOfMemoryError: Java heap space"
+          },
+          {
+            "ts": "04:29:44.019",
+            "level": "ERROR",
+            "source": "TaskSetManager",
+            "text": "Task 37 in stage 14.0 failed 4 times; aborting job"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "stage 14: Window [user_id] ORDER BY event_ts",
+        "items": [
+          {
+            "key": "shuffle read per task",
+            "value": "median 121.6 MiB · max 47.3 GiB (task 37)"
+          },
+          {
+            "key": "task duration",
+            "value": "median 36 s · task 37 ran 31 min before OOM"
+          },
+          {
+            "key": "top user_id by rows today",
+            "value": "NULL — 39.4% of 2.1B rows"
+          },
+          {
+            "key": "NULL user_id share last week",
+            "value": "0.3%"
+          },
+          {
+            "key": "mobile app 8.4 (Oct 8)",
+            "value": "logged-out events now sent without user_id"
+          },
+          {
+            "key": "spark.sql.shuffle.partitions",
+            "value": "200 · AQE enabled"
+          }
+        ]
+      }
+    ],
+    "question": "Why does one task run out of memory while 199 finish?",
+    "options": [
+      "Executors undersized for this week's event volume",
+      "Too few shuffle partitions for the window stage",
+      "A Python UDF leaking memory across rows",
+      "One NULL user_id key landing in a single task"
+    ],
+    "answer": 3,
+    "explanation": {
+      "cause": "39% of rows had user_id NULL, so the window shuffle sent all of them to one task",
+      "why": "Window.partitionBy(\"user_id\") puts every row with the same key in one partition and sorts it. When app 8.4 stopped sending user_id for logged-out events, ~830M NULL rows hashed to task 37. More executors or shuffle partitions can’t split one key, and AQE’s skew handling only covers joins. Filter or salt the NULLs.",
+      "tell": "199 of 200 tasks finish in ~36 s, task 37 reads 47 GiB against a 122 MiB median, and NULL user_id went from 0.3% to 39.4% the day app 8.4 shipped."
+    },
+    "source": {
+      "title": "Spark docs — Performance Tuning: Optimizing Skew Join",
+      "url": "https://spark.apache.org/docs/latest/sql-performance-tuning.html"
+    }
+  },
+  {
+    "id": "data-not-in-null-winback-empty",
+    "kind": "find-line",
+    "topic": "data-pipelines",
+    "difficulty": 1,
+    "alert": {
+      "service": "audience-export",
+      "title": "Monte Carlo volume anomaly: marketing.winback_audience 0 rows",
+      "severity": "SEV3",
+      "firedAt": "06:15"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "winback_audience rows inserted per day",
+        "unit": "rows",
+        "points": [
+          18204,
+          17911,
+          18467,
+          18120,
+          17702,
+          18391,
+          18055,
+          17986,
+          18240,
+          18133,
+          17874,
+          0,
+          0,
+          0
+        ],
+        "markAt": 11
+      },
+      {
+        "type": "facts",
+        "label": "upstream changes",
+        "items": [
+          {
+            "key": "guest checkout",
+            "value": "launched Oct 8 — orders stored with customer_id NULL"
+          },
+          {
+            "key": "sales.orders NULL customer_id",
+            "value": "1,204 rows since Oct 8 (0 before)"
+          },
+          {
+            "key": "active opted-in customers",
+            "value": "412,880 (flat week over week)"
+          },
+          {
+            "key": "export job status",
+            "value": "success · 0 rows · 2.1 s"
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "label": "jobs/winback_audience.sql",
+        "language": "sql",
+        "startLine": 1,
+        "lines": [
+          "INSERT INTO marketing.winback_audience (customer_id, email, last_seen_at)",
+          "SELECT c.customer_id, c.email, c.last_seen_at",
+          "FROM crm.customers AS c",
+          "WHERE c.status = 'active'",
+          "  AND c.marketing_opt_in",
+          "  AND c.customer_id NOT IN (",
+          "    SELECT o.customer_id",
+          "    FROM sales.orders AS o",
+          "    WHERE o.ordered_at >= now() - interval '90 days'",
+          "  );"
+        ]
+      }
+    ],
+    "question": "Tap the line that makes the export return zero rows.",
+    "answer": {
+      "evidence": 2,
+      "line": 5
+    },
+    "explanation": {
+      "cause": "NOT IN against a subquery that contains a NULL can never evaluate to TRUE",
+      "why": "Guest checkout writes orders with customer_id NULL. For an unmatched customer, x NOT IN (…, NULL) is NULL rather than TRUE, and for a matched one it’s FALSE, so WHERE rejects every row and the job “succeeds” with 0. Use NOT EXISTS, or add o.customer_id IS NOT NULL to the subquery.",
+      "tell": "Rows fell to exactly 0, not partway, on the day NULL customer_ids first appeared in sales.orders, while the customer base stayed flat."
+    },
+    "source": {
+      "title": "PostgreSQL wiki — Don't Do This: Don't use NOT IN",
+      "url": "https://wiki.postgresql.org/wiki/Don%27t_Do_This"
+    }
+  },
+  {
+    "id": "data-join-fanout-split-shipments",
+    "kind": "find-line",
+    "topic": "data-pipelines",
+    "difficulty": 2,
+    "alert": {
+      "service": "finance-marts",
+      "title": "Revenue reconciliation failed: daily_revenue 31% above PSP settlements",
+      "severity": "SEV2",
+      "firedAt": "09:02"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "daily_revenue vs PSP settlements",
+        "unit": "% diff",
+        "points": [
+          0.4,
+          0.2,
+          0.3,
+          0.5,
+          0.1,
+          0.3,
+          0.2,
+          0.4,
+          27.8,
+          30.6,
+          29.9,
+          31.2,
+          30.4,
+          31.0
+        ],
+        "markAt": 8
+      },
+      {
+        "type": "facts",
+        "label": "context",
+        "items": [
+          {
+            "key": "split shipments",
+            "value": "enabled Oct 6 — one order can ship in 2–4 boxes"
+          },
+          {
+            "key": "orders with >1 shipment",
+            "value": "26% since Oct 6 (0% before)"
+          },
+          {
+            "key": "daily_revenue.orders vs OMS",
+            "value": "matches exactly every day"
+          },
+          {
+            "key": "sales.shipments grain",
+            "value": "one row per box (shipment_id)"
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "label": "models/finance/daily_revenue.sql",
+        "language": "sql",
+        "startLine": 1,
+        "lines": [
+          "SELECT",
+          "  date_trunc('day', o.ordered_at) AS order_date,",
+          "  o.region,",
+          "  count(DISTINCT o.order_id)      AS orders,",
+          "  sum(o.total_amount)             AS gross_revenue",
+          "FROM sales.orders AS o",
+          "JOIN sales.shipments AS s ON s.order_id = o.order_id",
+          "WHERE o.status = 'completed'",
+          "  AND s.carrier_status <> 'cancelled'",
+          "  AND o.ordered_at >= current_date - 35",
+          "GROUP BY 1, 2",
+          "ORDER BY 1, 2;"
+        ]
+      }
+    ],
+    "question": "Tap the line that inflates gross_revenue.",
+    "answer": {
+      "evidence": 2,
+      "line": 6
+    },
+    "explanation": {
+      "cause": "Joining order-grain revenue to box-grain shipments repeats total_amount once per box",
+      "why": "Since split shipments launched, an order can have 2–4 rows in sales.shipments, so the join repeats each order row per box and sum(o.total_amount) adds it again. count(DISTINCT) hides the fan-out on the orders column. Filter with EXISTS on shipments, or aggregate shipments to one row per order before joining.",
+      "tell": "Order counts still match the OMS while revenue jumped the day split shipments launched — only the non-DISTINCT aggregate is inflated."
+    }
+  },
+  {
+    "id": "data-watermark-drops-offline-events",
+    "kind": "diagnose",
+    "topic": "data-pipelines",
+    "difficulty": 3,
+    "alert": {
+      "service": "events-stream",
+      "title": "Reconciliation: stream vs batch session_starts off by 4.1% (>1%)",
+      "severity": "SEV3",
+      "firedAt": "10:05"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "streaming count below nightly batch",
+        "unit": "%",
+        "points": [
+          0.2,
+          0.1,
+          0.3,
+          0.2,
+          0.2,
+          0.1,
+          0.3,
+          1.8,
+          3.2,
+          3.9,
+          4.1,
+          4.0,
+          4.2,
+          4.1
+        ],
+        "markAt": 7
+      },
+      {
+        "type": "facts",
+        "label": "sessions_5m: query.lastProgress + context",
+        "items": [
+          {
+            "key": "withWatermark",
+            "value": "event_ts, 10 minutes · outputMode append"
+          },
+          {
+            "key": "numRowsDroppedByWatermark",
+            "value": "18412 (stateOperators[0], last trigger)"
+          },
+          {
+            "key": "Kafka consumer lag",
+            "value": "≤ 3 s on all partitions"
+          },
+          {
+            "key": "nightly batch",
+            "value": "same raw topic archive, dedupes on event_id"
+          },
+          {
+            "key": "mobile app 6.2 (Oct 3)",
+            "value": "queues events offline, uploads on reconnect"
+          }
+        ]
+      },
+      {
+        "type": "log",
+        "label": "ingest-gw, upload batches",
+        "lines": [
+          {
+            "ts": "09:58:12.044",
+            "level": "INFO",
+            "source": "ingest-gw",
+            "text": "batch upload client=android/6.2 events=41 oldest_event_age=38s"
+          },
+          {
+            "ts": "09:58:12.391",
+            "level": "INFO",
+            "source": "ingest-gw",
+            "text": "batch upload client=ios/6.2 events=312 oldest_event_age=47m"
+          },
+          {
+            "ts": "09:58:13.007",
+            "level": "INFO",
+            "source": "ingest-gw",
+            "text": "batch upload client=ios/6.1 events=6 oldest_event_age=2s"
+          },
+          {
+            "ts": "09:58:14.552",
+            "level": "INFO",
+            "source": "ingest-gw",
+            "text": "batch upload client=android/6.2 events=188 oldest_event_age=26m"
+          }
+        ]
+      }
+    ],
+    "question": "Why does the stream count fewer sessions than the batch?",
+    "options": [
+      "Kafka retention expiring offsets before the stream reads them",
+      "Nightly batch double-counting events from retried uploads",
+      "Offline-queued events arriving behind the 10-min watermark",
+      "Micro-batch triggers falling behind the input rate"
+    ],
+    "answer": 2,
+    "explanation": {
+      "cause": "App 6.2 uploads offline-queued events late, and rows behind the watermark are dropped",
+      "why": "The watermark trails the max event_ts seen by 10 minutes. Events queued offline arrive 20–60 minutes old, after their 5-minute window was finalized in append mode, so Spark drops them and counts them in numRowsDroppedByWatermark. The nightly batch has no watermark and counts everything.",
+      "tell": "numRowsDroppedByWatermark is non-zero while Kafka lag is ~3 s, uploads carry events 26–47 min old, and the gap opened when app 6.2 shipped."
+    },
+    "source": {
+      "title": "Spark Structured Streaming guide — Handling Late Data and Watermarking",
+      "url": "https://spark.apache.org/docs/latest/streaming/apis-on-dataframes-and-datasets.html"
+    }
+  },
+  {
+    "id": "data-dbt-incremental-created-at-filter",
+    "kind": "find-line",
+    "topic": "data-pipelines",
+    "difficulty": 2,
+    "alert": {
+      "service": "analytics-dbt",
+      "title": "dbt test failed: fct_orders status != stg_orders (38,912 rows)",
+      "severity": "SEV3",
+      "firedAt": "07:20"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "fct_orders rows with stale status",
+        "unit": "rows",
+        "points": [
+          31840,
+          33102,
+          0,
+          2210,
+          4875,
+          7391,
+          10120,
+          12904,
+          15731,
+          18660,
+          21892,
+          25010,
+          28377,
+          31608,
+          35022,
+          38912
+        ],
+        "markAt": 2
+      },
+      {
+        "type": "facts",
+        "label": "fct_orders",
+        "items": [
+          {
+            "key": "materialization",
+            "value": "incremental · unique_key=order_id · hourly"
+          },
+          {
+            "key": "last --full-refresh",
+            "value": "Sep 28 — mismatches dropped to 0"
+          },
+          {
+            "key": "mismatched rows",
+            "value": "all created before last run, updated after it"
+          },
+          {
+            "key": "typical mismatch",
+            "value": "fct: pending · source: shipped / refunded"
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "label": "models/marts/fct_orders.sql",
+        "language": "sql",
+        "startLine": 1,
+        "lines": [
+          "{{",
+          "  config(",
+          "    materialized='incremental',",
+          "    unique_key='order_id',",
+          "    on_schema_change='append_new_columns'",
+          "  )",
+          "}}",
+          "",
+          "select",
+          "    order_id,",
+          "    customer_id,",
+          "    status,",
+          "    total_amount,",
+          "    created_at,",
+          "    updated_at",
+          "from {{ ref('stg_orders') }}",
+          "",
+          "{% if is_incremental() %}",
+          "where created_at > (select max(created_at) from {{ this }})",
+          "{% endif %}"
+        ]
+      }
+    ],
+    "question": "Tap the line that keeps order status from updating.",
+    "answer": {
+      "evidence": 2,
+      "line": 18
+    },
+    "explanation": {
+      "cause": "Filtering on created_at means status changes to existing orders are never re-selected",
+      "why": "On incremental runs dbt only selects rows that pass the is_incremental() filter. Orders change status days after they’re created, but created_at stays old, so the changed rows never reach the unique_key merge. Filter on updated_at (with a small lookback) to capture both new and modified rows.",
+      "tell": "Every mismatched row was created before the last run but updated after it, and the count only resets on --full-refresh."
+    },
+    "source": {
+      "title": "dbt docs — Configure incremental models",
+      "url": "https://docs.getdbt.com/docs/build/incremental-models"
+    }
+  },
+  {
+    "id": "ml-gpu-oom-eager-attention-seq-len",
+    "kind": "diagnose",
+    "topic": "machine-learning",
+    "difficulty": 1,
+    "alert": {
+      "service": "llm-finetune",
+      "title": "Training job ft-support-8k failed on step 0 (exit code 1)",
+      "severity": "SEV3",
+      "firedAt": "14:07"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "ft-support-8k, rank 0",
+        "lines": [
+          {
+            "ts": "14:06:31.902",
+            "level": "INFO",
+            "source": "train",
+            "text": "config: max_seq_len=8192 micro_batch_size=8 num_heads=32 attn_impl=eager dtype=bf16"
+          },
+          {
+            "ts": "14:06:58.114",
+            "level": "INFO",
+            "source": "train",
+            "text": "model loaded on cuda:0, 41 GiB after optimizer init"
+          },
+          {
+            "ts": "14:07:02.530",
+            "level": "INFO",
+            "source": "train",
+            "text": "step 0: forward"
+          },
+          {
+            "ts": "14:07:03.871",
+            "level": "ERROR",
+            "source": "train",
+            "text": "torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 32.00 GiB. GPU 0 has a total capacity of 79.15 GiB of which 21.36 GiB is free."
+          },
+          {
+            "ts": "14:07:03.871",
+            "level": "ERROR",
+            "source": "train",
+            "text": "Process 3871 has 57.78 GiB memory in use. Of the allocated memory 55.91 GiB is allocated by PyTorch, and 1.21 GiB is reserved by PyTorch but unallocated."
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "diff vs last good run (ft-support-1k)",
+        "items": [
+          {
+            "key": "max_seq_len",
+            "value": "1024 → 8192"
+          },
+          {
+            "key": "micro_batch_size",
+            "value": "8 (unchanged)"
+          },
+          {
+            "key": "attn_impl",
+            "value": "eager (unchanged)"
+          },
+          {
+            "key": "last good run peak memory",
+            "value": "44.6 GiB, flat over 6,000 steps"
+          },
+          {
+            "key": "nvidia-smi before launch",
+            "value": "0 MiB used, no other processes"
+          }
+        ]
+      }
+    ],
+    "question": "Why does the run OOM on its very first step?",
+    "options": [
+      "Eager attention scores grow with seq_len², 64× at 8192",
+      "Training loop keeps graphs alive by summing loss tensors",
+      "Allocator fragmentation from reserved-but-unused memory",
+      "A stale process from the last run still holding the GPU"
+    ],
+    "answer": 0,
+    "explanation": {
+      "cause": "Raising max_seq_len 8× made eager attention’s score tensor 64× larger",
+      "why": "Eager attention materializes a batch×heads×seq×seq score tensor: 8×32×8192×8192 in bf16 is exactly 32 GiB for one layer, the failed allocation. A leak needs many steps, only 1.21 GiB is reserved-but-unallocated, and no other process holds the GPU. Use a fused kernel (SDPA/FlashAttention) or a smaller micro-batch.",
+      "tell": "It dies on step 0, and the 32.00 GiB request is exactly 8 × 32 heads × 8192² × 2 bytes — one layer’s attention scores."
+    }
+  },
+  {
+    "id": "ml-random-split-lag-feature-leak",
+    "kind": "find-line",
+    "topic": "machine-learning",
+    "difficulty": 3,
+    "alert": {
+      "service": "demand-forecast",
+      "title": "Model monitor: live WAPE 19.4% vs 6.1% at validation (forecast v3)",
+      "severity": "SEV3",
+      "firedAt": "08:30"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "live WAPE, daily (v2 → v3 at mark)",
+        "unit": "%",
+        "points": [
+          12.6,
+          13.1,
+          12.4,
+          12.9,
+          13.3,
+          12.7,
+          12.8,
+          19.1,
+          19.6,
+          18.8,
+          19.9,
+          19.2,
+          19.7,
+          19.4
+        ],
+        "markAt": 7
+      },
+      {
+        "type": "facts",
+        "label": "v3 release notes",
+        "items": [
+          {
+            "key": "v3 validation WAPE",
+            "value": "6.1% (20% holdout)"
+          },
+          {
+            "key": "v2 validation WAPE",
+            "value": "12.8% (last-28-days holdout)"
+          },
+          {
+            "key": "training data",
+            "value": "41.6M store-sku-days, Jan 2023 → Sep 2026"
+          },
+          {
+            "key": "serving lag_1 / lag_7",
+            "value": "match offline recompute on 99.98% of rows"
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "label": "train_forecast.py",
+        "language": "python",
+        "startLine": 1,
+        "lines": [
+          "import lightgbm as lgb",
+          "import mlflow",
+          "import pandas as pd",
+          "from sklearn.model_selection import train_test_split",
+          "",
+          "df = pd.read_parquet(\"s3://ml-features/demand/store_sku_daily/\")",
+          "df = df.sort_values([\"store_id\", \"sku_id\", \"date\"])",
+          "",
+          "units = df.groupby([\"store_id\", \"sku_id\"])[\"units_sold\"]",
+          "df[\"lag_1\"] = units.shift(1)",
+          "df[\"lag_7\"] = units.shift(7)",
+          "df[\"roll_mean_28\"] = units.transform(lambda s: s.shift(1).rolling(28).mean())",
+          "df = df.dropna(subset=[\"lag_7\", \"roll_mean_28\"])",
+          "",
+          "FEATURES = [\"lag_1\", \"lag_7\", \"roll_mean_28\", \"dow\", \"promo_flag\", \"price\"]",
+          "X_tr, X_val, y_tr, y_val = train_test_split(df[FEATURES], df[\"units_sold\"], test_size=0.2)",
+          "",
+          "model = lgb.LGBMRegressor(n_estimators=800, learning_rate=0.03, num_leaves=63)",
+          "model.fit(X_tr, y_tr, eval_set=[(X_val, y_val)])",
+          "pred = model.predict(X_val)",
+          "mlflow.log_metric(\"val_wape\", abs(y_val - pred).sum() / y_val.sum())"
+        ]
+      }
+    ],
+    "question": "Tap the line that made v3 look twice as good as it is.",
+    "answer": {
+      "evidence": 2,
+      "line": 15
+    },
+    "explanation": {
+      "cause": "A shuffled split puts each validation day’s next day in training, leaking targets via lags",
+      "why": "lag_1 for day t+1 is the units_sold target of day t. train_test_split shuffles by default, so most validation days have their next day in training and the model is scored on targets it has effectively seen. Production only has the past. Hold out the last N weeks, or use TimeSeriesSplit.",
+      "tell": "v3 validated at half of v2’s honest last-28-days error yet is worse live, serving features match offline, and the split never passes shuffle=False."
+    },
+    "source": {
+      "title": "scikit-learn — train_test_split (shuffle defaults to True)",
+      "url": "https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.train_test_split.html"
+    }
+  },
+  {
+    "id": "ml-train-serve-skew-log-transform",
+    "kind": "diagnose",
+    "topic": "machine-learning",
+    "difficulty": 3,
+    "alert": {
+      "service": "propensity-scorer",
+      "title": "Model monitor: mean score 0.71 vs 0.12 baseline (purchase-propensity v9)",
+      "severity": "SEV2",
+      "firedAt": "11:42"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "mean predicted purchase probability",
+        "unit": "p",
+        "points": [
+          0.12,
+          0.11,
+          0.12,
+          0.13,
+          0.12,
+          0.11,
+          0.12,
+          0.12,
+          0.7,
+          0.71,
+          0.72,
+          0.71,
+          0.7,
+          0.71
+        ],
+        "markAt": 8
+      },
+      {
+        "type": "facts",
+        "label": "txn_amount_30d: training vs serving",
+        "items": [
+          {
+            "key": "v9 training set",
+            "value": "mean 3.92 · p50 3.97 · max 9.81"
+          },
+          {
+            "key": "serving requests today",
+            "value": "mean 88.40 · p50 52.10 · max 18240.00"
+          },
+          {
+            "key": "warehouse raw, last 90 days",
+            "value": "mean 87.9 · p50 51.8 — flat"
+          },
+          {
+            "key": "today via training pipeline",
+            "value": "offline AUC 0.88"
+          },
+          {
+            "key": "same rows, online scores",
+            "value": "AUC 0.61"
+          },
+          {
+            "key": "feature code",
+            "value": "training: feature_prep.py · serving: Java scorer"
+          }
+        ]
+      }
+    ],
+    "question": "What broke purchase-propensity v9 in production?",
+    "options": [
+      "Real drift: customers spending more since the launch",
+      "Training applied log1p to amount; serving sends raw",
+      "Target leakage inflating v9's offline AUC",
+      "Online feature store serving stale 30-day amounts"
+    ],
+    "answer": 1,
+    "explanation": {
+      "cause": "Training log-transformed txn_amount_30d; the serving path sends raw dollar amounts",
+      "why": "The training p50 of 3.97 is log1p of the raw median 51.8, while serving sends values like 52.10. The model reads every customer as a huge spender, so scores jump. Raw amounts haven’t moved, and today’s rows scored through the training pipeline still hit 0.88 AUC, ruling out drift and leakage. Share one transform across both paths.",
+      "tell": "Training p50 3.97 = log1p(51.8), serving p50 is 52.10 raw, the warehouse is flat, and replaying today’s rows offline restores AUC."
+    },
+    "source": {
+      "title": "Google — Rules of Machine Learning (training-serving skew, Rule #32)",
+      "url": "https://developers.google.com/machine-learning/guides/rules-of-ml"
+    }
+  },
+  {
+    "id": "ml-nan-log-of-softmax-underflow",
+    "kind": "find-line",
+    "topic": "machine-learning",
+    "difficulty": 2,
+    "alert": {
+      "service": "intent-train",
+      "title": "Training run intent-v5: loss is NaN from step 14238, job halted",
+      "severity": "SEV3",
+      "firedAt": "03:12"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "max − min logit per batch",
+        "unit": "logit",
+        "points": [
+          61,
+          66,
+          70,
+          74,
+          77,
+          81,
+          84,
+          88,
+          91,
+          94,
+          97,
+          99,
+          101,
+          103,
+          105,
+          106
+        ],
+        "markAt": 14
+      },
+      {
+        "type": "log",
+        "label": "trainer, then rerun with detect_anomaly",
+        "lines": [
+          {
+            "ts": "03:04:51",
+            "level": "INFO",
+            "source": "trainer",
+            "text": "step=14100 loss=0.0213 grad_norm=0.87 lr=2.71e-04"
+          },
+          {
+            "ts": "03:08:02",
+            "level": "INFO",
+            "source": "trainer",
+            "text": "step=14200 loss=0.0188 grad_norm=0.92 lr=2.70e-04"
+          },
+          {
+            "ts": "03:08:51",
+            "level": "WARN",
+            "source": "trainer",
+            "text": "step=14237 loss=0.0171 grad_norm=nan lr=2.70e-04"
+          },
+          {
+            "ts": "03:08:52",
+            "level": "WARN",
+            "source": "trainer",
+            "text": "step=14238 loss=nan grad_norm=nan lr=2.70e-04"
+          },
+          {
+            "ts": "rerun 14237",
+            "level": "WARN",
+            "source": "torch",
+            "text": "UserWarning: Error detected in LogBackward0. Traceback of forward call that caused the error:"
+          },
+          {
+            "ts": "rerun 14237",
+            "level": "ERROR",
+            "source": "torch",
+            "text": "RuntimeError: Function 'LogBackward0' returned nan values in its 0th output."
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "label": "intent/train.py",
+        "language": "python",
+        "startLine": 41,
+        "lines": [
+          "def train_step(model, batch, optimizer, scheduler):",
+          "    input_ids = batch[\"input_ids\"].cuda(non_blocking=True)",
+          "    labels = batch[\"labels\"].cuda(non_blocking=True)",
+          "    with torch.autocast(\"cuda\", dtype=torch.bfloat16):",
+          "        logits = model(input_ids)",
+          "    log_probs = torch.log(torch.softmax(logits.float(), dim=-1))",
+          "    loss = F.nll_loss(log_probs, labels)",
+          "    optimizer.zero_grad(set_to_none=True)",
+          "    loss.backward()",
+          "    grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)",
+          "    optimizer.step()",
+          "    scheduler.step()",
+          "    return loss.detach(), grad_norm"
+        ]
+      }
+    ],
+    "question": "Tap the line that turns the weights into NaN.",
+    "answer": {
+      "evidence": 2,
+      "line": 5
+    },
+    "explanation": {
+      "cause": "log(softmax(x)) underflows: softmax returns exact zeros and log’s backward divides 0 by 0",
+      "why": "Once a logit sits ~104 below the max, float32 softmax rounds its probability to 0. nll_loss sends zero gradient to those classes, and LogBackward computes grad / input = 0/0 = NaN, so the loss is finite but the weights go NaN after optimizer.step(). Clipping can’t fix a NaN norm. Use F.cross_entropy or F.log_softmax.",
+      "tell": "Loss was a finite 0.0171 on the step grad_norm went NaN, the logit range had just crossed ~104, and anomaly mode names LogBackward0."
+    },
+    "source": {
+      "title": "PyTorch docs — nn.Softmax (use LogSoftmax with NLLLoss)",
+      "url": "https://pytorch.org/docs/2.5/generated/torch.nn.Softmax.html"
+    }
+  },
+  {
+    "id": "ml-stale-online-features-paused-dag",
+    "kind": "diagnose",
+    "topic": "machine-learning",
+    "difficulty": 2,
+    "alert": {
+      "service": "fraud-scorer",
+      "title": "Model monitor: score PSI 0.31 > 0.2 on fraud-txn-v14 (24h)",
+      "severity": "SEV2",
+      "firedAt": "09:40"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "score PSI vs training baseline, 6h buckets",
+        "unit": "PSI",
+        "points": [
+          0.03,
+          0.02,
+          0.04,
+          0.03,
+          0.02,
+          0.03,
+          0.04,
+          0.03,
+          0.09,
+          0.14,
+          0.19,
+          0.22,
+          0.26,
+          0.28,
+          0.3,
+          0.31
+        ],
+        "markAt": 8
+      },
+      {
+        "type": "facts",
+        "label": "online feature store + model registry",
+        "items": [
+          {
+            "key": "txn_count_1h newest event_ts",
+            "value": "2026-10-07 01:00 UTC"
+          },
+          {
+            "key": "materialize_txn_features DAG",
+            "value": "paused Oct 7 01:14 for warehouse migration"
+          },
+          {
+            "key": "spot check card c-88213",
+            "value": "online txn_count_1h=7 · warehouse now=0"
+          },
+          {
+            "key": "model in production",
+            "value": "fraud-txn-v14 since Sep 22 (unchanged)"
+          }
+        ]
+      },
+      {
+        "type": "log",
+        "label": "fraud-scorer",
+        "lines": [
+          {
+            "ts": "09:38:12.400",
+            "level": "INFO",
+            "source": "fraud-scorer",
+            "text": "feature fetch ok keys=42 misses=0 latency=3ms card=c-88213"
+          },
+          {
+            "ts": "09:38:12.402",
+            "level": "INFO",
+            "source": "fraud-scorer",
+            "text": "score=0.912 decision=review model=fraud-txn-v14 card=c-88213"
+          },
+          {
+            "ts": "09:38:12.733",
+            "level": "INFO",
+            "source": "fraud-scorer",
+            "text": "feature fetch ok keys=42 misses=0 latency=2ms card=c-10377"
+          },
+          {
+            "ts": "09:38:12.735",
+            "level": "INFO",
+            "source": "fraud-scorer",
+            "text": "score=0.004 decision=approve model=fraud-txn-v14 card=c-10377"
+          }
+        ]
+      }
+    ],
+    "question": "Why has the fraud score distribution drifted?",
+    "options": [
+      "Fraud patterns shifting after this week's promo launch",
+      "Online features frozen since materialization paused",
+      "A model deploy changing the score calibration",
+      "Online store timing out, scorer falling back to defaults"
+    ],
+    "answer": 1,
+    "explanation": {
+      "cause": "With the materialization DAG paused, the online store kept serving Oct 7 feature values",
+      "why": "Velocity features like txn_count_1h are only right if materialized continuously. With the DAG paused, every lookup returns the last value written, so a card busy on Oct 7 still looks busy today and gets sent to review. Lookups still hit in 2–3 ms, so nothing errors; only the score distribution drifts.",
+      "tell": "A 1-hour feature’s newest event is three days old, PSI rises from the hour the DAG was paused, and the model version hasn’t changed."
+    }
+  }
+]

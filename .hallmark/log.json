@@ -1,0 +1,11 @@
+[
+  {
+    "date": "2026-10-10",
+    "macrostructure": "bespoke: single-card incident feed with thumb-zone answer dock",
+    "theme": "custom",
+    "theme_axes": "dark / display-condensed-bold / warm (sodium-amber)",
+    "vibe": "pager at 3am, sodium light, evidence first",
+    "enrichment": "none (data sparklines only)",
+    "brief": "sev1 · daily incident-diagnosis game for on-call engineers"
+  }
+]

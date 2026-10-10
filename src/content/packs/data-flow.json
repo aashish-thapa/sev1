@@ -1,0 +1,1165 @@
+[
+  {
+    "id": "cache-ttl-mass-expiry-stampede",
+    "kind": "diagnose",
+    "topic": "caching",
+    "difficulty": 1,
+    "alert": {
+      "service": "catalog-api",
+      "title": "catalog-api p99 > 3s and 5xx rate 18%",
+      "severity": "SEV2",
+      "firedAt": "04:01"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "redis-catalog keyspace hit ratio",
+        "unit": "hit %",
+        "points": [
+          96.1,
+          95.8,
+          96.3,
+          96.0,
+          95.7,
+          96.2,
+          95.9,
+          96.1,
+          12.4,
+          4.1,
+          6.8,
+          15.2,
+          31.7,
+          48.9,
+          63.0,
+          74.5
+        ],
+        "markAt": 8
+      },
+      {
+        "type": "log",
+        "label": "catalog-api + postgres, 04:00",
+        "lines": [
+          {
+            "ts": "03:59:58.902",
+            "level": "INFO",
+            "source": "catalog-api",
+            "text": "GET /products/sku-20931 200 14ms cache=hit"
+          },
+          {
+            "ts": "04:00:00.117",
+            "level": "INFO",
+            "source": "catalog-api",
+            "text": "cache miss product:sku-20931, loading from db"
+          },
+          {
+            "ts": "04:00:00.118",
+            "level": "INFO",
+            "source": "catalog-api",
+            "text": "cache miss product:sku-20931, loading from db"
+          },
+          {
+            "ts": "04:00:00.121",
+            "level": "INFO",
+            "source": "catalog-api",
+            "text": "cache miss product:sku-77410, loading from db"
+          },
+          {
+            "ts": "04:00:00.884",
+            "level": "FATAL",
+            "source": "postgres",
+            "text": "sorry, too many clients already"
+          },
+          {
+            "ts": "04:00:01.402",
+            "level": "ERROR",
+            "source": "catalog-api",
+            "text": "db pool: timeout acquiring connection after 1000ms (active=50 idle=0 waiting=412)"
+          },
+          {
+            "ts": "04:00:01.977",
+            "level": "WARN",
+            "source": "catalog-api",
+            "text": "GET /products/sku-20931 504 3002ms"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "redis-catalog INFO + jobs",
+        "items": [
+          {
+            "key": "maxmemory-policy",
+            "value": "allkeys-lru"
+          },
+          {
+            "key": "evicted_keys (last 5m)",
+            "value": "0"
+          },
+          {
+            "key": "expired_keys (last 5m)",
+            "value": "1,204,377"
+          },
+          {
+            "key": "used_memory",
+            "value": "5.1G of 12G maxmemory"
+          },
+          {
+            "key": "role / uptime",
+            "value": "master, up 45 days"
+          },
+          {
+            "key": "cache-warmer last run",
+            "value": "03:00:01 — SET product:* EX 3600 on 1.2M keys"
+          }
+        ]
+      }
+    ],
+    "question": "What emptied the cache at 04:00?",
+    "options": [
+      "Redis evicting product keys under maxmemory pressure",
+      "A failover promoting a replica with an empty dataset",
+      "Keys warmed together with one fixed TTL expiring at once",
+      "A deploy changing the product cache key format"
+    ],
+    "answer": 2,
+    "explanation": {
+      "cause": "1.2M keys written by one warm-up job with the same TTL all expired in the same second",
+      "why": "The warmer SETs every product with EX 3600, so the whole keyspace expires together an hour later. Every request then misses at once, each miss goes to Postgres, and concurrent misses for the same key aren’t coalesced — the DB runs out of connections before the cache can refill.",
+      "tell": "Hit ratio collapsed exactly one hour after the 03:00 warm-up, expired_keys spiked to 1.2M while evicted_keys stayed 0, and the same key missed twice within a millisecond."
+    }
+  },
+  {
+    "id": "cache-allkeys-lru-evicts-sessions",
+    "kind": "diagnose",
+    "topic": "caching",
+    "difficulty": 2,
+    "alert": {
+      "service": "auth-service",
+      "title": "Login rate 6x baseline; users report random logouts",
+      "severity": "SEV2",
+      "firedAt": "15:22"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "redis-shared evicted_keys",
+        "unit": "/s",
+        "points": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          2,
+          18,
+          64,
+          141,
+          236,
+          310,
+          288,
+          342,
+          327,
+          355,
+          349
+        ],
+        "markAt": 6
+      },
+      {
+        "type": "facts",
+        "label": "redis-shared INFO",
+        "items": [
+          {
+            "key": "used_memory / maxmemory",
+            "value": "7.99G / 8.00G"
+          },
+          {
+            "key": "maxmemory-policy",
+            "value": "allkeys-lru"
+          },
+          {
+            "key": "sess:* keys",
+            "value": "1.1M, TTL 604800s (unchanged since March)"
+          },
+          {
+            "key": "rec:* keys",
+            "value": "3.4M (first seen 15:01)"
+          },
+          {
+            "key": "last failover",
+            "value": "41 days ago"
+          }
+        ]
+      },
+      {
+        "type": "log",
+        "label": "recs-service + auth-service",
+        "lines": [
+          {
+            "ts": "15:01:12.004",
+            "level": "INFO",
+            "source": "recs-service",
+            "text": "deploy v3.18.0: caching per-user recommendations in redis-shared as rec:{user_id}"
+          },
+          {
+            "ts": "15:14:40.551",
+            "level": "INFO",
+            "source": "auth-service",
+            "text": "GET /me 401 session not found sid=sess:9f1c2a"
+          },
+          {
+            "ts": "15:14:41.009",
+            "level": "INFO",
+            "source": "auth-service",
+            "text": "POST /login 200 user=u-118202"
+          },
+          {
+            "ts": "15:16:03.118",
+            "level": "WARN",
+            "source": "auth-service",
+            "text": "session sess:41aa07 missing 6m after creation (expected TTL 7d)"
+          },
+          {
+            "ts": "15:16:03.402",
+            "level": "INFO",
+            "source": "auth-service",
+            "text": "cookie signature valid sid=sess:41aa07 user=u-77310"
+          }
+        ]
+      }
+    ],
+    "question": "Why are sessions disappearing?",
+    "options": [
+      "allkeys-lru evicting session keys to make room for new data",
+      "Session TTL shortened by the latest auth-service deploy",
+      "A failover promoted a replica missing recent session writes",
+      "Clock skew invalidating signed session cookies too early"
+    ],
+    "answer": 0,
+    "explanation": {
+      "cause": "Sessions share a cache instance running allkeys-lru, so new rec:* data evicted them",
+      "why": "allkeys-lru treats every key as disposable. Once recs-service started writing 3.4M rec:* keys, used_memory hit maxmemory and Redis began evicting the least recently used keys — including sessions of users idle for a few minutes. Data you can’t lose needs its own instance or a policy that won’t evict it.",
+      "tell": "Evictions start right after the recs-service deploy, memory sits at maxmemory, the policy is allkeys-lru, and the cookies are valid but the session keys are gone."
+    },
+    "source": {
+      "title": "Redis docs — Key eviction",
+      "url": "https://redis.io/docs/latest/develop/reference/eviction/"
+    }
+  },
+  {
+    "id": "cache-keys-command-nightly-block",
+    "kind": "find-line",
+    "topic": "caching",
+    "difficulty": 2,
+    "alert": {
+      "service": "checkout-api",
+      "title": "checkout-api p99 > 2s — third night in a row at 02:00",
+      "severity": "SEV3",
+      "firedAt": "02:01"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "redis-cart command latency p99",
+        "unit": "ms",
+        "points": [
+          0.9,
+          1.1,
+          0.8,
+          1.0,
+          1.2,
+          0.9,
+          1.0,
+          2290,
+          2410,
+          1.4,
+          1.1,
+          0.9,
+          1.0,
+          1.2,
+          0.8,
+          1.1
+        ],
+        "markAt": 7
+      },
+      {
+        "type": "facts",
+        "label": "redis-cart",
+        "items": [
+          {
+            "key": "dbsize",
+            "value": "61.2M keys"
+          },
+          {
+            "key": "jedis socket timeout",
+            "value": "2000ms"
+          },
+          {
+            "key": "maxmemory-policy",
+            "value": "volatile-lru"
+          }
+        ]
+      },
+      {
+        "type": "log",
+        "label": "02:00 window, all sources",
+        "lines": [
+          {
+            "ts": "01:59:57.210",
+            "level": "INFO",
+            "source": "redis",
+            "text": "Background saving started by pid 31877"
+          },
+          {
+            "ts": "02:00:00.003",
+            "level": "INFO",
+            "source": "cron",
+            "text": "cart-reaper started (schedule \"0 2 * * *\")"
+          },
+          {
+            "ts": "02:00:00.011",
+            "level": "INFO",
+            "source": "cart-reaper",
+            "text": "listing abandoned carts: KEYS cart:*"
+          },
+          {
+            "ts": "02:00:01.118",
+            "level": "WARN",
+            "source": "checkout-api",
+            "text": "redis GET cart:u-58812 took 1187ms"
+          },
+          {
+            "ts": "02:00:02.031",
+            "level": "ERROR",
+            "source": "checkout-api",
+            "text": "redis.clients.jedis.exceptions.JedisConnectionException: java.net.SocketTimeoutException: Read timed out"
+          },
+          {
+            "ts": "02:00:02.940",
+            "level": "INFO",
+            "source": "cart-reaper",
+            "text": "matched 2481330 keys, 18204 older than 72h"
+          },
+          {
+            "ts": "02:00:03.077",
+            "level": "INFO",
+            "source": "checkout-api",
+            "text": "POST /checkout 200 3021ms order=o-771902"
+          },
+          {
+            "ts": "02:00:09.660",
+            "level": "INFO",
+            "source": "redis",
+            "text": "Background saving terminated with success"
+          }
+        ]
+      }
+    ],
+    "question": "Tap the line that explains the nightly latency spike.",
+    "answer": {
+      "evidence": 2,
+      "line": 2
+    },
+    "explanation": {
+      "cause": "A nightly job runs KEYS cart:*, an O(N) walk that blocks Redis’s single thread for ~2s",
+      "why": "Redis serves commands on one thread. KEYS walks the entire 61M-key keyspace before replying, so every GET from checkout-api queues behind it and Jedis hits its 2s read timeout. The BGSAVE runs in a forked child and isn’t the blocker. SCAN iterates incrementally instead.",
+      "tell": "Latency jumps the moment cart-reaper issues KEYS against a 61M-key instance, and it recurs nightly on the job’s 02:00 schedule."
+    },
+    "source": {
+      "title": "Redis docs — Diagnosing latency issues",
+      "url": "https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/latency/"
+    }
+  },
+  {
+    "id": "cache-hot-key-single-shard",
+    "kind": "diagnose",
+    "topic": "caching",
+    "difficulty": 3,
+    "alert": {
+      "service": "pricing-api",
+      "title": "pricing-api: 18% of Redis reads timing out, all on cluster node-3",
+      "severity": "SEV2",
+      "firedAt": "12:02"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "redis node-3 main-thread CPU",
+        "unit": "%",
+        "points": [
+          34,
+          37,
+          33,
+          36,
+          35,
+          38,
+          34,
+          71,
+          94,
+          99,
+          100,
+          99,
+          100,
+          98,
+          100,
+          99
+        ],
+        "markAt": 7
+      },
+      {
+        "type": "facts",
+        "label": "redis-cluster at 12:05",
+        "items": [
+          {
+            "key": "ops/s node-1 / 2 / 4",
+            "value": "41k / 39k / 42k"
+          },
+          {
+            "key": "ops/s node-3",
+            "value": "188k"
+          },
+          {
+            "key": "keys per node (1/2/3/4)",
+            "value": "2.1M / 2.0M / 2.1M / 2.1M"
+          },
+          {
+            "key": "node-3 SLOWLOG (>10ms)",
+            "value": "empty"
+          },
+          {
+            "key": "host CPU steal",
+            "value": "0.2–0.4% on all nodes"
+          }
+        ]
+      },
+      {
+        "type": "log",
+        "label": "promo-service + pricing-api",
+        "lines": [
+          {
+            "ts": "12:00:00.002",
+            "level": "INFO",
+            "source": "promo-service",
+            "text": "flash sale live: sku-449120 (homepage hero, push sent to 2.4M devices)"
+          },
+          {
+            "ts": "12:00:41.880",
+            "level": "WARN",
+            "source": "pricing-api",
+            "text": "redis GET price:sku-449120 timeout 250ms node=10.2.3.13:6379"
+          },
+          {
+            "ts": "12:00:42.116",
+            "level": "WARN",
+            "source": "pricing-api",
+            "text": "redis GET price:sku-102271 timeout 250ms node=10.2.3.13:6379"
+          },
+          {
+            "ts": "12:01:03.009",
+            "level": "INFO",
+            "source": "pricing-api",
+            "text": "GET /price/sku-88310 200 3ms node=10.2.3.11:6379"
+          }
+        ]
+      }
+    ],
+    "question": "What’s saturating node-3?",
+    "options": [
+      "Uneven hash-slot allocation leaving node-3 with extra keys",
+      "An O(N) command on a big key blocking node-3’s event loop",
+      "CPU steal from a noisy neighbor on node-3’s physical host",
+      "Reads for one hot key all landing on the shard owning its slot"
+    ],
+    "answer": 3,
+    "explanation": {
+      "cause": "The flash-sale SKU’s price key is a hot key; all its reads hit one shard’s single thread",
+      "why": "Redis Cluster maps each key to one hash slot owned by one primary. More nodes don’t spread a single key, so millions of clients reading price:sku-449120 pin node-3’s main thread at 100% and every other key on that node times out too. A short in-process cache or replica reads for that key spread the load.",
+      "tell": "node-3 runs 4.5x its peers’ ops with the same key count, an empty slowlog and no steal, starting the minute the sku-449120 push went out."
+    }
+  },
+  {
+    "id": "cache-cdn-caches-account-pages",
+    "kind": "diagnose",
+    "topic": "caching",
+    "difficulty": 1,
+    "alert": {
+      "service": "web-storefront",
+      "title": "Support escalation: users seeing other customers’ order history",
+      "severity": "SEV1",
+      "firedAt": "09:44"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "CDN cache hit ratio, /account/*",
+        "unit": "hit %",
+        "points": [
+          0,
+          0,
+          0.2,
+          0,
+          0,
+          0.4,
+          0,
+          61,
+          88,
+          93,
+          94,
+          95,
+          94,
+          96
+        ],
+        "markAt": 7
+      },
+      {
+        "type": "log",
+        "label": "cdn-edge + origin",
+        "lines": [
+          {
+            "ts": "09:41:12.330",
+            "level": "INFO",
+            "source": "cdn-edge",
+            "text": "GET /account/orders 200 cache=MISS age=0 pop=fra2 sid=3c91e0"
+          },
+          {
+            "ts": "09:41:12.371",
+            "level": "INFO",
+            "source": "web-storefront",
+            "text": "GET /account/orders 200 41ms user=u-20114"
+          },
+          {
+            "ts": "09:41:14.008",
+            "level": "INFO",
+            "source": "cdn-edge",
+            "text": "GET /account/orders 200 cache=HIT age=2 pop=fra2 sid=b77a42"
+          },
+          {
+            "ts": "09:41:14.551",
+            "level": "INFO",
+            "source": "cdn-edge",
+            "text": "GET /account/orders 200 cache=HIT age=2 pop=fra2 sid=0f19d3"
+          },
+          {
+            "ts": "09:41:15.120",
+            "level": "INFO",
+            "source": "cdn-edge",
+            "text": "GET /static/app.4f1c.js 200 cache=HIT age=8812 pop=fra2"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "/account/orders response headers",
+        "items": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=300"
+          },
+          {
+            "key": "Vary",
+            "value": "Accept-Encoding"
+          },
+          {
+            "key": "Last deploy",
+            "value": "09:28 storefront v5.12 (response header middleware refactor)"
+          }
+        ]
+      }
+    ],
+    "question": "Why are customers seeing someone else’s orders?",
+    "options": [
+      "Session IDs colliding because of a weak random generator",
+      "The CDN caching authenticated pages as shared responses",
+      "Load balancer stickiness routing users to stale backends",
+      "A race in the session store returning the wrong session"
+    ],
+    "answer": 1,
+    "explanation": {
+      "cause": "Account pages were sent with Cache-Control: public, so the CDN cached and replayed them",
+      "why": "With public, max-age=300 and no Vary on the cookie, the edge treats /account/orders as one shared object. The first logged-in user’s page is stored and served to everyone hitting that POP for five minutes. Personalized responses need private or no-store.",
+      "tell": "Different sids get cache=HIT on /account/orders, the origin rendered it for only one user, and the /account/* hit ratio jumped from 0 to 90%+ after the 09:28 deploy."
+    },
+    "source": {
+      "title": "Steam — Update on Christmas Issues (cached authenticated pages)",
+      "url": "https://store.steampowered.com/oldnews/19852"
+    }
+  },
+  {
+    "id": "queue-poison-record-crashloop",
+    "kind": "diagnose",
+    "topic": "queues",
+    "difficulty": 1,
+    "alert": {
+      "service": "order-events-consumer",
+      "title": "Consumer lag on orders-3 > 240k and growing",
+      "severity": "SEV2",
+      "firedAt": "11:47"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "consumer lag, orders-3",
+        "unit": "msgs",
+        "points": [
+          120,
+          95,
+          140,
+          110,
+          4100,
+          18800,
+          39200,
+          61500,
+          84000,
+          107300,
+          129900,
+          152800,
+          176100,
+          199400,
+          222000,
+          246900
+        ],
+        "markAt": 4
+      },
+      {
+        "type": "log",
+        "label": "order-events-consumer pods",
+        "lines": [
+          {
+            "ts": "11:31:02.118",
+            "level": "ERROR",
+            "source": "consumer-2",
+            "text": "org.apache.kafka.common.errors.RecordDeserializationException: Error deserializing VALUE for partition orders-3 at offset 1882734. If needed, please seek past the record to continue consumption."
+          },
+          {
+            "ts": "11:31:02.140",
+            "level": "INFO",
+            "source": "consumer-2",
+            "text": "shutting down: unhandled exception in poll loop"
+          },
+          {
+            "ts": "11:31:47.900",
+            "level": "WARN",
+            "source": "kubelet",
+            "text": "Back-off restarting failed container consumer in pod order-events-consumer-2_orders(8f3b2c71-4e0a-4d6b-9a51-2c7e0f1d9b44)"
+          },
+          {
+            "ts": "11:32:30.996",
+            "level": "INFO",
+            "source": "consumer-5",
+            "text": "committed offsets orders-7=902114 orders-8=877301"
+          },
+          {
+            "ts": "11:32:31.004",
+            "level": "ERROR",
+            "source": "consumer-2",
+            "text": "org.apache.kafka.common.errors.RecordDeserializationException: Error deserializing VALUE for partition orders-3 at offset 1882734. If needed, please seek past the record to continue consumption."
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "orders topic",
+        "items": [
+          {
+            "key": "lag, other 11 partitions",
+            "value": "< 200 each"
+          },
+          {
+            "key": "orders-3 leader",
+            "value": "broker-2, ISR 3/3"
+          },
+          {
+            "key": "group state",
+            "value": "Stable, 12 members"
+          }
+        ]
+      }
+    ],
+    "question": "Why is only partition orders-3 stuck?",
+    "options": [
+      "orders-3’s leader broker is down, so its fetches fail",
+      "A rebalance loop keeps resetting orders-3’s committed offset",
+      "One undeserializable record crashing the consumer every time",
+      "Producers hashing a hot key onto partition orders-3"
+    ],
+    "answer": 2,
+    "explanation": {
+      "cause": "A record at offset 1882734 can’t be deserialized; the consumer crashes on it forever",
+      "why": "The deserializer throws inside poll() before the app sees the record, the pod exits, restarts from the last committed offset and fetches the same record again. orders-3 makes no progress while the other partitions drain. Catch the exception and seek past or dead-letter the record.",
+      "tell": "Every crash names the same partition and the same offset, 1882734, and kubelet is backing off restarts of that one pod."
+    }
+  },
+  {
+    "id": "queue-max-poll-interval-rebalance-loop",
+    "kind": "find-line",
+    "topic": "queues",
+    "difficulty": 3,
+    "alert": {
+      "service": "ledger-writer",
+      "title": "ledger group rebalancing every ~5 min; lag 310k and climbing",
+      "severity": "SEV2",
+      "firedAt": "04:20"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "ledger consumer group lag",
+        "unit": "msgs",
+        "points": [
+          11800,
+          12400,
+          11900,
+          13100,
+          28400,
+          61900,
+          97800,
+          141200,
+          179500,
+          226300,
+          268900,
+          314100
+        ],
+        "markAt": 4
+      },
+      {
+        "type": "facts",
+        "label": "ledger-writer consumer config",
+        "items": [
+          {
+            "key": "max.poll.records",
+            "value": "500"
+          },
+          {
+            "key": "max.poll.interval.ms",
+            "value": "300000"
+          },
+          {
+            "key": "session.timeout.ms",
+            "value": "45000"
+          },
+          {
+            "key": "group members",
+            "value": "6 (ledger-writer-0..5)"
+          },
+          {
+            "key": "04:05 deploy",
+            "value": "v2.31 — adds per-record fx-rate enrichment"
+          }
+        ]
+      },
+      {
+        "type": "log",
+        "label": "ledger-writer, 04:10–04:15",
+        "lines": [
+          {
+            "ts": "04:10:02.551",
+            "level": "INFO",
+            "source": "ledger-writer-3",
+            "text": "[Consumer clientId=ledger-writer-3, groupId=ledger] Successfully joined group with generation Generation{generationId=1184, memberId='ledger-writer-3-0f3a9c1e-77b2-4f0e-9d4b-1c2a5e6f7a80', protocol='range'}"
+          },
+          {
+            "ts": "04:10:02.560",
+            "level": "INFO",
+            "source": "ledger-writer-3",
+            "text": "[Consumer clientId=ledger-writer-3, groupId=ledger] Adding newly assigned partitions: [ledger-events-6, ledger-events-7]"
+          },
+          {
+            "ts": "04:11:30.207",
+            "level": "INFO",
+            "source": "ledger-writer-3",
+            "text": "GC(812) Pause Young (Normal) (G1 Evacuation Pause) 1843M->402M(4096M) 412.733ms"
+          },
+          {
+            "ts": "04:15:09.880",
+            "level": "INFO",
+            "source": "ledger-writer-3",
+            "text": "batch complete partition=ledger-events-6 records=500 elapsed_ms=307291 fx_lookups=500"
+          },
+          {
+            "ts": "04:15:09.912",
+            "level": "INFO",
+            "source": "ledger-writer-3",
+            "text": "[Consumer clientId=ledger-writer-3, groupId=ledger] Failing OffsetCommit request since the consumer is not part of an active group"
+          },
+          {
+            "ts": "04:15:09.914",
+            "level": "WARN",
+            "source": "ledger-writer-3",
+            "text": "commit failed, batch will be redelivered partition=ledger-events-6 records=500"
+          },
+          {
+            "ts": "04:15:09.915",
+            "level": "INFO",
+            "source": "ledger-writer-3",
+            "text": "[Consumer clientId=ledger-writer-3, groupId=ledger] Lost previously assigned partitions [ledger-events-6, ledger-events-7]"
+          },
+          {
+            "ts": "04:15:09.921",
+            "level": "INFO",
+            "source": "ledger-writer-3",
+            "text": "[Consumer clientId=ledger-writer-3, groupId=ledger] (Re-)joining group"
+          },
+          {
+            "ts": "04:15:10.204",
+            "level": "INFO",
+            "source": "ledger-writer-0",
+            "text": "[Consumer clientId=ledger-writer-0, groupId=ledger] Request joining group due to: group is already rebalancing"
+          }
+        ]
+      }
+    ],
+    "question": "Tap the line that explains why the group keeps rebalancing.",
+    "answer": {
+      "evidence": 2,
+      "line": 3
+    },
+    "explanation": {
+      "cause": "A 500-record batch now takes 307s, longer than max.poll.interval.ms (300s)",
+      "why": "The new per-record fx lookup made each poll() batch take over five minutes. When the gap between polls exceeds max.poll.interval.ms, the client leaves the group, partitions are reassigned, the uncommitted batch is redelivered and the cycle repeats. Lower max.poll.records or make enrichment batched.",
+      "tell": "elapsed_ms=307291 for one batch versus max.poll.interval.ms=300000 — and the commit fails because the member is no longer in the group right after it."
+    },
+    "source": {
+      "title": "Apache Kafka docs — Consumer Configs (max.poll.interval.ms)",
+      "url": "https://kafka.apache.org/41/configuration/consumer-configs/"
+    }
+  },
+  {
+    "id": "queue-retry-requeue-amplification",
+    "kind": "diagnose",
+    "topic": "queues",
+    "difficulty": 3,
+    "alert": {
+      "service": "inventory-api",
+      "title": "inventory-api 503 rate 61%; order-worker queue backlog 1.4M",
+      "severity": "SEV1",
+      "firedAt": "14:06"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "inventory-api inbound requests",
+        "unit": "/s",
+        "points": [
+          2110,
+          2080,
+          2140,
+          2095,
+          2120,
+          2160,
+          4880,
+          8210,
+          11950,
+          12600,
+          12340,
+          12810,
+          12550,
+          12920,
+          12700
+        ],
+        "markAt": 6
+      },
+      {
+        "type": "facts",
+        "label": "order pipeline",
+        "items": [
+          {
+            "key": "orders published",
+            "value": "~2,100/s, flat all afternoon"
+          },
+          {
+            "key": "order-worker HTTP client",
+            "value": "4 attempts, fixed 50ms delay"
+          },
+          {
+            "key": "on failure",
+            "value": "basic.nack requeue=true, no delay"
+          },
+          {
+            "key": "inventory-api replicas",
+            "value": "12 → 24 (HPA), CPU 98%"
+          },
+          {
+            "key": "inventory-db failover",
+            "value": "14:02:11–14:02:34, healthy since"
+          }
+        ]
+      },
+      {
+        "type": "log",
+        "label": "order-worker + inventory-api",
+        "lines": [
+          {
+            "ts": "14:05:51.004",
+            "level": "WARN",
+            "source": "order-worker",
+            "text": "POST inventory-api/reserve 503 attempt=1/4 order=o-6610284"
+          },
+          {
+            "ts": "14:05:51.071",
+            "level": "WARN",
+            "source": "order-worker",
+            "text": "POST inventory-api/reserve 503 attempt=2/4 order=o-6610284"
+          },
+          {
+            "ts": "14:05:51.198",
+            "level": "WARN",
+            "source": "order-worker",
+            "text": "POST inventory-api/reserve 503 attempt=4/4 order=o-6610284"
+          },
+          {
+            "ts": "14:05:51.199",
+            "level": "INFO",
+            "source": "order-worker",
+            "text": "nack delivery_tag=88213 requeue=true order=o-6610284"
+          },
+          {
+            "ts": "14:05:51.203",
+            "level": "WARN",
+            "source": "order-worker",
+            "text": "POST inventory-api/reserve 503 attempt=1/4 order=o-6610284"
+          },
+          {
+            "ts": "14:05:51.260",
+            "level": "WARN",
+            "source": "inventory-api",
+            "text": "load shed: 503, in-flight 512 > limit 256"
+          },
+          {
+            "ts": "14:05:52.017",
+            "level": "INFO",
+            "source": "inventory-api",
+            "text": "db pool healthy: primary=inventory-db-b active=31 idle=33"
+          }
+        ]
+      }
+    ],
+    "question": "Why hasn’t inventory-api recovered after the DB came back?",
+    "options": [
+      "Immediate retries and requeues multiplying load on the API",
+      "The HPA failing to add inventory-api replicas fast enough",
+      "Connection pools still pinned to the old DB primary host",
+      "A surge of new orders arriving from the storefront"
+    ],
+    "answer": 0,
+    "explanation": {
+      "cause": "Retries without backoff plus instant requeue turned a 23s DB blip into 6x load",
+      "why": "Each message gets four back-to-back attempts, then is nacked with requeue and redelivered at once to try four more. Every failure creates more requests, so the API stays saturated and shedding long after the DB recovered. Exponential backoff with jitter, a retry budget and delayed redelivery break the loop.",
+      "tell": "inventory-api takes ~6x its normal rate while orders are flat at 2.1k/s, the same order is re-attempted within milliseconds of its nack, and the DB pool is healthy."
+    },
+    "source": {
+      "title": "Amazon Builders’ Library — Timeouts, retries, and backoff with jitter",
+      "url": "https://builder.aws.com/content/3EumjoZascWd1oZiEgL8ORlv3qE/timeouts-retries-and-backoff-with-jitter"
+    }
+  },
+  {
+    "id": "queue-sqs-visibility-timeout-double-bill",
+    "kind": "find-line",
+    "topic": "queues",
+    "difficulty": 2,
+    "alert": {
+      "service": "invoice-worker",
+      "title": "Duplicate charges: 212 customers billed twice since 10:00",
+      "severity": "SEV2",
+      "firedAt": "10:48"
+    },
+    "evidence": [
+      {
+        "type": "facts",
+        "label": "invoice-jobs queue",
+        "items": [
+          {
+            "key": "Type",
+            "value": "Standard"
+          },
+          {
+            "key": "VisibilityTimeout",
+            "value": "30s"
+          },
+          {
+            "key": "maxReceiveCount",
+            "value": "5 (DLQ: invoice-jobs-dlq)"
+          },
+          {
+            "key": "Consumers",
+            "value": "6 invoice-worker pods"
+          },
+          {
+            "key": "10:00 deploy",
+            "value": "invoice PDF template v9 (adds line-item detail)"
+          }
+        ]
+      },
+      {
+        "type": "log",
+        "label": "invoice-worker pods",
+        "lines": [
+          {
+            "ts": "10:31:00.104",
+            "level": "INFO",
+            "source": "invoice-worker-7f2c",
+            "text": "received msg=4c1e9a7b inv=INV-88213 receive_count=1"
+          },
+          {
+            "ts": "10:31:00.311",
+            "level": "INFO",
+            "source": "invoice-worker-7f2c",
+            "text": "rendering pdf inv=INV-88213 pages=212"
+          },
+          {
+            "ts": "10:31:12.880",
+            "level": "WARN",
+            "source": "invoice-worker-3b90",
+            "text": "smtp: 421 4.7.0 Try again later, retrying in 2s inv=INV-88190"
+          },
+          {
+            "ts": "10:31:30.127",
+            "level": "INFO",
+            "source": "invoice-worker-a91d",
+            "text": "received msg=4c1e9a7b inv=INV-88213 receive_count=2"
+          },
+          {
+            "ts": "10:31:30.402",
+            "level": "INFO",
+            "source": "invoice-worker-a91d",
+            "text": "rendering pdf inv=INV-88213 pages=212"
+          },
+          {
+            "ts": "10:31:41.866",
+            "level": "INFO",
+            "source": "invoice-worker-7f2c",
+            "text": "charged inv=INV-88213 amount=1240.00 USD, email sent"
+          },
+          {
+            "ts": "10:32:11.930",
+            "level": "INFO",
+            "source": "invoice-worker-a91d",
+            "text": "charged inv=INV-88213 amount=1240.00 USD, email sent"
+          }
+        ]
+      }
+    ],
+    "question": "Tap the line that shows how the invoice got charged twice.",
+    "answer": {
+      "evidence": 1,
+      "line": 3
+    },
+    "explanation": {
+      "cause": "Jobs now take ~41s, longer than the 30s visibility timeout, so SQS redelivers them",
+      "why": "A received SQS message is only hidden for the visibility timeout. The v9 template pushed jobs to ~41s, so at 30s the message became visible again and a second worker took it while the first was still rendering. Both charged. Extend visibility with ChangeMessageVisibility and make the charge idempotent.",
+      "tell": "A second worker receives the same msg with receive_count=2 exactly 30s after the first receive, while the first worker hasn’t finished."
+    },
+    "source": {
+      "title": "Amazon SQS Developer Guide — Visibility timeout",
+      "url": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html"
+    }
+  },
+  {
+    "id": "queue-partition-key-skew",
+    "kind": "diagnose",
+    "topic": "queues",
+    "difficulty": 2,
+    "alert": {
+      "service": "usage-aggregator",
+      "title": "usage-events lag > 2M on one partition; billing dashboards stale",
+      "severity": "SEV3",
+      "firedAt": "09:15"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "consumer lag, usage-events-11",
+        "unit": "msgs",
+        "points": [
+          40,
+          55,
+          38,
+          61,
+          47,
+          52,
+          89000,
+          410000,
+          735000,
+          1062000,
+          1388000,
+          1711000,
+          2040000,
+          2366000
+        ],
+        "markAt": 6
+      },
+      {
+        "type": "facts",
+        "label": "usage-events topic at 09:20",
+        "items": [
+          {
+            "key": "partitions / consumers",
+            "value": "24 / 24"
+          },
+          {
+            "key": "producer key",
+            "value": "tenant_id"
+          },
+          {
+            "key": "usage-events-11 ingest",
+            "value": "9,140 msgs/s"
+          },
+          {
+            "key": "median partition ingest",
+            "value": "380 msgs/s"
+          },
+          {
+            "key": "consumer CPU",
+            "value": "p11 consumer 100%; others 6–9%"
+          },
+          {
+            "key": "broker-3 (p11 leader)",
+            "value": "fetch p99 4ms, ISR 3/3"
+          }
+        ]
+      },
+      {
+        "type": "log",
+        "label": "tenant-api + usage-aggregator",
+        "lines": [
+          {
+            "ts": "08:41:07.220",
+            "level": "INFO",
+            "source": "tenant-api",
+            "text": "tenant t-0042 enabled per-request metering"
+          },
+          {
+            "ts": "08:52:13.004",
+            "level": "INFO",
+            "source": "usage-aggregator-11",
+            "text": "processed 50000 events in 61.4s partition=usage-events-11"
+          },
+          {
+            "ts": "08:52:13.880",
+            "level": "INFO",
+            "source": "usage-aggregator-4",
+            "text": "processed 5000 events in 13.2s partition=usage-events-4 lag=12"
+          },
+          {
+            "ts": "08:52:14.310",
+            "level": "INFO",
+            "source": "usage-aggregator-17",
+            "text": "processed 5000 events in 12.9s partition=usage-events-17 lag=8"
+          }
+        ]
+      }
+    ],
+    "question": "Why is a single partition falling behind?",
+    "options": [
+      "Too few consumers in the group for the topic’s partitions",
+      "broker-3 throttling fetches for the partitions it leads",
+      "A stuck rebalance leaving usage-events-11 unassigned",
+      "The tenant_id key routing one huge tenant to one partition"
+    ],
+    "answer": 3,
+    "explanation": {
+      "cause": "Keying by tenant_id hashed one high-volume tenant entirely onto partition 11",
+      "why": "The partitioner sends every record with the same key to the same partition, and each partition is read by one group member. When t-0042 began emitting ~9k events/s it all landed on p11, beyond one consumer’s ~800/s, and adding consumers can’t help. Salt the key or partition on a finer-grained id.",
+      "tell": "p11 ingests 24x the median while its consumer is pegged and broker-3 is healthy, starting right after t-0042 turned on per-request metering."
+    }
+  }
+]

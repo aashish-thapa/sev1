@@ -1,0 +1,534 @@
+[
+  {
+    "id": "cloud-ops-selector-drains-metadata-fleet",
+    "topic": "cloud",
+    "kind": "diagnose",
+    "difficulty": 2,
+    "alert": {
+      "service": "blobstore-meta",
+      "title": "blobstore-meta: GET/PUT error rate 87% (threshold 1%)",
+      "severity": "SEV1",
+      "firedAt": "17:38"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "meta-index hosts in service",
+        "unit": "hosts",
+        "points": [212, 212, 211, 212, 212, 212, 212, 211, 212, 31, 29, 30, 31, 30, 30, 32, 33, 35, 38, 41, 45, 52, 60],
+        "markAt": 9
+      },
+      {
+        "type": "log",
+        "label": "capctl + metadata fleet",
+        "lines": [
+          { "ts": "17:36:48.120", "level": "INFO", "source": "capctl", "text": "OPS-2291 opened: remove 4 hosts from billing-meta (billing subsystem slow) operator=rkaur" },
+          { "ts": "17:37:02.551", "level": "INFO", "source": "capctl", "text": "remove --hosts 'meta-*' --reason OPS-2291" },
+          { "ts": "17:37:02.903", "level": "INFO", "source": "capctl", "text": "selector matched 268 hosts (billing-meta: 4, meta-index: 212, meta-placement: 52)" },
+          { "ts": "17:37:03.010", "level": "INFO", "source": "capctl", "text": "draining 268 hosts, batch=all, min-capacity check: not configured" },
+          { "ts": "17:37:41.338", "level": "ERROR", "source": "meta-index", "text": "partition quorum lost for 6912 of 8192 partitions" },
+          { "ts": "17:37:44.870", "level": "ERROR", "source": "meta-placement", "text": "no placement capacity available, rejecting PutObject" },
+          { "ts": "17:39:10.215", "level": "WARN", "source": "meta-index", "text": "cold restart requires full metadata validation, ETA 2h+" }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Context",
+        "items": [
+          { "key": "Last meta-index deploy", "value": "3 days ago" },
+          { "key": "AZ / power events", "value": "none reported" },
+          { "key": "billing-meta p99 (before)", "value": "1.8s, degraded since 16:50" }
+        ]
+      }
+    ],
+    "question": "Why did the metadata tier fall over?",
+    "options": [
+      "Billing subsystem slowness backing up metadata requests",
+      "meta-index deploy crash-looping the index nodes",
+      "Mistyped capctl selector drained index and placement fleets",
+      "AZ power loss taking a large share of index hosts offline"
+    ],
+    "answer": 2,
+    "explanation": {
+      "cause": "An ops glob meant for 4 billing hosts matched and drained 268 metadata hosts",
+      "why": "capctl had no minimum-capacity floor and drained everything in one batch. The 'meta-*' glob matched meta-index and meta-placement as well as billing-meta, so index partitions lost quorum and placement had nowhere to put new objects. A cold restart of the index needs full validation, so recovery takes hours.",
+      "tell": "The selector line: 268 hosts matched for a ticket about 4 billing hosts — and the host count fell off a cliff in a single step instead of degrading."
+    },
+    "source": {
+      "title": "Summary of the Amazon S3 Service Disruption in the Northern Virginia (US-EAST-1) Region",
+      "url": "https://aws.amazon.com/message/41926/"
+    }
+  },
+  {
+    "id": "cloud-iam-inline-policy-wrong-bucket",
+    "topic": "cloud",
+    "kind": "find-line",
+    "difficulty": 1,
+    "alert": {
+      "service": "report-exporter",
+      "title": "report-exporter: nightly finance export failed (0 of 312 files)",
+      "severity": "SEV2",
+      "firedAt": "03:15"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "report-exporter",
+        "lines": [
+          { "ts": "03:03:10.482", "level": "INFO", "source": "report-exporter", "text": "export run 2026-10-09 started, 312 files to upload" },
+          { "ts": "03:03:11.907", "level": "ERROR", "source": "report-exporter", "text": "upload failed key=finance/2026-10-09/ledger-001.parquet: An error occurred (AccessDenied) when calling the PutObject operation: Access Denied" },
+          { "ts": "03:03:12.015", "level": "WARN", "source": "report-exporter", "text": "retrying 311 remaining uploads with backoff" },
+          { "ts": "03:14:58.660", "level": "ERROR", "source": "report-exporter", "text": "export run aborted: 0 of 312 files written" }
+        ]
+      },
+      {
+        "type": "log",
+        "label": "CloudTrail events (02:40–03:10)",
+        "lines": [
+          { "ts": "02:41:19", "level": "INFO", "source": "sts.amazonaws.com", "text": "AssumeRole role=report-exporter principal=ecs-tasks.amazonaws.com" },
+          { "ts": "02:52:33", "level": "INFO", "source": "s3.amazonaws.com", "text": "PutBucketLifecycleConfiguration bucket=analytics-raw by data-platform-admin/mkhan" },
+          { "ts": "02:58:07", "level": "INFO", "source": "iam.amazonaws.com", "text": "PutRolePolicy role=report-exporter policyName=s3-access by terraform-ci/run-8812 resource=arn:aws:s3:::finance-reports-v2/*" },
+          { "ts": "03:01:44", "level": "INFO", "source": "iam.amazonaws.com", "text": "PutRolePolicy role=search-indexer policyName=s3-access by terraform-ci/run-8812 resource=arn:aws:s3:::search-snapshots/*" },
+          { "ts": "03:03:11", "level": "WARN", "source": "s3.amazonaws.com", "text": "PutObject bucket=finance-reports errorCode=AccessDenied by report-exporter/task-9c1e" },
+          { "ts": "03:09:26", "level": "INFO", "source": "s3.amazonaws.com", "text": "GetBucketPolicy bucket=finance-reports by oncall-readonly/jlee" }
+        ]
+      }
+    ],
+    "question": "Tap the event that broke the export.",
+    "answer": { "evidence": 1, "line": 2 },
+    "explanation": {
+      "cause": "Terraform rewrote the exporter’s inline policy to point at a different bucket",
+      "why": "PutRolePolicy replaces the whole inline policy document. The new s3-access policy granted writes only on finance-reports-v2/*, so every PutObject to finance-reports was implicitly denied and came back AccessDenied — five minutes after the change, on the job’s first upload.",
+      "tell": "It’s the only change to the report-exporter role, it landed minutes before the first AccessDenied, and its resource ARN names a bucket the exporter doesn’t write to."
+    }
+  },
+  {
+    "id": "cloud-ssm-getparameter-throttled",
+    "topic": "cloud",
+    "kind": "diagnose",
+    "difficulty": 1,
+    "alert": {
+      "service": "checkout-api",
+      "title": "checkout-api: 5xx rate 38% after deploy v2026.10.09-3",
+      "severity": "SEV1",
+      "firedAt": "11:22"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "SSM GetParameter calls (account)",
+        "unit": "/s",
+        "points": [3, 2, 4, 3, 3, 2, 3, 4, 3, 212, 488, 705, 860, 912, 931, 925, 940, 918, 936, 929],
+        "markAt": 9
+      },
+      {
+        "type": "log",
+        "label": "checkout-api",
+        "lines": [
+          { "ts": "11:20:41.208", "level": "INFO", "source": "deploy", "text": "checkout-api v2026.10.09-3 rolled out to 48/48 tasks" },
+          { "ts": "11:20:44.930", "level": "INFO", "source": "checkout-api", "text": "config: ParameterLoader ready (prefix=/checkout/prod/, keys=6, ttl=0s)" },
+          { "ts": "11:21:02.117", "level": "WARN", "source": "checkout-api", "text": "config: GetParameter /checkout/prod/psp-endpoint slow (1840ms)" },
+          { "ts": "11:21:03.540", "level": "ERROR", "source": "checkout-api", "text": "botocore.exceptions.ClientError: An error occurred (ThrottlingException) when calling the GetParameter operation (reached max retries: 4): Rate exceeded" },
+          { "ts": "11:21:03.552", "level": "ERROR", "source": "checkout-api", "text": "POST /v1/checkout 500 3184ms" }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Context",
+        "items": [
+          { "key": "AWS Health (us-east-1)", "value": "no open events" },
+          { "key": "IAM changes (24h)", "value": "none on checkout-api task role" },
+          { "key": "KMS Decrypt errors", "value": "0" }
+        ]
+      }
+    ],
+    "question": "What’s causing the 500s?",
+    "options": [
+      "KMS request quota exhausted decrypting SecureStrings",
+      "Per-request GetParameter calls exceeding SSM’s API rate",
+      "Task role lost ssm:GetParameter in the new task definition",
+      "Regional Systems Manager outage in us-east-1"
+    ],
+    "answer": 1,
+    "explanation": {
+      "cause": "The release fetched SSM parameters on every request and blew the API rate limit",
+      "why": "Parameter Store caps the request rate per account and Region. With ttl=0s every request across 48 tasks called GetParameter, so calls jumped from ~3/s to ~900/s. SSM answered with ThrottlingException, botocore burned its 4 retries with backoff, and checkout returned 500 after seconds of waiting.",
+      "tell": "GetParameter calls/s jumped ~300× exactly at the deploy, the loader logs ttl=0s, and the error is ThrottlingException: Rate exceeded — not AccessDenied or a KMS error."
+    },
+    "source": {
+      "title": "Resolve \"ThrottlingException\" or \"Rate exceeded\" errors in Parameter Store",
+      "url": "https://repost.aws/knowledge-center/ssm-parameter-store-rate-exceeded"
+    }
+  },
+  {
+    "id": "cloud-vcpu-quota-blocks-scale-out",
+    "topic": "cloud",
+    "kind": "diagnose",
+    "difficulty": 2,
+    "alert": {
+      "service": "render-workers",
+      "title": "render-workers: queue age 14m, ASG stuck at 24 of 40 desired",
+      "severity": "SEV2",
+      "firedAt": "19:06"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "InService instances (desired 40)",
+        "unit": "inst",
+        "points": [12, 12, 13, 14, 16, 18, 20, 22, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24],
+        "markAt": 8
+      },
+      {
+        "type": "log",
+        "label": "ASG activity history",
+        "lines": [
+          { "ts": "18:51:12", "level": "INFO", "source": "autoscaling", "text": "Launching a new EC2 instance: i-0a41c9e2f7b3d8015" },
+          { "ts": "18:52:40", "level": "INFO", "source": "autoscaling", "text": "Launching a new EC2 instance: i-0c7d2b19e84f6a305" },
+          { "ts": "18:54:03", "level": "ERROR", "source": "autoscaling", "text": "Launching a new EC2 instance. Status Reason: You have requested more vCPU capacity than your current vCPU limit of 512 allows for the instance bucket that the specified instance type belongs to." },
+          { "ts": "18:58:09", "level": "ERROR", "source": "autoscaling", "text": "Launching a new EC2 instance. Status Reason: You have requested more vCPU capacity than your current vCPU limit of 512 allows for the instance bucket that the specified instance type belongs to." },
+          { "ts": "19:02:15", "level": "INFO", "source": "render-dispatcher", "text": "queue depth 18,442 jobs, oldest 13m51s" }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Capacity",
+        "items": [
+          { "key": "ASG min / desired / max", "value": "4 / 40 / 80" },
+          { "key": "Instance type", "value": "m6i.4xlarge (16 vCPU), 3 AZs" },
+          { "key": "Other On-Demand in Region", "value": "batch-etl: 8 × m6i.4xlarge" },
+          { "key": "Launch template", "value": "v17, AMI available" }
+        ]
+      }
+    ],
+    "question": "Why won’t the group scale past 24?",
+    "options": [
+      "Scaling capped by the Auto Scaling group’s max size",
+      "EC2 out of m6i.4xlarge capacity in those AZs",
+      "Launch template points at a deregistered AMI",
+      "On-Demand vCPU quota for the account is used up"
+    ],
+    "answer": 3,
+    "explanation": {
+      "cause": "The account hit its Standard On-Demand vCPU quota, so EC2 refused new launches",
+      "why": "On-Demand limits are counted in vCPUs per instance-family bucket across the whole Region, not per group. 24 render nodes × 16 vCPU plus batch-etl’s 8 × 16 is exactly 512, so every further launch was rejected and the group sat below desired capacity.",
+      "tell": "The Status Reason names a vCPU limit of 512, and 24 × 16 + 128 = 512. A capacity shortage would say InsufficientInstanceCapacity, and max size is 80."
+    }
+  },
+  {
+    "id": "cloud-nat-gateway-port-exhaustion",
+    "topic": "cloud",
+    "kind": "diagnose",
+    "difficulty": 3,
+    "alert": {
+      "service": "webhook-dispatcher",
+      "title": "webhook-dispatcher: 31% of deliveries failing to hooks.partner",
+      "severity": "SEV2",
+      "firedAt": "16:48"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "NAT gateway ActiveConnectionCount",
+        "unit": "conns",
+        "points": [8200, 8350, 8100, 8420, 8300, 14600, 23800, 33100, 41900, 49200, 53800, 55400, 56100, 55900, 56300, 56000, 56200, 55800, 56100, 56000],
+        "markAt": 11
+      },
+      {
+        "type": "log",
+        "label": "webhook-dispatcher",
+        "lines": [
+          { "ts": "16:31:02.004", "level": "INFO", "source": "deploy", "text": "webhook-dispatcher v4.12.0 rolled out (http client: DisableKeepAlives=true)" },
+          { "ts": "16:44:17.312", "level": "WARN", "source": "webhook-dispatcher", "text": "delivery retry 2/5 id=wh_7f31c endpoint=hooks.partner.example" },
+          { "ts": "16:44:17.315", "level": "ERROR", "source": "webhook-dispatcher", "text": "Post \"https://hooks.partner.example/v1/events\": dial tcp 203.0.113.40:443: i/o timeout" },
+          { "ts": "16:44:17.902", "level": "INFO", "source": "webhook-dispatcher", "text": "Post \"https://api.crm-vendor.example/v2/notify\" 200 88ms" },
+          { "ts": "16:44:18.006", "level": "ERROR", "source": "webhook-dispatcher", "text": "Post \"https://hooks.partner.example/v1/events\": dial tcp 203.0.113.40:443: i/o timeout" },
+          { "ts": "16:44:18.430", "level": "INFO", "source": "webhook-dispatcher", "text": "Post \"https://api.crm-vendor.example/v2/notify\" 200 91ms" }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Context",
+        "items": [
+          { "key": "NAT gateway IPs", "value": "1 Elastic IP, shared by all private subnets" },
+          { "key": "hooks.partner.example", "value": "resolves to a single IP, 203.0.113.40" },
+          { "key": "Node conntrack usage", "value": "28% of nf_conntrack_max" },
+          { "key": "Partner status page", "value": "all systems operational" }
+        ]
+      }
+    ],
+    "question": "Why are partner deliveries timing out?",
+    "options": [
+      "NAT gateway out of ports to that one destination IP:port",
+      "Partner rate-limiting us by silently dropping new SYNs",
+      "Node conntrack tables full, dropping new outbound flows",
+      "Egress security group change blocking outbound 443"
+    ],
+    "answer": 0,
+    "explanation": {
+      "cause": "Disabling keep-alive exhausted the NAT gateway’s ~55,000 ports to one destination",
+      "why": "Each NAT gateway IP supports up to 55,000 simultaneous connections per unique destination (IP, port, protocol). With keep-alives off, every webhook opened a new connection to 203.0.113.40:443. Once that space ran out, new connections failed and ErrorPortAllocation climbed, while other destinations kept working.",
+      "tell": "Connections plateau just above 55k right after the keep-alive change, failures hit only the single-IP partner, and other HTTPS calls through the same NAT succeed."
+    },
+    "source": {
+      "title": "Resolve port allocation errors on a NAT gateway",
+      "url": "https://repost.aws/knowledge-center/vpc-resolve-port-allocation-errors"
+    }
+  },
+  {
+    "id": "rt-unbounded-cache-heap-oom",
+    "topic": "runtime",
+    "kind": "diagnose",
+    "difficulty": 1,
+    "alert": {
+      "service": "session-service",
+      "title": "session-service: 503 rate 22%, 3 pods restarted in the last hour",
+      "severity": "SEV2",
+      "firedAt": "06:14"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "Heap used (G1, -Xmx4g), last 8h",
+        "unit": "MiB",
+        "points": [1210, 1890, 1350, 2040, 1480, 2210, 1620, 2380, 1790, 2550, 1960, 2720, 2150, 2910, 2380, 3150, 2640, 3420, 2950, 3720, 3310, 3980, 3790, 4070, 4060, 4071],
+        "markAt": 21
+      },
+      {
+        "type": "log",
+        "label": "session-service pod",
+        "lines": [
+          { "ts": "06:09:14.220", "level": "INFO", "source": "session-service", "text": "active sessions=48212 (24h avg 47900)" },
+          { "ts": "06:11:52.806", "level": "WARN", "source": "jvm", "text": "[41782.115s][info][gc] GC(9187) Pause Young (Normal) (G1 Evacuation Pause) 4012M->3968M(4096M) 61.340ms" },
+          { "ts": "06:12:30.442", "level": "ERROR", "source": "session-service", "text": "Exception in thread \"http-nio-8080-exec-17\" java.lang.OutOfMemoryError: Java heap space" },
+          { "ts": "06:12:30.451", "level": "INFO", "source": "jvm", "text": "Dumping heap to /var/dumps/java_pid1.hprof ..." },
+          { "ts": "06:12:52.903", "level": "INFO", "source": "jvm", "text": "Heap dump file created [4192305114 bytes in 22.452 secs]" },
+          { "ts": "06:13:05.117", "level": "WARN", "source": "kubelet", "text": "Liveness probe failed: HTTP probe failed with statuscode: 503" }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Context",
+        "items": [
+          { "key": "Traffic", "value": "flat, ~1.1k req/s" },
+          { "key": "Last deploy", "value": "v3.8.0, 2 days ago (adds per-user token cache)" },
+          { "key": "Container memory", "value": "limit 6 GiB, peak RSS 4.9 GiB" }
+        ]
+      }
+    ],
+    "question": "What’s killing session-service?",
+    "options": [
+      "Session traffic surge outgrowing the 4 GiB heap",
+      "Container memory limit OOM-killing the JVM pod",
+      "Unbounded cache filling the heap until it runs out",
+      "Long G1 GC pauses failing the liveness probe"
+    ],
+    "answer": 2,
+    "explanation": {
+      "cause": "A cache with no eviction kept growing until the Java heap was exhausted",
+      "why": "Each GC reclaimed less than the one before: the post-GC floor climbed from ~1.2 GiB to ~4 GiB over hours while traffic stayed flat. That’s retained objects — the new per-user token cache never evicts. Once the old generation filled, allocations failed and the JVM threw OutOfMemoryError: Java heap space.",
+      "tell": "Sawtooth with a rising floor under flat traffic. The error is Java heap space with RSS well under the 6 GiB limit — the JVM ran out, not the container."
+    }
+  },
+  {
+    "id": "rt-g1-full-gc-stop-the-world",
+    "topic": "runtime",
+    "kind": "diagnose",
+    "difficulty": 2,
+    "alert": {
+      "service": "pricing-engine",
+      "title": "pricing-engine: p99 latency 7.3s (SLO 300ms), caller timeouts",
+      "severity": "SEV2",
+      "firedAt": "13:41"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "p99 latency (1-min buckets)",
+        "unit": "ms",
+        "points": [182, 190, 176, 205, 188, 7120, 194, 181, 199, 6880, 187, 210, 192, 7340, 201, 186, 6950, 179, 195, 188],
+        "markAt": 5
+      },
+      {
+        "type": "log",
+        "label": "pricing-engine GC log + callers",
+        "lines": [
+          { "ts": "13:34:40.551", "level": "WARN", "source": "jvm", "text": "[9109.836s][info][gc] GC(2163) Pause Full (G1 Compaction Pause) 4090M->3396M(4096M) 6871.204ms" },
+          { "ts": "13:38:02.117", "level": "INFO", "source": "jvm", "text": "[9311.402s][info][gc] GC(2201) Pause Young (Normal) (G1 Evacuation Pause) 3720M->3655M(4096M) 41.882ms" },
+          { "ts": "13:38:09.660", "level": "INFO", "source": "jvm", "text": "[9318.945s][info][gc] GC(2202) Pause Young (Concurrent Start) (G1 Evacuation Pause) 3891M->3874M(4096M) 52.104ms" },
+          { "ts": "13:38:16.950", "level": "WARN", "source": "jvm", "text": "[9326.235s][info][gc] GC(2204) Pause Full (G1 Compaction Pause) 4089M->3402M(4096M) 6914.330ms" },
+          { "ts": "13:38:16.988", "level": "ERROR", "source": "quote-gateway", "text": "pricing-engine call timed out after 2000ms (412 in last 7s)" }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Context",
+        "items": [
+          { "key": "JVM", "value": "OpenJDK 21, G1, -Xmx4g" },
+          { "key": "CPU throttled periods", "value": "0.3%" },
+          { "key": "DB p99 (same window)", "value": "14ms" }
+        ]
+      }
+    ],
+    "question": "What’s behind the periodic 7-second spikes?",
+    "options": [
+      "CFS CPU throttling from a tight container limit",
+      "Database lock waits stalling pricing queries",
+      "Heap leak about to throw OutOfMemoryError",
+      "Full GC stop-the-world pauses freezing the JVM"
+    ],
+    "answer": 3,
+    "explanation": {
+      "cause": "Live set near -Xmx forced repeated multi-second full GCs that freeze the app",
+      "why": "With ~3.4 GiB live in a 4 GiB heap, G1’s concurrent cycle couldn’t free space fast enough and fell back to Pause Full (G1 Compaction Pause), a stop-the-world collection. Every application thread froze for ~7s, so in-flight requests blew past caller timeouts.",
+      "tell": "Each latency spike matches a Pause Full of ~6,900 ms, and the heap lands at ~3.4 GiB after every full GC — a flat floor, so it’s an undersized heap, not a leak."
+    },
+    "source": {
+      "title": "Garbage-First Garbage Collector Tuning — Java SE 21 GC Tuning Guide",
+      "url": "https://docs.oracle.com/en/java/javase/21/gctuning/garbage-first-garbage-collector-tuning.html"
+    }
+  },
+  {
+    "id": "rt-fd-exhaustion-leaked-bodies",
+    "topic": "runtime",
+    "kind": "find-line",
+    "difficulty": 3,
+    "alert": {
+      "service": "ledger-api",
+      "title": "ledger-api: readiness failing on 9/12 pods, 504s at ingress",
+      "severity": "SEV1",
+      "firedAt": "14:22"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "Sockets open → fraud-scorer (per pod)",
+        "unit": "conns",
+        "points": [3120, 5480, 7910, 10230, 12650, 15110, 17480, 19920, 22310, 24780, 27150, 29600, 31980, 34420, 36810, 39270, 41650, 44090, 46480, 48930, 51320, 53790, 56170, 58610, 61000, 63420, 65390, 65412, 65409, 65414],
+        "markAt": 26
+      },
+      {
+        "type": "log",
+        "label": "ledger-api pod + neighbors",
+        "lines": [
+          { "ts": "14:21:52.118", "level": "INFO", "source": "ledger-api", "text": "POST /v1/transfers 201 38ms" },
+          { "ts": "14:21:53.402", "level": "WARN", "source": "ledger-api", "text": "fraud-scorer slow response 1.9s (target 250ms)" },
+          { "ts": "14:21:55.006", "level": "ERROR", "source": "ledger-api", "text": "POST /v1/transfers 500: Post \"http://fraud-scorer.internal:8080/score\": context deadline exceeded" },
+          { "ts": "14:21:55.771", "level": "WARN", "source": "ledger-api", "text": "http: Accept error: accept tcp [::]:8080: accept4: too many open files; retrying in 5ms" },
+          { "ts": "14:21:56.090", "level": "ERROR", "source": "kubelet", "text": "Readiness probe failed: Get \"http://10.2.7.31:8080/healthz\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)" },
+          { "ts": "14:21:57.330", "level": "INFO", "source": "ledger-api", "text": "GET /v1/balances 200 9ms" },
+          { "ts": "14:21:58.512", "level": "ERROR", "source": "ingress-nginx", "text": "upstream timed out (110: Connection timed out) while reading response header from upstream" }
+        ]
+      }
+    ],
+    "question": "Tap the line that reveals the root cause.",
+    "answer": { "evidence": 1, "line": 3 },
+    "explanation": {
+      "cause": "Unclosed response bodies leaked sockets until the process hit its fd limit",
+      "why": "Each fraud-scorer call left its response body unclosed, so the connection never went back to the pool and its socket stayed open. Sockets are file descriptors; at the 65,536 nofile limit accept4 returned EMFILE, the server stopped taking new connections, and probes and ingress requests timed out.",
+      "tell": "accept4: too many open files is the cause; the timeouts are symptoms. Sockets to fraud-scorer climbed linearly for hours and flattened just under 65,536 — the nofile limit."
+    }
+  },
+  {
+    "id": "rt-leap-day-renewal-date",
+    "topic": "runtime",
+    "kind": "find-line",
+    "difficulty": 2,
+    "alert": {
+      "service": "billing-renewals",
+      "title": "billing-renewals: daily renewal batch failed (0 of 1,904 renewed)",
+      "severity": "SEV2",
+      "firedAt": "00:07"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "billing-renewals, 2024-02-29",
+        "lines": [
+          { "ts": "00:05:00.012", "level": "INFO", "source": "renewal-scheduler", "text": "starting daily batch date=2024-02-29 due=1904" },
+          { "ts": "00:05:00.391", "level": "WARN", "source": "hikari", "text": "HikariPool-1 - Thread starvation or clock leap detected (housekeeper delta=1m1s262ms114µs702ns)." },
+          { "ts": "00:05:00.877", "level": "INFO", "source": "chronyd", "text": "System clock wrong by 0.000214 seconds, adjustment started" },
+          { "ts": "00:05:01.204", "level": "ERROR", "source": "renewal-worker", "text": "renew sub_01HQ7T2K9W failed: java.time.DateTimeException: Invalid date 'February 29' as '2025' is not a leap year" },
+          { "ts": "00:05:01.209", "level": "WARN", "source": "renewal-worker", "text": "sub_01HQ7T2K9W moved to retry queue (attempt 1/3)" },
+          { "ts": "00:05:03.660", "level": "ERROR", "source": "renewal-worker", "text": "batch finished: renewed=0 failed=1904 elapsed=3.4s" },
+          { "ts": "00:05:03.702", "level": "INFO", "source": "renewal-scheduler", "text": "next run 2024-03-01T00:05:00Z" }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Context",
+        "items": [
+          { "key": "Last deploy", "value": "9 days ago" },
+          { "key": "Postgres p99", "value": "6ms" },
+          { "key": "Payment provider", "value": "no errors returned" }
+        ]
+      }
+    ],
+    "question": "Tap the line that explains the failed batch.",
+    "answer": { "evidence": 0, "line": 3 },
+    "explanation": {
+      "cause": "Renewal code built Feb 29 of a non-leap year, and java.time rejected every date",
+      "why": "The job computed the next renewal as LocalDate.of(year + 1, month, day). Every subscription due on 2024-02-29 asked for 2025-02-29, which doesn’t exist, so LocalDate threw DateTimeException for all 1,904. plusYears(1) would have clamped to Feb 28.",
+      "tell": "The exception names the impossible date. The Hikari ‘clock leap’ warning is a red herring — chronyd shows the clock off by only 0.2 ms."
+    }
+  },
+  {
+    "id": "rt-regex-backtracking-homepage",
+    "topic": "runtime",
+    "kind": "diagnose",
+    "difficulty": 3,
+    "alert": {
+      "service": "qa-web",
+      "title": "qa-web: all backends DOWN at load balancer, site serving 503",
+      "severity": "SEV1",
+      "firedAt": "14:46"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "Web tier CPU (avg, 11 hosts)",
+        "unit": "%",
+        "points": [34, 37, 33, 36, 35, 38, 34, 97, 99, 99, 98, 99, 100, 99, 99, 98, 99, 100, 99, 99],
+        "markAt": 7
+      },
+      {
+        "type": "log",
+        "label": "qa-web + haproxy",
+        "lines": [
+          { "ts": "14:43:51.004", "level": "INFO", "source": "qa-web", "text": "post 38114872 edited by user 912833 (body 31288 chars), listed on homepage" },
+          { "ts": "14:44:07.215", "level": "WARN", "source": "qa-web", "text": "slow request GET / 6912ms (top frame: RegexInterpreter.Go <- TextUtil.TrimUnicodeWhitespace)" },
+          { "ts": "14:44:31.402", "level": "WARN", "source": "haproxy", "text": "Server www/web-07 is DOWN, reason: Layer7 timeout, check duration: 2001ms. 4 active and 0 backup servers left. 63 sessions active, 0 requeued, 0 remaining in queue" },
+          { "ts": "14:44:58.117", "level": "ERROR", "source": "haproxy", "text": "backend www has no server available!" },
+          { "ts": "14:45:02.338", "level": "INFO", "source": "qa-web", "text": "GET /questions/41722301 200 64ms (direct to web-03, bypassing LB)" }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Context",
+        "items": [
+          { "key": "Last deploy", "value": "2 days ago" },
+          { "key": "LB requests/s", "value": "flat vs. same hour yesterday" },
+          { "key": "DB CPU", "value": "21%" },
+          { "key": "LB health check", "value": "GET / every 2s, timeout 2s" }
+        ]
+      }
+    ],
+    "question": "What took the whole site down?",
+    "options": [
+      "Cache stampede after the homepage cache expired",
+      "Trim regex backtracking on one post pinning every CPU",
+      "Health check on / too strict, ejecting healthy hosts",
+      "Bot traffic exhausting web worker threads on /"
+    ],
+    "answer": 1,
+    "explanation": {
+      "cause": "A whitespace-trim regex went quadratic on one post that every homepage view rendered",
+      "why": "^[\\s\\u200c]+|[\\s\\u200c]+$ retries \\s+$ from every position in a long whitespace run that isn’t at the end of the string — ~200M checks for 20,000 spaces. The post sat in the homepage list, so each view and each health check (GET /) burned seconds of CPU until the LB marked every backend DOWN.",
+      "tell": "CPU jumped right after one homepage post was edited, slow requests show RegexInterpreter.Go under a trim helper, and traffic and DB load were flat — work per request exploded, not volume."
+    },
+    "source": {
+      "title": "Outage Postmortem – July 20, 2016 (Stack Exchange)",
+      "url": "https://stackstatus.tumblr.com/post/147710624694/outage-postmortem-july-20-2016"
+    }
+  }
+]

@@ -22,7 +22,13 @@ export type BadgeStanding = { readonly badge: Badge; readonly current: number; r
 
 const passedCount = (progress: Progress) => passedWarRooms(progress).length;
 const topGrades = (progress: Progress) => Object.values(progress.warRoom).filter((record) => record.bestGrade === "S").length;
-const lifetimeDollars = (progress: Progress) => Math.floor(Object.values(progress.wallet.earnedCents).reduce((sum, cents) => sum + cents, 0) / 100);
+/** Money earned by playing; admin grants (test money) never count toward a badge. */
+const lifetimeDollars = (progress: Progress) =>
+  Math.floor(
+    Object.entries(progress.wallet.earnedCents)
+      .filter(([reason]) => reason !== "grant")
+      .reduce((sum, [, cents]) => sum + cents, 0) / 100,
+  );
 const hasPassed = (scenarioId: string) => (progress: Progress) => (passedWarRooms(progress).includes(scenarioId) ? 1 : 0);
 
 /** Ordered as the shelf shows them: by family, then easiest first. */

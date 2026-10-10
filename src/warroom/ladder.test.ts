@@ -34,7 +34,7 @@ function resolveWith(scenario: Scenario, fix: string) {
   let incident = play(scenario, 40, openIncident(scenario)).incident;
   incident = shell(scenario, incident, fix).incident;
   incident = play(scenario, 120, incident).incident;
-  const declared = declareResolved(incident);
+  const declared = declareResolved(incident, scenario);
   const { incident: closed, notices } = play(scenario, 700, declared.incident);
   return { before: incident, refused: declared.notice, closed, notices };
 }

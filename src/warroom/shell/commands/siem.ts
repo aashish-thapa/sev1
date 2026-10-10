@@ -2,7 +2,7 @@ import { segmentStats } from "../../sim/clients.ts";
 import { resolveAlert } from "../../sim/commerce-actions.ts";
 import { isAlertOpen, type AlertDisposition, type Commerce, type SiemAlert } from "../../sim/commerce.ts";
 import { DISTINCT_SOURCE_IPS } from "../../sim/edge.ts";
-import { applied, commerceCommand, count, percent, stamp, WINDOW_SECONDS } from "../commerce-command.ts";
+import { applied, commerceCommand, count, percent, runEvidence, stamp, viewNames, WINDOW_SECONDS } from "../commerce-command.ts";
 import { operatorName, ssoRefusal } from "../identity.ts";
 import { takeFlag } from "../tokenize.ts";
 import { age, dim, err, out, table, type OutputLine, type ShellContext, type ShellResult } from "../types.ts";
@@ -122,8 +122,10 @@ const SEARCHES: Record<string, (context: ShellContext, commerce: Commerce) => re
 };
 
 function search(name: string | undefined, context: ShellContext, commerce: Commerce): ShellResult {
+  const scenarioView = runEvidence(context, "siem", name);
+  if (scenarioView) return scenarioView;
   const run = name ? SEARCHES[name] : undefined;
-  if (!run) return { output: err(`siem: unknown saved search "${name ?? ""}"`, `Saved searches: ${Object.keys(SEARCHES).join(", ")}`) };
+  if (!run) return { output: err(`siem: unknown saved search "${name ?? ""}"`, `Saved searches: ${viewNames(context, "siem", Object.keys(SEARCHES)).join(", ")}`) };
   return { output: run(context, commerce) };
 }
 
@@ -172,10 +174,10 @@ export const siem = commerceCommand({
         return { output: err(`siem: unknown command "${sub}"`, "Commands: alerts, show, search, resolve") };
     }
   },
-  complete(args, _partial, _context, commerce) {
+  complete(args, _partial, context, commerce) {
     if (args.length === 0) return ["alerts", "show", "search", "resolve"];
     if (args.length === 1 && (args[0] === "show" || args[0] === "resolve")) return commerce.alerts.map((alert) => alert.id);
-    if (args.length === 1 && args[0] === "search") return Object.keys(SEARCHES);
+    if (args.length === 1 && args[0] === "search") return viewNames(context, "siem", Object.keys(SEARCHES));
     if (args[0] === "resolve" && args.at(-1) === "--disposition") return Object.keys(DISPOSITIONS);
     if (args[0] === "resolve" && args.length === 2) return ["--disposition"];
     return [];

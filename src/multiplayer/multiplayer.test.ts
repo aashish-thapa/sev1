@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { generateRoomCode } from "../../server/room-code.ts";
 import { silentLogger } from "../../server/log.ts";
+import { Room } from "../../server/room.ts";
 import { findScenario } from "../../server/scenarios.ts";
 import { startServer, type RunningServer, type ServerOptions } from "../../server/server.ts";
 import { advance, openIncident, type Incident } from "../warroom/incident.ts";
@@ -109,6 +110,24 @@ describe("incident frames", () => {
     expect(diffList([1, 2, 3], [2, 3, 4])).toEqual({ drop: 1, append: [4] });
     expect(diffList([1, 2, 3], [9])).toEqual({ drop: 3, append: [9] });
     expect(diffList([], [])).toEqual({ drop: 0, append: [] });
+  });
+});
+
+describe("declaring resolved in a room", () => {
+  it("is refused on the scenario's own metric, and the channel says which", () => {
+    const paged = { ...scenario, alertMetric: { label: "customers turned away", rate: () => 0.3 } };
+    const room = new Room("TEST", paged, { tickMs: 60_000, monitoringTickMs: 60_000, playerGraceMs: 60_000 }, silentLogger, () => {});
+    const said: string[] = [];
+    const listen = (payload: string) => {
+      const parsed = parseServerMessage(payload);
+      if (parsed.ok && parsed.message.type === "comms") said.push(parsed.message.message.text);
+    };
+    const joined = room.join({ name: "Maya", role: "infrastructure", badge: null, tags: [] }, { send: listen, close: () => {} });
+    if (!joined.ok) throw new Error(joined.message);
+
+    room.declare(joined.playerId);
+    room.dispose();
+    expect(said.at(-1)).toBe("Can’t resolve: customers turned away is still 30%.");
   });
 });
 

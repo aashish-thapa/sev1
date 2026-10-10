@@ -1,7 +1,12 @@
+import { attackLoad, stepAttack } from "./attack.ts";
+import { clientDefects, type DefectEffect } from "./client-defects.ts";
 import { clientSegments, mixAmplification, mixGiveUp, RETRY_POLICIES, type ClientSegment } from "./clients.ts";
-import { isAlertOpen, type Commerce, type Ledger, type MinuteBucket, type PaymentGateway, type Platform } from "./commerce.ts";
+import { isAlertOpen, type Commerce, type Ledger, type MinuteBucket, type PaymentGateway } from "./commerce.ts";
 import { blockedShare, containmentRule, topTalker } from "./edge.ts";
+import { fraudDeclines, stepFraud } from "./fraud.ts";
 import { appendCapped, SERIES_LENGTH, type ClusterState, type LogLevel, type Traffic } from "./model.ts";
+import { stepRollout } from "./rollout.ts";
+import { updateWall } from "./update-wall.ts";
 
 /** What reaches the cluster this second and how the dependency behind it is doing. */
 export type Load = {
@@ -11,22 +16,45 @@ export type Load = {
   readonly gatewayFailShare: number;
   /** Multiplier on dependency-timeout traits relative to the traffic they were measured at. */
   readonly leakPressure: number;
+  /** Share of checkouts a client defect makes checkout-api answer with a 5xx before it calls the gateway. */
+  readonly rejectedCheckoutShare: number;
+  /** Share of checkouts declined as fraud: a 402 before the gateway, so a lost order but not a failed request. */
+  readonly declinedCheckoutShare: number;
 };
 
+/** A client segment as it meets checkout this second: past the update wall, through its build's defects. */
+export type DemandSegment = ClientSegment &
+  DefectEffect & {
+    /** Share of the segment's customers behind the update wall. */
+    readonly walledShare: number;
+    /** Share of the segment's customers whose checkout sends any request at all. */
+    readonly reach: number;
+  };
+
 export type CommerceDemand = Load & {
-  readonly segments: readonly ClientSegment[];
+  readonly segments: readonly DemandSegment[];
   /** The checkout failure rate clients reacted to when deciding how hard to retry. */
   readonly clientFailureRate: number;
   readonly organicCheckoutsPerSecond: number;
   readonly checkoutAttemptsPerSecond: number;
   readonly blockedShare: number;
   readonly blockedPerSecond: number;
+  /** Fraudulent checkouts the scorer let through; they queue at the gateway beside real ones. */
+  readonly fraudGatewayCallsPerSecond: number;
 };
 
 export type RoutingOutcome = {
   readonly t: number;
   readonly gatewayCallsPerSecond: number;
   readonly checkoutFailureRate: number;
+};
+
+/** One settled second, for the hooks that advance commerce state after the gateway has run. */
+export type Settlement = {
+  readonly t: number;
+  readonly demand: CommerceDemand;
+  /** Charges the gateway completed this second, fraudulent ones included. */
+  readonly processedCharges: number;
 };
 
 type Log = (source: string, level: LogLevel, text: string) => void;
@@ -37,45 +65,100 @@ const TIMEOUT_ONSET_SECONDS = 2.2;
 const TIMEOUT_SPREAD_SECONDS = 1.6;
 
 export function plainLoad(traffic: Traffic): Load {
-  return { requestsPerSecond: traffic.requestsPerSecond, checkoutShare: traffic.checkoutShare, gatewayFailShare: 0, leakPressure: 1 };
+  return {
+    requestsPerSecond: traffic.requestsPerSecond,
+    checkoutShare: traffic.checkoutShare,
+    gatewayFailShare: 0,
+    leakPressure: 1,
+    rejectedCheckoutShare: 0,
+    declinedCheckoutShare: 0,
+  };
 }
 
 function gatewayTimeoutTotal(gateway: PaymentGateway): number {
   return gateway.baselineTimeoutShare + (1 - gateway.baselineTimeoutShare) * gateway.timeoutShare;
 }
 
-/** Organic customers, multiplied by whatever retry policy their client runs, minus what the WAF drops. */
+function demandSegments(commerce: Commerce, t: number): readonly DemandSegment[] {
+  return clientSegments(commerce, t).map((segment) => {
+    const walledShare = updateWall(commerce, segment, t);
+    const defects = clientDefects(commerce, segment, t);
+    return { ...segment, ...defects, walledShare, reach: (1 - walledShare) * (1 - defects.clientFailureShare) };
+  });
+}
+
+/**
+ * Organic customers who get as far as a request (past the update wall, their app not failing first),
+ * multiplied by whatever retry policy their client runs, minus what the WAF drops, plus attack traffic it lets through.
+ */
 export function commerceDemand(state: ClusterState, commerce: Commerce): CommerceDemand {
   const { requestsPerSecond: organic, checkoutShare } = state.traffic;
-  const segments = clientSegments(commerce, state.t);
+  const segments = demandSegments(commerce, state.t);
   const failure = commerce.pulse.checkoutFailureRate;
   const organicCheckouts = organic * checkoutShare;
-  const checkoutAttempts = organicCheckouts * segments.reduce((sum, segment) => sum + segment.share * mixAmplification(segment.mix, failure), 0);
+  const requestsPerCustomer = segments.map((segment) => segment.share * segment.reach * mixAmplification(segment.mix, failure));
+  const perCustomer = requestsPerCustomer.reduce((sum, requests) => sum + requests, 0);
+  const rejected = requestsPerCustomer.reduce((sum, requests, index) => sum + requests * segments[index].rejectedShare, 0);
+  const checkoutAttempts = organicCheckouts * perCustomer;
   const attempts = organic * (1 - checkoutShare) + checkoutAttempts;
   const blocked = blockedShare(commerce.wafRules);
-  const share = attempts > 0 ? checkoutAttempts / attempts : 0;
+  const customerRequests = attempts * (1 - blocked);
+  const attack = attackLoad(commerce, state.t);
+  const fraud = fraudDeclines(commerce, state.t);
+  const requestsPerSecond = customerRequests + attack.requestsPerSecond;
+  const customerShare = attempts > 0 ? checkoutAttempts / attempts : 0;
+  // Attack requests are never checkouts, so they thin the checkout share of what reaches the pods.
+  const share = attack.requestsPerSecond > 0 ? customerShare * (customerRequests / requestsPerSecond) : customerShare;
   const { gateway } = commerce;
   return {
-    requestsPerSecond: attempts * (1 - blocked),
+    requestsPerSecond,
     checkoutShare: share,
     gatewayFailShare: gateway.timeoutShare,
     leakPressure: (share / checkoutShare) * (gatewayTimeoutTotal(gateway) / gateway.baselineTimeoutShare),
+    rejectedCheckoutShare: perCustomer > 0 ? rejected / perCustomer : 0,
+    declinedCheckoutShare: fraud.declinedCheckoutShare,
     segments,
     clientFailureRate: failure,
     organicCheckoutsPerSecond: organicCheckouts,
     checkoutAttemptsPerSecond: checkoutAttempts,
     blockedShare: blocked,
     blockedPerSecond: attempts * blocked,
+    fraudGatewayCallsPerSecond: fraud.gatewayCallsPerSecond,
   };
 }
 
-/** Customers who end this second without an order: blocked at the edge, or out of retries. */
+/**
+ * Share of one segment's customers who end the second without an order, by the first thing that stops
+ * them: the update wall, their own app, the WAF, running out of retries, or a fraud decline.
+ */
+function lostShare(segment: DemandSegment, blocked: number, gaveUp: number, declined: number): number {
+  const pastEdge = gaveUp + (1 - gaveUp) * declined;
+  const atEdge = blocked + (1 - blocked) * pastEdge;
+  const inApp = segment.clientFailureShare + (1 - segment.clientFailureShare) * atEdge;
+  return segment.walledShare + (1 - segment.walledShare) * inApp;
+}
+
+/** Customers who end this second without an order. */
 export function lostCheckouts(demand: CommerceDemand, checkoutFailureRate: number): number {
   return demand.segments.reduce((sum, segment) => {
     const customers = demand.organicCheckoutsPerSecond * segment.share;
     const gaveUp = mixGiveUp(segment.mix, checkoutFailureRate);
-    return sum + customers * (demand.blockedShare + (1 - demand.blockedShare) * gaveUp);
+    return sum + customers * lostShare(segment, demand.blockedShare, gaveUp, demand.declinedCheckoutShare);
   }, 0);
+}
+
+/**
+ * Share of organic checkout customers who ended the last second without an order, for scenarios
+ * whose fix doesn't show in 5xx: the failure rate customers saw then, on the clients and rules in place at `t`.
+ */
+export function customerLossRate(commerce: Commerce, t: number): number {
+  const blocked = blockedShare(commerce.wafRules);
+  const failure = commerce.pulse.checkoutFailureRate;
+  const { declinedCheckoutShare } = fraudDeclines(commerce, t);
+  return demandSegments(commerce, t).reduce(
+    (sum, segment) => sum + segment.share * lostShare(segment, blocked, mixGiveUp(segment.mix, failure), declinedCheckoutShare),
+    0,
+  );
 }
 
 /**
@@ -96,11 +179,12 @@ function stepLedger(ledger: Ledger, t: number, processed: number, orphanShare: n
   const failure = demand.clientFailureRate;
   const orphaned = processed * orphanShare;
   const paid = processed - orphaned;
-  // Orphans land on segments in proportion to the gateway calls each one sends.
+  // Orphans land on segments in proportion to the gateway calls each one sends; rejected requests send none.
   const calls = demand.segments.map((segment) => {
     const unsafe = segment.mix.filter((part) => !RETRY_POLICIES[part.policy].sendsIdempotencyKey);
     const safe = segment.mix.filter((part) => RETRY_POLICIES[part.policy].sendsIdempotencyKey);
-    return { withoutKey: segment.share * mixAmplification(unsafe, failure), withKey: segment.share * mixAmplification(safe, failure) };
+    const sending = segment.share * segment.reach * (1 - segment.rejectedShare);
+    return { withoutKey: sending * mixAmplification(unsafe, failure), withKey: sending * mixAmplification(safe, failure) };
   });
   const totalCalls = calls.reduce((sum, call) => sum + call.withKey + call.withoutKey, 0);
   const scale = totalCalls > 0 ? orphaned / totalCalls : 0;
@@ -124,12 +208,6 @@ function stepLedger(ledger: Ledger, t: number, processed: number, orphanShare: n
     orphanHistory: appendCapped(ledger.orphanHistory, orphanedCaptures, SERIES_LENGTH),
     minutes: minutes.slice(-MINUTES_KEPT),
   };
-}
-
-function stepRollout(platform: Platform): Platform {
-  const { rollout } = platform;
-  if (rollout.kind !== "phased" || rollout.isPaused || platform.adoption >= 1) return platform;
-  return { ...platform, adoption: Math.min(1, platform.adoption + rollout.adoptionPerSecond) };
 }
 
 /** The SOAR playbook contains any alert nobody triaged in time by blocking its top talkers. */
@@ -158,7 +236,7 @@ function logEdge(demand: CommerceDemand, outcome: RoutingOutcome, commerce: Comm
   const { t } = outcome;
   if (t % 2 !== 0 || demand.segments.length === 0) return;
   const failure = outcome.checkoutFailureRate;
-  const weights = demand.segments.map((segment) => segment.share * mixAmplification(segment.mix, demand.clientFailureRate));
+  const weights = demand.segments.map((segment) => segment.share * segment.reach * mixAmplification(segment.mix, demand.clientFailureRate));
   const total = weights.reduce((sum, weight) => sum + weight, 0);
   let pick = unitHash(t * 7 + 1) * total;
   const segment = demand.segments.find((_, index) => (pick -= weights[index]) <= 0) ?? demand.segments[0];
@@ -177,7 +255,7 @@ function logEdge(demand: CommerceDemand, outcome: RoutingOutcome, commerce: Comm
 }
 
 export function settleCommerce(commerce: Commerce, demand: CommerceDemand, outcome: RoutingOutcome, log: Log): Commerce {
-  const { gateway, processed } = stepGateway(commerce.gateway, outcome.gatewayCallsPerSecond);
+  const { gateway, processed } = stepGateway(commerce.gateway, outcome.gatewayCallsPerSecond + demand.fraudGatewayCallsPerSecond);
   const ledger = stepLedger(commerce.ledger, outcome.t, processed, gateway.timeoutShare, demand);
   const settled: Commerce = {
     ...commerce,
@@ -193,5 +271,8 @@ export function settleCommerce(commerce: Commerce, demand: CommerceDemand, outco
     },
   };
   logEdge(demand, outcome, commerce, log);
-  return autoContain(settled, outcome.t, log);
+  const settlement: Settlement = { t: outcome.t, demand, processedCharges: processed };
+  const attacked = stepAttack(settled, settlement);
+  const defrauded = stepFraud(attacked, settlement);
+  return autoContain(defrauded, outcome.t, log);
 }

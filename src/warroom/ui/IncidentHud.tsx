@@ -1,4 +1,4 @@
-import type { Incident } from "../incident.ts";
+import { alertLabel, alertRate, type Incident } from "../incident.ts";
 import { SoundToggle } from "../../ui/SoundToggle.tsx";
 import { useCareer } from "../../app/career-context.ts";
 import { WalletChip } from "../../ui/WalletChip.tsx";
@@ -9,10 +9,10 @@ const countFormat = new Intl.NumberFormat("en");
 /** Failed checkouts the SLA allows this hour; past it, contracts start paying out credits. */
 const SLA_BUDGET = 9_000;
 
-function SlaClock({ incident }: { incident: Incident }) {
+function SlaClock({ incident, scenario }: { incident: Incident; scenario: Scenario }) {
   const { cluster, phase } = incident;
   const remaining = SLA_BUDGET - cluster.failedCheckouts;
-  const failingPerSecond = cluster.traffic.requestsPerSecond * cluster.errorRate * cluster.traffic.checkoutShare;
+  const failingPerSecond = cluster.traffic.requestsPerSecond * alertRate(scenario, cluster) * cluster.traffic.checkoutShare;
   if (phase.name !== "live") return null;
   if (remaining <= 0) {
     return (
@@ -46,7 +46,7 @@ type Props = {
 export function IncidentHud({ incident, scenario, isPaged, onPage, onDeclare, onLeave }: Props) {
   const career = useCareer();
   const { cluster, phase } = incident;
-  const errorPercent = Math.round(cluster.errorRate * 100);
+  const alertPercent = Math.round(alertRate(scenario, cluster) * 100);
   if (!isPaged) {
     return (
       <header className="hud">
@@ -82,15 +82,15 @@ export function IncidentHud({ incident, scenario, isPaged, onPage, onDeclare, on
         <p className="hud__clock">{clockAt(scenario, cluster.t)}</p>
       </div>
       <dl className="hud__stats">
-        <div data-tone={errorPercent >= 5 ? "critical" : errorPercent >= 1 ? "warn" : "ok"}>
-          <dt>checkout 5xx</dt>
-          <dd>{errorPercent}%</dd>
+        <div data-tone={alertPercent >= 5 ? "critical" : alertPercent >= 1 ? "warn" : "ok"}>
+          <dt>{alertLabel(scenario)}</dt>
+          <dd>{alertPercent}%</dd>
         </div>
         <div>
           <dt>failed checkouts</dt>
           <dd>{countFormat.format(Math.round(cluster.failedCheckouts))}</dd>
         </div>
-        <SlaClock incident={incident} />
+        <SlaClock incident={incident} scenario={scenario} />
         <WalletChip />
         <div className="hud__action">
           {phase.name === "monitoring" ? (

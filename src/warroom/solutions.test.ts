@@ -10,7 +10,7 @@ const THINKING_SECONDS = 8;
 const FIRST_MOVE_AT = 20;
 /** Long enough for any rollout or rebuild in the catalogue to finish. */
 const SETTLE_SECONDS = 180;
-/** In the cross-team incident, refunds wait until the retry storm is over (see the data steps). */
+/** In a cross-team incident, refunds wait until the retry storm is over (see the data steps); alone, data acts at once. */
 const DATA_WAITS_UNTIL = 420;
 const REFUSAL = /^(bash:|error:|Error from server|usage:|ERROR:|psql: error|[a-z-]+: )/;
 
@@ -35,7 +35,7 @@ function runSteps(scenario: Scenario, role: Role, incident: Incident): Incident 
 }
 
 function close(scenario: Scenario, incident: Incident) {
-  const declared = declareResolved(incident);
+  const declared = declareResolved(incident, scenario);
   expect(declared.notice, `${scenario.id} refused to resolve`).toBeUndefined();
   return play(scenario, declared.incident, 700);
 }
@@ -47,7 +47,7 @@ describe.each(SCENARIOS.map((scenario) => [scenario.id, scenario] as const))("%s
     const commands = Object.values(scenario.solution).flatMap((steps) => steps?.map((step) => step.command) ?? []);
     for (const hint of scenario.hints) {
       for (const command of commands) expect(hint).not.toContain(command);
-      expect(hint).not.toMatch(/\b(kubectl|psql|flags|remote-config|siem|waf|reconcile|releases)\s/);
+      expect(hint).not.toMatch(/\b(kubectl|psql|flags|remote-config|siem|waf|reconcile|releases|rum|warehouse|curl|models|pipelines)\s/);
     }
   });
 
@@ -60,7 +60,7 @@ describe.each(SCENARIOS.map((scenario) => [scenario.id, scenario] as const))("%s
     const now = scenario.roles.filter((role) => role !== "data");
     for (const role of now) incident = runSteps(scenario, role, incident);
     if (scenario.roles.includes("data")) {
-      incident = play(scenario, incident, Math.max(0, DATA_WAITS_UNTIL - incident.cluster.t));
+      if (scenario.roles.length > 1) incident = play(scenario, incident, Math.max(0, DATA_WAITS_UNTIL - incident.cluster.t));
       incident = runSteps(scenario, "data", incident);
     }
     incident = play(scenario, incident, SETTLE_SECONDS);

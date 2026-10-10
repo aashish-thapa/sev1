@@ -43,7 +43,7 @@ describe("orders index left invalid by a migration", () => {
     expect(scenario.isRootCauseFixed(incident.cluster)).toBe(true);
     expect(incident.cluster.errorRate).toBeLessThan(0.01);
 
-    const declared = declareResolved(incident);
+    const declared = declareResolved(incident, scenario);
     expect(declared.notice).toBeUndefined();
     const { incident: closed, notices } = play(700, declared.incident);
     expect(notices.map((notice) => notice.kind)).toEqual(["closed"]);

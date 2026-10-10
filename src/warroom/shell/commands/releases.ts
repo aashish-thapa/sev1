@@ -1,26 +1,19 @@
 import { segmentId, segmentStats } from "../../sim/clients.ts";
 import { setReleasePaused } from "../../sim/commerce-actions.ts";
 import { findPlatform, type Commerce, type Platform } from "../../sim/commerce.ts";
-import { applied, commerceCommand, percent } from "../commerce-command.ts";
+import { rolloutLabel } from "../../sim/rollout.ts";
+import { applied, commerceCommand, percent, runEvidence, viewNames } from "../commerce-command.ts";
 import { ssoRefusal } from "../identity.ts";
 import { dim, err, out, table, type ShellContext, type ShellResult } from "../types.ts";
 
-/** App Store Connect's 7-day phased release schedule (share of automatic updates offered). */
-const PHASED_PERCENT = [1, 2, 5, 10, 20, 50, 100];
 const MOBILE = ["ios", "android"];
+const COMMANDS = ["status", "halt", "resume", "rollback"];
 const DISPLAY_NAME: Record<string, string> = { ios: "iOS", android: "Android" };
 
 function crashFree(version: string): string {
   let hash = 0;
   for (const char of version) hash = (hash * 31 + char.charCodeAt(0)) % 1000;
   return `${(99.4 + (hash % 40) / 100).toFixed(2)}%`;
-}
-
-function rolloutLabel(platform: Platform): string {
-  const { rollout } = platform;
-  if (rollout.kind === "instant") return "released (100%)";
-  const percentToday = PHASED_PERCENT[Math.min(rollout.day, PHASED_PERCENT.length) - 1];
-  return `phased${rollout.isPaused ? " · PAUSED" : ""} · day ${rollout.day}/7 (${percentToday}%)`;
 }
 
 function status(filter: string | undefined, context: ShellContext, commerce: Commerce): ShellResult {
@@ -81,6 +74,8 @@ export const releases = commerceCommand({
   roles: ["mobile"],
   refuse: (_args, { role }) => ssoRefusal("releases", "app-store-release-managers", role),
   run([sub, ...rest], context, commerce) {
+    const scenarioView = runEvidence(context, "releases", sub);
+    if (scenarioView) return scenarioView;
     switch (sub) {
       case undefined:
       case "status":
@@ -93,11 +88,11 @@ export const releases = commerceCommand({
       case "rollback":
         return rollback(rest);
       default:
-        return { output: err(`releases: unknown command "${sub}"`, "Commands: status, halt, resume, rollback") };
+        return { output: err(`releases: unknown command "${sub}"`, `Commands: ${viewNames(context, "releases", COMMANDS).join(", ")}`) };
     }
   },
-  complete(args, _partial, _context, commerce) {
-    if (args.length === 0) return ["status", "halt", "resume", "rollback"];
+  complete(args, _partial, context, commerce) {
+    if (args.length === 0) return viewNames(context, "releases", COMMANDS);
     if (args.length === 1) return MOBILE;
     if (args.length === 2 && ["halt", "resume", "rollback"].includes(args[0])) {
       const platform = findPlatform(commerce, args[1]);

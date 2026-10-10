@@ -198,7 +198,7 @@ export class Room {
       this.send(seat, { type: "error", code: "incident_not_live", message: "The incident is already marked resolved." });
       return;
     }
-    const { incident, notice } = declareResolved(this.incident);
+    const { incident, notice } = declareResolved(this.incident, this.scenario);
     if (notice) {
       this.post(noticeComms(notice, incident.cluster.t));
       return;

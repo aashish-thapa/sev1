@@ -72,7 +72,7 @@ function reduce(state: State, action: Action, scenario: Scenario, role: Role): S
       return { ...state, incident: team.incident, teamworkDone: team.done, notices };
     }
     case "declare": {
-      const { incident, notice } = declareResolved(state.incident);
+      const { incident, notice } = declareResolved(state.incident, scenario);
       const message: CommsMessage | null = notice
         ? commsFor(notice, incident)
         : { at: incident.cluster.t, from: "PagerDuty", text: "Marked resolved by you. Monitoring for 10 minutes before closing." };
@@ -100,12 +100,12 @@ function commsFor(notice: IncidentNotice, incident: Incident): CommsMessage {
   const at = incident.cluster.t;
   switch (notice.kind) {
     case "refused":
-      return { at, from: "PagerDuty", text: `Can’t resolve: checkout 5xx is still ${percent(notice.errorRate)}.` };
+      return { at, from: "PagerDuty", text: `Can’t resolve: ${notice.label} is still ${percent(notice.rate)}.` };
     case "reopened":
       return {
         at,
         from: "PagerDuty",
-        text: `Re-triggered — 5xx back at ${percent(notice.errorRate)}${notice.wasRollingOut ? " while the rollout was still replacing pods" : ""}. The incident is open again.`,
+        text: `Re-triggered — ${notice.label} back at ${percent(notice.rate)}${notice.wasRollingOut ? " while the rollout was still replacing pods" : ""}. The incident is open again.`,
       };
     case "closed":
       return { at, from: "PagerDuty", text: "Quiet for 10 minutes. Incident closed — time for the postmortem." };

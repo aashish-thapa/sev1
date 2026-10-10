@@ -173,7 +173,7 @@ function reconcile(
 }
 
 function routeTraffic(deployment: Deployment, load: Load, connectionHoldSeconds: number, t: number, random: Random, journal: Journal) {
-  const { requestsPerSecond, checkoutShare, gatewayFailShare, leakPressure } = load;
+  const { requestsPerSecond, checkoutShare, gatewayFailShare, leakPressure, rejectedCheckoutShare, declinedCheckoutShare } = load;
   const serving = deployment.pods.filter(isServing);
   const offeredPerPod = serving.length > 0 ? requestsPerSecond / serving.length : 0;
   // Past its capacity a pod sheds the overflow; with no capacity set, any pod copes with any load.
@@ -197,13 +197,15 @@ function routeTraffic(deployment: Deployment, load: Load, connectionHoldSeconds:
     const available = deployment.poolSize - leaked;
     const failFraction = !isPodServing ? 0 : available <= 0 ? 1 : Math.max(0, 1 - available / demand);
     failedRps += perPodRps * failFraction;
-    // A build that throws on checkout fails every checkout it reaches, before any gateway call.
+    // A build that throws on checkout fails every checkout it reaches, before any gateway call;
+    // a client defect fails its share of them the same way.
     const reachedCheckouts = isPodServing ? perPodRps * (1 - failFraction) * checkoutShare : 0;
-    const thrown = throwsOnCheckout(deployment, pod) ? reachedCheckouts : 0;
+    const thrown = reachedCheckouts * (throwsOnCheckout(deployment, pod) ? 1 : rejectedCheckoutShare);
     failedRps += thrown;
     checkoutFailedRps += thrown;
     // Starved requests fail before checkout-api ever calls the gateway; the rest may time out there.
-    const gatewayCalls = reachedCheckouts - thrown;
+    // A fraud decline ends the checkout before the gateway too, without failing the request.
+    const gatewayCalls = (reachedCheckouts - thrown) * (1 - declinedCheckoutShare);
     const gatewayFailed = gatewayCalls * gatewayFailShare;
     failedRps += gatewayFailed;
     checkoutFailedRps += perPodRps * failFraction * checkoutShare + gatewayFailed;

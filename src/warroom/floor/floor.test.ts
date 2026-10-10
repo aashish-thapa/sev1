@@ -8,7 +8,7 @@ const still = { forward: 0, strafe: 0, yawDelta: 0, pitchDelta: 0 };
 
 describe("server hall", () => {
   const cluster = openIncident(checkoutPoolLeak).cluster;
-  const racks = layoutHall(cluster, checkoutPoolLeak.externals);
+  const racks = layoutHall(cluster, checkoutPoolLeak);
 
   it("gives every live pod its own rack and marks the starved one critical", () => {
     const compute = racks.filter((rack) => rack.kind === "compute");

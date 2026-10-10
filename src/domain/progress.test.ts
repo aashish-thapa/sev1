@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseLocalDate } from "./calendar.ts";
 import { isPlausibleProgress } from "./audit.ts";
 import { payRef } from "./economy.ts";
-import { earn, emptyProgress, ProgressSchema, recordAssistedRun, recordAttempt, recordWarRoomRun, startShift, warRoomPlays, type Attempt } from "./progress.ts";
+import { earn, emptyProgress, hintsUsedOn, ProgressSchema, recordAssistedRun, spendHint, recordAttempt, recordWarRoomRun, startShift, warRoomPlays, type Attempt } from "./progress.ts";
 
 const DAY = parseLocalDate("2026-10-10");
 const attempt = (incidentId: string, isCorrect: boolean): Attempt => ({ incidentId, topic: "database", difficulty: 1, isCorrect, elapsedMs: 9000 });
@@ -87,5 +87,16 @@ describe("bestStreak", () => {
     const parsed = ProgressSchema.parse(legacy);
     expect(parsed.bestStreak).toBe(4);
     expect(parsed.featuredBadge).toBeNull();
+  });
+});
+
+describe("hintsUsed", () => {
+  it("counts allowance hints per day and starts fresh the next day", () => {
+    const today = parseLocalDate("2026-10-10");
+    const tomorrow = parseLocalDate("2026-10-11");
+    const used = spendHint(spendHint(emptyProgress(), today), today);
+    expect(hintsUsedOn(used, today)).toBe(2);
+    expect(hintsUsedOn(used, tomorrow)).toBe(0);
+    expect(hintsUsedOn(spendHint(used, tomorrow), tomorrow)).toBe(1);
   });
 });

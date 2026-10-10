@@ -49,6 +49,8 @@ const ProgressFieldsSchema = z.object({
   bestStreak: z.int().nonnegative(),
   /** The earned badge shown next to your name in rooms and on the leaderboard (an achievements catalog id). */
   featuredBadge: z.string().min(1).max(40).nullable().default(null),
+  /** Paid-tier hints opened today (Pro's daily allowance); resets when the day changes. */
+  hintsUsed: z.object({ day: LocalDateSchema, count: z.int().nonnegative() }).nullable().default(null),
 });
 
 /** Saves from before `correctCards` existed: count what history and today's shift still remember. */
@@ -83,6 +85,7 @@ export function emptyProgress(): Progress {
     streak: { count: 0, lastShiftDay: null },
     bestStreak: 0,
     featuredBadge: null,
+    hintsUsed: null,
     history: [],
     activeShift: null,
     warRoom: {},
@@ -134,6 +137,16 @@ export function warRoomPlays(progress: Progress): number {
 }
 
 /** Shows an earned badge next to your name, or none. Whether it's earned is checked where badges live (achievements.ts). */
+/** Allowance hints opened on `day`; yesterday's count doesn't carry over. */
+export function hintsUsedOn(progress: Progress, day: LocalDate): number {
+  return progress.hintsUsed?.day === day ? progress.hintsUsed.count : 0;
+}
+
+/** Counts one allowance hint against `day`. Whether one was left to spend is the caller's rule (entitlements). */
+export function spendHint(progress: Progress, day: LocalDate): Progress {
+  return { ...progress, hintsUsed: { day, count: hintsUsedOn(progress, day) + 1 } };
+}
+
 export function featureBadge(progress: Progress, badgeId: string | null): Progress {
   return progress.featuredBadge === badgeId ? progress : { ...progress, featuredBadge: badgeId };
 }

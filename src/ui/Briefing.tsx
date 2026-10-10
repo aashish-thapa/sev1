@@ -1,7 +1,6 @@
-import { useContext, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import { AccountContext } from "../app/useAccount.ts";
 import { featuredBadge } from "../domain/achievements.ts";
-import { careerLevel } from "../domain/career.ts";
 import { ROLE_IDS, type Role } from "../domain/incident.ts";
 import type { Progress } from "../domain/progress.ts";
 import { ROLE_INFO } from "../domain/roles.ts";
@@ -9,9 +8,9 @@ import type { RoomVisibility } from "../multiplayer/protocol.ts";
 import { usePublicRooms, type ListPublicRooms } from "../multiplayer/usePublicRooms.ts";
 import { useLeaderboard, type FetchLeaderboard } from "../storage/leaderboard-api.ts";
 import { AccountPanel } from "./AccountPanel.tsx";
-import { BadgeMark, BadgeShelf } from "./Badges.tsx";
-import { CareerLadder } from "./Career.tsx";
+import { BadgeMark } from "./Badges.tsx";
 import { LeaderboardPanel } from "./LeaderboardPanel.tsx";
+import { Profile } from "./Profile.tsx";
 import { WalletChip } from "./WalletChip.tsx";
 
 type Props = {
@@ -31,6 +30,18 @@ type Props = {
 
 const NAME_LIMIT = 24;
 const ACCOUNT_PANEL_ID = "account-panel";
+/** The profile lives at its own hash, so Back returns to the lobby and the page can be linked. */
+const PROFILE_HASH = "#profile";
+
+function useIsProfileOpen(): boolean {
+  const [hash, setHash] = useState(() => window.location.hash);
+  useEffect(() => {
+    const follow = () => setHash(window.location.hash);
+    window.addEventListener("hashchange", follow);
+    return () => window.removeEventListener("hashchange", follow);
+  }, []);
+  return hash === PROFILE_HASH;
+}
 
 /** What sev1 looks like, in the order a shift goes. */
 const SCREENS = [
@@ -39,7 +50,7 @@ const SCREENS = [
   { src: "/home/office.webp", width: 1200, height: 675, caption: "Colleagues walk over with news. In a room, your teammates are on the floor with you." },
 ] as const;
 
-/** The lobby: what the game is, who you are in it, and the three ways to start. */
+/** The lobby: what the game is, who you are in it, the three ways to start, and the board. Your profile opens in its place. */
 export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, fetchLeaderboard, rooms }: Props) {
   const session = useContext(AccountContext);
   const role = roles.chosen ?? "infrastructure";
@@ -53,14 +64,21 @@ export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, fetch
   const setAccountOpen = (isOpen: boolean) => setOpenedAs(isOpen ? (session?.status ?? null) : null);
   const shown = featuredBadge(progress);
   const leaderboard = useLeaderboard(fetchLeaderboard, `${session?.status}:${session?.account?.username ?? ""}`);
+  const isProfileOpen = useIsProfileOpen();
 
   return (
     <main className="home">
       <header className="home__bar">
-        <p className="wordmark">sev1</p>
+        <a className="wordmark home__home-link" href="#" aria-label="sev1, back to the lobby">
+          sev1
+        </a>
         <div className="home__bar-end">
           <WalletChip />
-          {session && session.status !== "checking" && (
+          <a className="button button--ghost home__account-toggle" href={PROFILE_HASH} aria-current={isProfileOpen ? "page" : undefined}>
+            {isSignedIn ? session?.account?.username : "Profile"}
+            {shown && <BadgeMark badge={shown} />}
+          </a>
+          {session?.status === "anonymous" && (
             <button
               type="button"
               className="button button--ghost home__account-toggle"
@@ -68,14 +86,7 @@ export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, fetch
               aria-controls={ACCOUNT_PANEL_ID}
               onClick={() => setAccountOpen(!isAccountOpen)}
             >
-              {isSignedIn ? (
-                <>
-                  {session.account?.username}
-                  {shown && <BadgeMark badge={shown} />}
-                </>
-              ) : (
-                "Log in / Sign up"
-              )}
+              Log in / Sign up
             </button>
           )}
         </div>
@@ -98,79 +109,83 @@ export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, fetch
         </p>
       )}
 
-      <section className="home__intro" aria-labelledby="home-title">
-        <div className="home__pitch">
-          <h1 id="home-title" className="home__title">
-            Production is down.
-            <span className="home__title-sub">You’re on call.</span>
-          </h1>
-          <p className="home__lede">
-            sev1 is an on-call simulator. Walk a 3D office, read real-looking alerts, logs and graphs, and fix live outages from a terminal, on your own or with
-            your team. You start as an intern and get paid for every minute on the floor.
-          </p>
-          <RolePicker chosen={role} onChoose={roles.onChoose} />
-          <CareerLadder career={careerLevel(progress)} />
-        </div>
-        <figure className="home__shot home__shot--hero">
-          <img src="/home/data-centre.webp" width={1600} height={900} alt="The glass-walled data centre: server racks labelled with live pod and database status, colleagues in the office beyond." />
-        </figure>
-      </section>
+      {isProfileOpen ? (
+        <Profile progress={progress} onFeatureBadge={onFeatureBadge} />
+      ) : (
+        <>
+          <section className="home__intro" aria-labelledby="home-title">
+            <div className="home__pitch">
+              <h1 id="home-title" className="home__title">
+                Production is down.
+                <span className="home__title-sub">You’re on call.</span>
+              </h1>
+              <p className="home__lede">
+                sev1 is an on-call simulator. Walk a 3D office, read real-looking alerts, logs and graphs, and fix live outages from a terminal, on your own or with
+                your team. You start as an intern and get paid for every minute on the floor.
+              </p>
+              <RolePicker chosen={role} onChoose={roles.onChoose} />
+            </div>
+            <figure className="home__shot home__shot--hero">
+              <img src="/home/data-centre.webp" width={1600} height={900} alt="The glass-walled data centre: server racks labelled with live pod and database status, colleagues in the office beyond." />
+            </figure>
+          </section>
 
-      <section className="home__play" aria-labelledby="play-title">
-        <h2 id="play-title" className="home__heading">
-          Play
-        </h2>
-        <label className="home__name">
-          <span>Your name in rooms</span>
-          <input value={name} maxLength={NAME_LIMIT} autoComplete="nickname" placeholder="Maya" onChange={(event) => setTypedName(event.target.value)} />
-          <span className="home__name-shows">
-            {shown ? (
-              <>
-                Teammates see <BadgeMark badge={shown} /> {shown.title} by your name.
-              </>
-            ) : (
-              "Earn a badge below to show it by your name."
-            )}
-          </span>
-        </label>
-        <div className="home__modes">
-          <article className="mode">
-            <h3 className="mode__title">Solo</h3>
-            <p className="mode__body">
-              Take today’s problems at the {ROLE_INFO[role].room} screen and wait for the pager. Colleagues cover the other roles.
+          <section className="home__play" aria-labelledby="play-title">
+            <h2 id="play-title" className="home__heading">
+              Play
+            </h2>
+            <label className="home__name">
+              <span>Your name in rooms</span>
+              <input value={name} maxLength={NAME_LIMIT} autoComplete="nickname" placeholder="Maya" onChange={(event) => setTypedName(event.target.value)} />
+              <span className="home__name-shows">
+                {shown ? (
+                  <>
+                    Teammates see <BadgeMark badge={shown} /> {shown.title} by your name.
+                  </>
+                ) : (
+                  <>
+                    Pick a badge in your <a href={PROFILE_HASH}>profile</a> to show it by your name.
+                  </>
+                )}
+              </span>
+            </label>
+            <div className="home__modes">
+              <article className="mode">
+                <h3 className="mode__title">Solo</h3>
+                <p className="mode__body">
+                  Take today’s problems at the {ROLE_INFO[role].room} screen and wait for the pager. Colleagues cover the other roles.
+                </p>
+                <button type="button" className="button button--primary mode__action" onClick={onEnterOffice}>
+                  Enter the office
+                </button>
+              </article>
+              <HostRoom name={name.trim()} rooms={rooms} />
+              <JoinRoom name={name.trim()} rooms={rooms} />
+            </div>
+            <p className="home__status" role="status">
+              {rooms.status === "connecting" ? "Connecting to the room…" : (rooms.error ?? "")}
             </p>
-            <button type="button" className="button button--primary mode__action" onClick={onEnterOffice}>
-              Enter the office
-            </button>
-          </article>
-          <HostRoom name={name.trim()} rooms={rooms} />
-          <JoinRoom name={name.trim()} rooms={rooms} />
-        </div>
-        <p className="home__status" role="status">
-          {rooms.status === "connecting" ? "Connecting to the room…" : (rooms.error ?? "")}
-        </p>
-      </section>
+          </section>
 
-      <div className="home__standing">
-        <BadgeShelf progress={progress} featured={shown?.id ?? null} onFeature={onFeatureBadge} />
-        <LeaderboardPanel view={leaderboard} you={isSignedIn ? (session?.account?.username ?? null) : null} onSignUp={() => setAccountOpen(true)} />
-      </div>
+          <LeaderboardPanel view={leaderboard} you={isSignedIn ? (session?.account?.username ?? null) : null} onSignUp={() => setAccountOpen(true)} />
 
-      <section className="home__how" aria-labelledby="how-title">
-        <h2 id="how-title" className="home__heading">
-          How a shift goes
-        </h2>
-        <ol className="home__screens">
-          {SCREENS.map((screen) => (
-            <li key={screen.src}>
-              <figure className="home__shot">
-                <img src={screen.src} width={screen.width} height={screen.height} alt="" loading="lazy" />
-                <figcaption>{screen.caption}</figcaption>
-              </figure>
-            </li>
-          ))}
-        </ol>
-      </section>
+          <section className="home__how" aria-labelledby="how-title">
+            <h2 id="how-title" className="home__heading">
+              How a shift goes
+            </h2>
+            <ol className="home__screens">
+              {SCREENS.map((screen) => (
+                <li key={screen.src}>
+                  <figure className="home__shot">
+                    <img src={screen.src} width={screen.width} height={screen.height} alt="" loading="lazy" />
+                    <figcaption>{screen.caption}</figcaption>
+                  </figure>
+                </li>
+              ))}
+            </ol>
+          </section>
+        </>
+      )}
 
       <footer className="home__foot">
         <p>Sound on recommended. Works on desktop and on phones held sideways.</p>

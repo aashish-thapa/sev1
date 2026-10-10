@@ -1,3 +1,4 @@
+import { passedWarRooms } from "./career.ts";
 import type { Progress } from "./progress.ts";
 
 /** How rare a badge is, from the first week's to a long career's. */
@@ -19,13 +20,10 @@ export type Badge = {
 
 export type BadgeStanding = { readonly badge: Badge; readonly current: number; readonly isEarned: boolean };
 
-/** A War Room counts as passed at grade C (35 points) or better, as for career experience. */
-const PASSING_POINTS = 35;
-
-const passedWarRooms = (progress: Progress) => Object.values(progress.warRoom).filter((record) => record.bestPoints >= PASSING_POINTS).length;
+const passedCount = (progress: Progress) => passedWarRooms(progress).length;
 const topGrades = (progress: Progress) => Object.values(progress.warRoom).filter((record) => record.bestGrade === "S").length;
 const lifetimeDollars = (progress: Progress) => Math.floor(Object.values(progress.wallet.earnedCents).reduce((sum, cents) => sum + cents, 0) / 100);
-const hasPassed = (scenarioId: string) => (progress: Progress) => ((progress.warRoom[scenarioId]?.bestPoints ?? 0) >= PASSING_POINTS ? 1 : 0);
+const hasPassed = (scenarioId: string) => (progress: Progress) => (passedWarRooms(progress).includes(scenarioId) ? 1 : 0);
 
 /** Ordered as the shelf shows them: by family, then easiest first. */
 export const BADGES: readonly Badge[] = [
@@ -37,8 +35,8 @@ export const BADGES: readonly Badge[] = [
   { id: "streak-7", title: "A week on call", description: "Finish your daily shift seven days in a row.", glyph: "↻", tier: "silver", target: 7, measure: (p) => p.bestStreak },
   { id: "streak-30", title: "A month on call", description: "Finish your daily shift thirty days in a row.", glyph: "↻", tier: "gold", target: 30, measure: (p) => p.bestStreak },
 
-  { id: "resolve-1", title: "First resolve", description: "Close a War Room with grade C or better.", glyph: "⚑", tier: "bronze", target: 1, measure: passedWarRooms },
-  { id: "resolve-3", title: "Firefighter", description: "Pass three different War Rooms.", glyph: "⚑", tier: "silver", target: 3, measure: passedWarRooms },
+  { id: "resolve-1", title: "First resolve", description: "Close a War Room with grade C or better.", glyph: "⚑", tier: "bronze", target: 1, measure: passedCount },
+  { id: "resolve-3", title: "Firefighter", description: "Pass three different War Rooms.", glyph: "⚑", tier: "silver", target: 3, measure: passedCount },
   { id: "resolve-meltdown", title: "Meltdown survivor", description: "Pass Checkout meltdown, the five-role incident.", glyph: "⚑", tier: "gold", target: 1, measure: hasPassed("checkout-meltdown") },
 
   { id: "grade-s", title: "Clean resolve", description: "Close a War Room with grade S.", glyph: "★", tier: "silver", target: 1, measure: topGrades },

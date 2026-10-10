@@ -13,6 +13,13 @@ const EXPERIENCE_PER_CORRECT_CARD = 10;
 /** A War Room counts once its best run scored at least this (grade C): a botched fix teaches, but doesn't promote. */
 const PASSING_WAR_ROOM_POINTS = 35;
 
+/** War Rooms passed at least once: the count behind experience, badges and the profile. */
+export function passedWarRooms(progress: Progress): readonly string[] {
+  return Object.entries(progress.warRoom)
+    .filter(([, record]) => record.bestPoints >= PASSING_WAR_ROOM_POINTS)
+    .map(([scenarioId]) => scenarioId);
+}
+
 export type Career = {
   readonly level: Level;
   readonly title: Title;
@@ -27,10 +34,8 @@ export type Career = {
  * `progress`, so the server can check a claimed promotion without loading any content.
  */
 export function careerLevel(progress: Progress): Career {
-  const passedWarRooms = Object.values(progress.warRoom)
-    .filter((record) => record.bestPoints >= PASSING_WAR_ROOM_POINTS)
-    .reduce((sum, record) => sum + record.bestPoints, 0);
-  return careerAt(progress.correctCards * EXPERIENCE_PER_CORRECT_CARD + passedWarRooms);
+  const passedPoints = passedWarRooms(progress).reduce((sum, scenarioId) => sum + (progress.warRoom[scenarioId]?.bestPoints ?? 0), 0);
+  return careerAt(progress.correctCards * EXPERIENCE_PER_CORRECT_CARD + passedPoints);
 }
 
 export function careerAt(experience: number): Career {

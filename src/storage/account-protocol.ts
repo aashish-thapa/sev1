@@ -42,6 +42,11 @@ export const COMPANY_ERRORS = [
   "proposal_not_found",
   "cannot_fire_founder",
   "founder_cannot_leave",
+  // Investments agreed in a meeting.
+  "deal_closed",
+  "terms_changed",
+  "not_together",
+  "deal_not_found",
 ] as const;
 
 export const API_ERRORS = [

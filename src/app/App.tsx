@@ -22,6 +22,7 @@ import { useShiftGame, type GameServices } from "./useShiftGame.ts";
 import { WalletContext } from "./wallet-context.ts";
 import { AccountContext } from "./useAccount.ts";
 import { CompanyOfficeContext } from "../warroom/floor/company-office/context.ts";
+import { visitedLayout, type CompanyLayout } from "../warroom/floor/company-office/plan.ts";
 import { LaptopAppsContext } from "../warroom/ui/laptop-apps.ts";
 import { useCompanyLaptopApps } from "../ui/company/desk/useCompanyLaptopApps.tsx";
 import type { Company, DealWire } from "../storage/company-protocol.ts";
@@ -76,13 +77,13 @@ export function App({ shareUrl, proSale, adminApi, companyApi, ...services }: Pr
   // Rooms show it by your name; only an earned badge is ever sent.
   const badge = featuredBadge(game.progress)?.id ?? null;
   // The company whose office room you walked into from the HQ: its floor shows only what it bought.
-  const [companyOffice, setCompanyOffice] = useState<{ readonly code: string; readonly company: Company } | null>(null);
+  const [companyOffice, setCompanyOffice] = useState<{ readonly code: string; readonly companyId: string; readonly company: CompanyLayout } | null>(null);
   const enterCompanyOffice = useCallback(
     async (code: string) => {
       // Know the office's layout before stepping in, so you start at your desk, not behind a shut door.
       const mine = await companyApi.mine();
       const company = mine.ok ? mine.value.company : null;
-      if (company) setCompanyOffice({ code, company });
+      if (company) setCompanyOffice({ code, companyId: company.id, company });
       // In the office you're who the company hired you as, not your lobby role.
       const companyRole = company?.members.find((member) => member.username === username)?.role ?? role;
       room.join(code, { name: username ?? "", role: companyRole, badge });
@@ -94,6 +95,9 @@ export function App({ shareUrl, proSale, adminApi, companyApi, ...services }: Pr
     async (code: string, companyId: string) => {
       const mine = await companyApi.mine();
       if (mine.ok && mine.value.company?.id === companyId) return enterCompanyOffice(code);
+      // A visitor walks into someone else's office: draw what that company bought, then step in as yourself.
+      const layout = await companyApi.officeLayout(companyId);
+      if (layout.ok) setCompanyOffice({ code, companyId, company: visitedLayout(layout.value) });
       room.join(code, { name: username ?? "", role, badge });
     },
     [badge, companyApi, enterCompanyOffice, role, room, username],
@@ -103,7 +107,7 @@ export function App({ shareUrl, proSale, adminApi, companyApi, ...services }: Pr
     [companyOffice, isInRoom, room.room?.code, username],
   );
 
-  const refreshOffice = useCallback((company: Company) => setCompanyOffice((office) => (office && office.company.id === company.id ? { ...office, company } : office)), []);
+  const refreshOffice = useCallback((company: Company) => setCompanyOffice((office) => (office && office.companyId === company.id ? { ...office, company } : office)), []);
   const { invest } = game;
   const payForDeal = useCallback(
     (deal: DealWire) => {
@@ -113,7 +117,7 @@ export function App({ shareUrl, proSale, adminApi, companyApi, ...services }: Pr
     [invest],
   );
   const companyApps = useCompanyLaptopApps(companyApi, username, {
-    officeCompanyId: officeVisit ? (companyOffice?.company.id ?? null) : null,
+    officeCompanyId: officeVisit ? (companyOffice?.companyId ?? null) : null,
     onCompany: refreshOffice,
     onAgreed: payForDeal,
   });

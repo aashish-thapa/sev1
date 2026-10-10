@@ -20,6 +20,8 @@ import {
   FoundResponseSchema,
   InviteRequestSchema,
   MyCompanySchema,
+  OfficeLayoutSchema,
+  officeLayoutPath,
   SetMemberRequestSchema,
   WorkDaySettlementSchema,
   type CompanySummary,
@@ -33,6 +35,7 @@ import {
   type OfferRequest,
   type ProposalRequest,
   type DealTerms,
+  type OfficeLayout,
   type WorkBoard,
   type WorkItem,
   type MyCompany,
@@ -91,6 +94,8 @@ export interface CompanyApi {
   /** Agree to the terms exactly as read; refused if they changed or you're not both in the meeting. */
   agreeDeal(dealId: string, terms: DealTerms): Promise<CompanyOutcome<unknown>>;
   walkAway(dealId: string): Promise<CompanyOutcome<unknown>>;
+  /** Another company's office layout, for walking into it as a visitor (public; no money in it). */
+  officeLayout(companyId: string): Promise<CompanyOutcome<OfficeLayout>>;
 }
 
 const ErrorSchema = z.object({ error: z.enum(API_ERRORS), message: z.string().optional() });
@@ -189,6 +194,10 @@ export class HttpCompanyApi implements CompanyApi {
   }
   agreeDeal(dealId: string, terms: DealTerms) {
     return call(`${DEALS_PATH}/${encodeURIComponent(dealId)}/agree`, "POST", terms, Anything);
+  }
+  async officeLayout(companyId: string) {
+    const outcome = await call(officeLayoutPath(companyId), "GET", undefined, OfficeLayoutSchema);
+    return outcome.ok ? { ok: true as const, value: outcome.value.layout } : outcome;
   }
   walkAway(dealId: string) {
     return call(`${DEALS_PATH}/${encodeURIComponent(dealId)}/walk-away`, "POST", {}, Anything);

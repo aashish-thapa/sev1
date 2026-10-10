@@ -6,7 +6,7 @@ import { DEFAULT_ROOM_TIMING, Room, type Connection } from "../server/room.ts";
 import { officePaging } from "../server/paging.ts";
 import { findScenario } from "../server/scenarios.ts";
 import { openSession, type RoomDirectory } from "../server/session.ts";
-import { IDENTITY_TAGS_HEADER, OFFICE_SCENARIO_HEADER } from "./rooms.ts";
+import { IDENTITY_TAGS_HEADER, IDENTITY_USER_HEADER, OFFICE_SCENARIO_HEADER } from "./rooms.ts";
 import { DIRECTORY_NAME } from "./directory-object.ts";
 import type { Env } from "./env.ts";
 import { workerLogger } from "./log.ts";
@@ -25,12 +25,19 @@ export class RoomObject extends DurableObject<Env> {
   private listing: RoomListing | null = null;
   private claimedCode: string | null = null;
   private expiry: ReturnType<typeof setTimeout> | null = null;
+  /** Signed-in players with a socket open here, by user id, one count per socket. */
+  private readonly present = new Map<string, number>();
 
   /** Reserves this object for a new room; false when the code is already in use. */
   claim(code: string): boolean {
     if (this.claimedCode !== null || this.room !== null) return false;
     this.claimedCode = code;
     return true;
+  }
+
+  /** Who's connected right now, by user id; the worker asks before letting a deal close in a meeting. */
+  presentUsers(): string[] {
+    return [...this.present.keys()];
   }
 
   override fetch(request: Request): Response {
@@ -56,8 +63,19 @@ export class RoomObject extends DurableObject<Env> {
       }
       session.receive(event.data, bytes.encode(event.data).byteLength);
     });
-    socket.addEventListener("close", () => session.end());
-    socket.addEventListener("error", () => session.end());
+    const userId = request.headers.get(IDENTITY_USER_HEADER) ?? "";
+    if (userId) this.present.set(userId, (this.present.get(userId) ?? 0) + 1);
+    let isGone = false;
+    const leave = () => {
+      session.end();
+      if (isGone || !userId) return;
+      isGone = true;
+      const count = (this.present.get(userId) ?? 1) - 1;
+      if (count > 0) this.present.set(userId, count);
+      else this.present.delete(userId);
+    };
+    socket.addEventListener("close", leave);
+    socket.addEventListener("error", leave);
     return new Response(null, { status: 101, webSocket: client });
   }
 

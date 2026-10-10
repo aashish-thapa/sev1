@@ -6,7 +6,7 @@ import { ROLE_MINIMUM_PAY_CENTS, roomKindById, serverTierById, type RoomKindId, 
 import { checkOffer, checkRoomPurchase, checkServerPurchase, FOUNDING_MINIMUM_CENTS, settleWorkDay, type CompanyBook } from "../../src/domain/company/rules.ts";
 import { companyLevel } from "../../src/domain/company/levels.ts";
 import type { Role } from "../../src/domain/incident.ts";
-import type { Application, Company, FoundRequest, MyCompany, Posting, WorkDaySettlement } from "../../src/storage/company-protocol.ts";
+import type { Application, Company, DealWire, FoundRequest, MyCompany, Posting, WorkDaySettlement } from "../../src/storage/company-protocol.ts";
 import type { ApplicationRow, HiringStore, PostingRow } from "./hiring-store.ts";
 import type { WorkStore } from "./work-store.ts";
 import { dividendsOn, myInvesting, NO_OWNERSHIP, ownershipOf, type InvestorReads, type Ownership, type ProposalReads } from "./ownership.ts";
@@ -57,7 +57,11 @@ export type CompanyProblem =
   | "already_proposed"
   | "proposal_not_found"
   | "cannot_fire_founder"
-  | "founder_cannot_leave";
+  | "founder_cannot_leave"
+  | "deal_closed"
+  | "terms_changed"
+  | "not_together"
+  | "deal_not_found";
 
 export type Outcome<Value> = { readonly ok: true; readonly value: Value } | { readonly ok: false; readonly problem: CompanyProblem };
 
@@ -86,6 +90,8 @@ export type CompanyDeps = {
   readonly investors?: InvestorReads;
   /** Players' proposals to invest; without it there are none. */
   readonly proposals?: ProposalReads;
+  /** A player's investment deals being agreed in person; without it there are none. */
+  readonly dealsOf?: (userId: string) => Promise<DealWire[]>;
 };
 
 const fail = (problem: CompanyProblem) => ({ ok: false as const, problem });
@@ -164,15 +170,15 @@ export class CompanyService {
   /** Your company (with any expired, never-funded one dropped), the offers waiting for you and pay to claim. */
   async mine(caller: Caller): Promise<MyCompany> {
     const { store } = this.deps;
-    const [view, invitations, payouts, applications, investing] = await Promise.all([
+    const [view, invitations, payouts, applications, investing, deals] = await Promise.all([
       this.companyFor(caller.id),
       store.receivedInvitations(caller.id),
       store.pendingPayouts(caller.id),
       this.deps.hiring?.myApplications(caller.id) ?? [],
       this.deps.investors ? myInvesting(caller.id, this.deps.investors, this.deps.proposals) : { investmentOffers: [], holdings: [], dividends: [], proposals: [] },
+      this.deps.dealsOf?.(caller.id) ?? [],
     ]);
-    // Deals are negotiated in person once the deal server lands; until then there are none.
-    return { company: view ? await this.present(view, caller.id) : null, invitations, payouts, applications, ...investing, deals: [] };
+    return { company: view ? await this.present(view, caller.id) : null, invitations, payouts, applications, ...investing, deals };
   }
 
   async found(caller: Caller, request: FoundRequest): Promise<Outcome<{ companyId: string; fundingRef: string; seedCents: number }>> {

@@ -5,7 +5,7 @@
  */
 import { categoryById, roomKindById, type RoomKindId, type ServerTierId } from "../../../domain/company/catalog.ts";
 import { capacityRps } from "../../../domain/company/rules.ts";
-import type { Company } from "../../../storage/company-protocol.ts";
+import type { Company, OfficeLayout } from "../../../storage/company-protocol.ts";
 import { CLUSTERS, DATACENTRE_DOOR, DATACENTRE_FRONT, DESKS, desksOf, officeObstacles, PLAYER_DESK, type Desk, type DeskCluster } from "../office.ts";
 import type { Footprint } from "../layout.ts";
 
@@ -78,6 +78,11 @@ function closetRack(cluster: DeskCluster, index: number): Omit<OfficeRack, "serv
     footprint: { x: cluster.x, z: isFrontRow ? CLOSET_Z.front : CLOSET_Z.back, ...RACK },
     front: isFrontRow ? 1 : -1,
   };
+}
+
+/** A visitor's view of another company's office: the same floor, with no money on its board or its payroll. */
+export function visitedLayout(layout: OfficeLayout): CompanyLayout {
+  return { ...layout, fundsCents: 0, members: layout.members.map((member) => ({ ...member, payCents: 0, canHire: false })) };
 }
 
 export function officePlan(company: CompanyLayout | null): OfficePlan {

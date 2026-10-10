@@ -17,7 +17,11 @@ export type CompanyListing = {
   readonly postings: readonly PostingRow[];
   /** Every line in the company's books, oldest first: its valuation and that valuation's history come from these. */
   readonly lines: readonly BookLine[];
+  /** The latest investment that closed (paid for), or null before any. */
+  readonly lastRound: RoundRow | null;
 };
+
+export type RoundRow = { readonly amountCents: number; readonly equityBps: number; readonly workDay: number; readonly at: number };
 
 export interface CompanyDirectoryStore {
   /** Active companies whose name starts with `prefix` (any case), alphabetically. */

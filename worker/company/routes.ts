@@ -4,6 +4,9 @@ import {
   BuyServerRequestSchema,
   COMPANIES_PATH,
   COMPANY_PATH,
+  DEALS_PATH,
+  DealAgreeRequestSchema,
+  DealTermsRequestSchema,
   FoundRequestSchema,
   InterviewAnswersSchema,
   OpenPostingRequestSchema,
@@ -21,6 +24,7 @@ import {
 import type { AccountService } from "../api/accounts.ts";
 import { failure, idempotencyKeyOf, isSameOrigin, json, readBody, sessionTokenOf } from "../api/http.ts";
 import { CATEGORY_IDS, type CategoryId } from "../../src/domain/company/catalog.ts";
+import type { DealService } from "./deals.ts";
 import type { CompanyDirectory } from "./directory.ts";
 import type { HiringService } from "./hiring.ts";
 import type { InvestingService } from "./investing.ts";
@@ -53,6 +57,9 @@ const OFFER_ANSWER = new RegExp(`^${RECEIVED_OFFERS_PATH}/${ID}/(accept|decline)
 const PROPOSE = new RegExp(`^${COMPANIES_PATH}/${ID}/proposals$`);
 const PROPOSAL_DECISION = new RegExp(`^${COMPANY_PATH}/proposals/${ID}/(accept|decline)$`);
 const PROPOSAL_WITHDRAW = new RegExp(`^${PROPOSALS_PATH}/${ID}/withdraw$`);
+const DEAL_ACTION = new RegExp(`^${DEALS_PATH}/${ID}/(meeting|terms|agree|walk-away)$`);
+/** A company's office layout, for a visitor's floor. */
+export const OFFICE_LAYOUT = new RegExp(`^${COMPANIES_PATH}/${ID}/office$`);
 /** Usernames travel URL-encoded; the decoded name is matched against the staff list, never trusted further. */
 const MEMBER_FIRE = new RegExp(`^${COMPANY_PATH}/members/([^/]{1,96})/fire$`);
 /** Public lists change once a work day; a minute of caching spares the database on every page view. */
@@ -97,6 +104,10 @@ const STATUS: Readonly<Record<CompanyProblem, number>> = {
   proposal_not_found: 404,
   cannot_fire_founder: 409,
   founder_cannot_leave: 409,
+  deal_closed: 409,
+  terms_changed: 409,
+  not_together: 409,
+  deal_not_found: 404,
 };
 
 const MESSAGE: Readonly<Record<CompanyProblem, string>> = {
@@ -136,6 +147,10 @@ const MESSAGE: Readonly<Record<CompanyProblem, string>> = {
   proposal_not_found: "That proposal isn't pending any more.",
   cannot_fire_founder: "The founder can't be fired.",
   founder_cannot_leave: "A founder can't leave their own company.",
+  deal_closed: "That deal is already settled.",
+  terms_changed: "The terms changed; read them again.",
+  not_together: "Agree when you're both in the meeting.",
+  deal_not_found: "That deal is gone.",
 };
 
 function respond<Value>(outcome: Outcome<Value>, status = 200): Response {
@@ -152,6 +167,7 @@ export async function handleCompany(
   work: WorkService,
   investing: InvestingService,
   proposals: ProposalService,
+  deals: DealService,
 ): Promise<Response> {
   const url = new URL(request.url);
   const route = `${request.method} ${url.pathname}`;
@@ -196,6 +212,15 @@ export async function handleCompany(
     if (decidingProposal) {
       const [, id, answer] = decidingProposal;
       return respond(answer === "accept" ? await proposals.accept(user, id) : await proposals.decline(user, id));
+    }
+    const dealing = DEAL_ACTION.exec(url.pathname);
+    if (dealing) {
+      const [, id, action] = dealing;
+      if (action === "meeting") return respond(await deals.meeting(user, id));
+      if (action === "walk-away") return respond(await deals.walkAway(user, id));
+      const body = await readBody(request, action === "terms" ? DealTermsRequestSchema : DealAgreeRequestSchema);
+      if (!body.ok) return body.response;
+      return respond(action === "terms" ? await deals.terms(user, id, body.data) : await deals.agree(user, id, body.data));
     }
     const withdrawing = PROPOSAL_WITHDRAW.exec(url.pathname);
     if (withdrawing) return respond(await proposals.withdraw(user, withdrawing[1]));
@@ -247,7 +272,7 @@ export async function handleCompany(
     }
     case `POST ${OFFERS_PATH}`: {
       const body = await readBody(request, OfferRequestSchema);
-      return body.ok ? respond(await investing.offer(user, body.data, requestKey), 201) : body.response;
+      return body.ok ? respond(await deals.offer(user, body.data, requestKey), 201) : body.response;
     }
     case `POST ${POSTINGS_PATH}`: {
       const body = await readBody(request, OpenPostingRequestSchema);
@@ -268,6 +293,11 @@ export async function handleDirectory(request: Request, directory: CompanyDirect
   if (request.method !== "GET") return failure("not_found", "The company list is read-only.", 404);
   const url = new URL(request.url);
   if (url.pathname === TOP_COMPANIES_PATH) return json({ companies: await directory.top() }, 200, PUBLIC_CACHE);
+  const layoutOf = OFFICE_LAYOUT.exec(url.pathname);
+  if (layoutOf) {
+    const layout = await directory.layout(layoutOf[1]);
+    return layout ? json({ layout }, 200, PUBLIC_CACHE) : failure("not_found", "No such company.", 404);
+  }
   if (url.pathname !== COMPANIES_PATH) return failure("not_found", "No such list.", 404);
   const category = CategorySchema.safeParse(url.searchParams.get("category"));
   const chosen: CategoryId | null = category.success ? category.data : null;

@@ -3,7 +3,7 @@ import type { CategoryId } from "../../src/domain/company/catalog.ts";
 import type { Role } from "../../src/domain/incident.ts";
 import type { InterviewKey, InterviewQuestion } from "../../src/domain/work/interview.ts";
 import type { MyApplication } from "../../src/storage/company-protocol.ts";
-import type { CompanyDirectoryStore, CompanyListing } from "./directory-store.ts";
+import type { CompanyDirectoryStore, CompanyListing, RoundRow } from "./directory-store.ts";
 import type { ApplicationRow, ApplicationStatus, HiringStore, InterviewRow, PostingRow } from "./hiring-store.ts";
 
 type PostingRecord = { id: string; company_id: string; role: Role; pay_cents: number; min_career_level: number; min_score: number; is_open: number; created_by: string; created_at: number };
@@ -205,6 +205,9 @@ export class D1HiringStore implements HiringStore {
   }
 }
 
+const roundOf = (round: { amount_cents: number; equity_bps: number; work_day: number; created_at: number } | undefined): RoundRow | null =>
+  round ? { amountCents: round.amount_cents, equityBps: round.equity_bps, workDay: round.work_day, at: round.created_at } : null;
+
 /** LIKE treats % and _ as wildcards; a name search means them literally. */
 const likePrefix = (prefix: string) => `${prefix.replace(/[\\%_]/g, (character) => `\\${character}`)}%`;
 
@@ -249,6 +252,14 @@ export class D1CompanyDirectory implements CompanyDirectoryStore {
       .prepare(`SELECT company_id, work_day, reason, amount_cents FROM company_ledger WHERE company_id IN (${placeholders}) ORDER BY created_at`)
       .bind(...rows.map((row) => row.id))
       .all<{ company_id: string; work_day: number; reason: string; amount_cents: number }>();
+    // A round closes when its money lands in the books; the offer it paid says what stake it bought.
+    const rounds = await this.db
+      .prepare(
+        "SELECT ledger.company_id, offers.amount_cents, offers.equity_bps, ledger.work_day, ledger.created_at FROM company_ledger AS ledger " +
+          `JOIN investment_offers AS offers ON offers.invest_ref = ledger.ref AND offers.company_id = ledger.company_id WHERE ledger.reason = 'investment' AND ledger.company_id IN (${placeholders}) ORDER BY ledger.created_at`,
+      )
+      .bind(...rows.map((row) => row.id))
+      .all<{ company_id: string; amount_cents: number; equity_bps: number; work_day: number; created_at: number }>();
     return rows.map((row) => ({
       id: row.id,
       name: row.name,
@@ -260,6 +271,7 @@ export class D1CompanyDirectory implements CompanyDirectoryStore {
       revenue7dCents: row.recent,
       postings: postings.filter((posting) => posting.companyId === row.id),
       lines: books.results.filter((line) => line.company_id === row.id).map((line) => ({ workDay: line.work_day, reason: line.reason, amountCents: line.amount_cents })),
+      lastRound: roundOf(rounds.results.findLast((round) => round.company_id === row.id)),
     }));
   }
 }

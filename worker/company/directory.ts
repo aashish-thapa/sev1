@@ -1,8 +1,10 @@
 /** The public company list: search and the leaderboard, each company's level computed from its books. */
 import type { CategoryId } from "../../src/domain/company/catalog.ts";
+import { impliedValuationCents } from "../../src/domain/company/investors.ts";
 import { companyLevel } from "../../src/domain/company/levels.ts";
 import { valuationHistory, weekChangeBps } from "../../src/domain/company/valuation.ts";
-import type { CompanySummary } from "../../src/storage/company-protocol.ts";
+import type { CompanySummary, OfficeLayout } from "../../src/storage/company-protocol.ts";
+import type { CompanyView } from "./store.ts";
 import type { CompanyDirectoryStore, CompanyListing } from "./directory-store.ts";
 import { postingOf } from "./service.ts";
 
@@ -26,8 +28,11 @@ function summaryOf(listing: CompanyListing): CompanySummary {
     lifetimeRevenueCents: Math.max(0, listing.lifetimeRevenueCents),
     postings: listing.postings.slice(0, POSTINGS_SHOWN).map(postingOf),
     ...valuationOf(listing.lines, listing.workDays),
-    // The latest closed round, once the directory reads closed investments.
-    lastRound: null,
+    lastRound: listing.lastRound && {
+      valuationCents: impliedValuationCents(listing.lastRound.amountCents, listing.lastRound.equityBps),
+      workDay: listing.lastRound.workDay,
+      at: listing.lastRound.at,
+    },
   };
 }
 
@@ -39,9 +44,24 @@ export function valuationOf(lines: Parameters<typeof valuationHistory>[0], workD
 
 export class CompanyDirectory {
   private readonly store: CompanyDirectoryStore;
+  private readonly companyById: (id: string) => Promise<CompanyView | null>;
 
-  constructor(store: CompanyDirectoryStore) {
+  constructor(store: CompanyDirectoryStore, companyById: (id: string) => Promise<CompanyView | null> = async () => null) {
     this.store = store;
+    this.companyById = companyById;
+  }
+
+  /** What a visitor's floor needs to draw an active company's office: its rooms, servers and who sits where. */
+  async layout(companyId: string): Promise<OfficeLayout | null> {
+    const view = await this.companyById(companyId);
+    if (view?.company.state !== "active") return null;
+    return {
+      name: view.company.name,
+      category: view.company.category,
+      rooms: [...view.rooms],
+      servers: [...view.servers],
+      members: view.members.map((member) => ({ username: member.username, role: member.role, isFounder: member.isFounder, joinedAt: member.joinedAt })),
+    };
   }
 
   async search(query: string, category: CategoryId | null): Promise<CompanySummary[]> {

@@ -379,3 +379,13 @@ export type DealTerms = z.input<typeof TermsSchema>;
 
 /** POST /api/deals/:id/meeting: the office room to meet in; the investor gets in while the deal is open. */
 export const MeetingResponseSchema = z.object({ code: z.string().min(1) });
+export type MeetingResponse = z.output<typeof MeetingResponseSchema>;
+
+/** GET /api/companies/:id/office: what a visitor's floor needs to draw that office; public, so no money in it. */
+export const officeLayoutPath = (companyId: string) => `${COMPANIES_PATH}/${encodeURIComponent(companyId)}/office`;
+export const OfficeLayoutSchema = z.object({
+  layout: CompanySchema.pick({ name: true, category: true, rooms: true, servers: true }).extend({
+    members: z.array(CompanyMemberSchema.pick({ username: true, role: true, isFounder: true, joinedAt: true })),
+  }),
+});
+export type OfficeLayout = z.output<typeof OfficeLayoutSchema>["layout"];

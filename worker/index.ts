@@ -12,7 +12,7 @@ import { DIRECTORY_NAME } from "./directory-object.ts";
 import type { Env } from "./env.ts";
 import { routeRoomSocket } from "./rooms.ts";
 import { D1CompanyStore } from "./company/d1-store.ts";
-import { APPLICATIONS_PATH, APPLY_PATH, handleCompany, handleDirectory, INTERVIEWS_PATH, INVITATIONS_PATH, PROPOSALS_PATH, RECEIVED_OFFERS_PATH } from "./company/routes.ts";
+import { APPLICATIONS_PATH, APPLY_PATH, handleCompany, handleDirectory, INTERVIEWS_PATH, INVITATIONS_PATH, OFFICE_LAYOUT, PROPOSALS_PATH, RECEIVED_OFFERS_PATH } from "./company/routes.ts";
 import { D1ProposalStore } from "./company/proposal-d1-store.ts";
 import { ProposalService } from "./company/proposals.ts";
 import { D1InvestorStore } from "./company/investor-d1-store.ts";
@@ -24,7 +24,7 @@ import { D1WorkStore } from "./company/work-d1-store.ts";
 import { D1CompanyDirectory, D1HiringStore } from "./company/hiring-d1-store.ts";
 import { TASKS } from "./company/tasks.ts";
 import { CompanyService } from "./company/service.ts";
-import { COMPANIES_PATH, COMPANY_PATH, TOP_COMPANIES_PATH } from "../src/storage/company-protocol.ts";
+import { COMPANIES_PATH, COMPANY_PATH, DEALS_PATH, TOP_COMPANIES_PATH } from "../src/storage/company-protocol.ts";
 import { careerLevel } from "../src/domain/career.ts";
 import { emptyProgress, ProgressSchema, type Progress } from "../src/domain/progress.ts";
 import type { AccountStore } from "./api/store.ts";
@@ -37,6 +37,8 @@ import { shownTags } from "../src/domain/tags.ts";
 import { sessionTokenOf } from "./api/http.ts";
 import { pantryCostOn } from "../src/domain/pantry.ts";
 import { CompanyOffice } from "./company/office.ts";
+import { D1DealStore } from "./company/deal-d1-store.ts";
+import { dealWireOf, DealService } from "./company/deals.ts";
 import { D1OfficeRoomStore } from "./company/office-d1-store.ts";
 import { TEAM_SCENARIO } from "../src/warroom/scenarios/index.ts";
 
@@ -70,7 +72,8 @@ async function savedProgressOf(store: Pick<AccountStore, "loadProgress">, userId
 
 /** A company's private room: codes live in D1 and are held in the room host when first assigned. */
 function officeFor(env: Env): CompanyOffice {
-  return new CompanyOffice(new D1OfficeRoomStore(env.DB), (code) => env.ROOMS.getByName(code).claim(code), Math.random);
+  const deals = new D1DealStore(env.DB);
+  return new CompanyOffice(new D1OfficeRoomStore(env.DB), (code) => env.ROOMS.getByName(code).claim(code), Math.random, (companyId, userId) => deals.isTalkingWith(companyId, userId));
 }
 
 /** Composition root: rooms, the account API, and everything else from the built site. */
@@ -85,7 +88,7 @@ export default {
         request,
         env,
         Math.random,
-        async () => shownTags(user?.tags ?? []),
+        async () => ({ userId: user?.id ?? null, tags: shownTags(user?.tags ?? []) }),
         (_socket, code) => office.access(code, user?.id ?? null),
         TEAM_SCENARIO.id,
       );
@@ -105,11 +108,16 @@ export default {
       };
       const accounts = new AccountService(accountStore, Date.now, { tierOf: (id) => findScenario(id)?.tier, bank: companyStore, grants: grantStore, investors: investorStore, logger: workerLogger });
       const entitlements = new D1EntitlementStore(env.DB);
-      if (pathname === COMPANIES_PATH || pathname === TOP_COMPANIES_PATH) return handleDirectory(request, new CompanyDirectory(new D1CompanyDirectory(env.DB)));
-      if (pathname === COMPANY_PATH || [COMPANY_PATH, COMPANIES_PATH, INVITATIONS_PATH, APPLY_PATH, INTERVIEWS_PATH, APPLICATIONS_PATH, RECEIVED_OFFERS_PATH, PROPOSALS_PATH].some((prefix) => pathname.startsWith(`${prefix}/`))) {
+      if (pathname === COMPANIES_PATH || pathname === TOP_COMPANIES_PATH || OFFICE_LAYOUT.test(pathname)) {
+        return handleDirectory(request, new CompanyDirectory(new D1CompanyDirectory(env.DB), (id) => companyStore.companyById(id)));
+      }
+      if (pathname === COMPANY_PATH || [COMPANY_PATH, COMPANIES_PATH, INVITATIONS_PATH, APPLY_PATH, INTERVIEWS_PATH, APPLICATIONS_PATH, RECEIVED_OFFERS_PATH, PROPOSALS_PATH, DEALS_PATH].some((prefix) => pathname.startsWith(`${prefix}/`))) {
         const hiringStore = new D1HiringStore(env.DB);
         const proposalStore = new D1ProposalStore(env.DB);
         const workStore = new D1WorkStore(env.DB);
+        const dealStore = new D1DealStore(env.DB);
+        const office = officeFor(env);
+        const balanceOf = async (userId: string) => (await savedProgressOf(accountStore, userId)).wallet.balanceCents;
         const companies = new CompanyService({
           store: companyStore,
           now: Date.now,
@@ -120,6 +128,7 @@ export default {
           pantryOf: async (userId, day) => pantryCostOn((await savedProgressOf(accountStore, userId)).pantry, day),
           investors: investorStore,
           proposals: proposalStore,
+          dealsOf: async (userId) => (await dealStore.openFor(userId)).map(dealWireOf),
         });
         const hiring = new HiringService({
           store: hiringStore,
@@ -144,21 +153,33 @@ export default {
           companies: companyStore,
           company: companies,
           now: Date.now,
+          isOverLimit: isOverLimit(COMPANY_WRITES_PER_WINDOW),
+          balanceOf,
+        });
+        const deals = new DealService({
+          deals: dealStore,
+          companies: companyStore,
+          company: companies,
+          investing,
+          investors: investorStore,
+          meetingRoomOf: (companyId) => office.roomOf(companyId),
+          presence: async (code) => new Set(await env.ROOMS.getByName(code).presentUsers()),
+          balanceOf,
+          now: Date.now,
           newId: () => crypto.randomUUID(),
           isOverLimit: isOverLimit(COMPANY_WRITES_PER_WINDOW),
-          balanceOf: async (userId) => (await savedProgressOf(accountStore, userId)).wallet.balanceCents,
         });
         const proposals = new ProposalService({
           proposals: proposalStore,
           investors: investorStore,
           companies: companyStore,
           company: companies,
-          investing,
+          deals,
           now: Date.now,
           newId: () => crypto.randomUUID(),
           isOverLimit: isOverLimit(COMPANY_WRITES_PER_WINDOW),
         });
-        return handleCompany(request, accounts, companies, hiring, officeFor(env), work, investing, proposals);
+        return handleCompany(request, accounts, companies, hiring, office, work, investing, proposals, deals);
       }
       if (pathname.startsWith(ADMIN_PREFIX)) {
         const store = new D1AccountStore(env.DB);

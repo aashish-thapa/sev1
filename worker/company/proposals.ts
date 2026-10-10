@@ -1,10 +1,10 @@
 /**
  * Proposals to invest: a player asks a founder for a stake on their terms. The founder declines, or
- * accepts — which makes it an ordinary investment offer to that player, paid through the usual accept.
+ * accepts — which invites the player to meet and settle it in the company's office (see deals.ts).
  */
 import { checkInvestmentOffer } from "../../src/domain/company/investors.ts";
 import type { Company, MyCompany, ProposalRequest } from "../../src/storage/company-protocol.ts";
-import type { InvestingService } from "./investing.ts";
+import type { DealService } from "./deals.ts";
 import type { InvestorStore } from "./investor-store.ts";
 import { capTableOf, founderOf } from "./ownership.ts";
 import type { ProposalStore } from "./proposal-store.ts";
@@ -13,10 +13,10 @@ import type { CompanyStore } from "./store.ts";
 
 export type ProposalDeps = {
   readonly proposals: ProposalStore;
-  readonly investors: Pick<InvestorStore, "shares" | "liveOffers" | "setStatus">;
+  readonly investors: Pick<InvestorStore, "shares" | "liveOffers">;
   readonly companies: Pick<CompanyStore, "companyById">;
   readonly company: Pick<CompanyService, "foundersCompany" | "reloaded" | "mine">;
-  readonly investing: Pick<InvestingService, "offerTo">;
+  readonly deals: Pick<DealService, "open" | "retract">;
   readonly now: () => number;
   readonly newId: () => string;
   readonly isOverLimit: (key: string) => Promise<boolean>;
@@ -64,8 +64,8 @@ export class ProposalService {
   }
 
   /**
-   * The founder takes the terms: it becomes an offer to the proposer, re-checked against every offer now in
-   * play. If the proposer withdrew in the meantime, the fresh offer is cancelled again.
+   * The founder takes the terms to a meeting: a deal opens with the proposer, re-checked against every offer
+   * now in play. If the proposer withdrew in the meantime, the fresh deal comes off the table again.
    */
   async accept(caller: Caller, proposalId: string): Promise<Outcome<Company>> {
     const founded = await this.deps.company.foundersCompany(caller);
@@ -74,11 +74,11 @@ export class ProposalService {
     const proposal = await this.deps.proposals.proposal(proposalId);
     if (proposal?.status !== "pending" || proposal.companyId !== view.company.id) return fail("proposal_not_found");
     const investor = { id: proposal.investorId, username: proposal.investor };
-    // Keyed by the proposal, so a retried accept never makes a second offer.
-    const made = await this.deps.investing.offerTo(view, investor, { amountCents: proposal.amountCents, equityBps: proposal.equityBps }, `proposal:${proposal.id}`);
-    if (!made.ok) return made;
+    // Keyed by the proposal, so a retried accept never opens a second deal.
+    const opened = await this.deps.deals.open(view, investor, { amountCents: proposal.amountCents, equityBps: proposal.equityBps }, `proposal:${proposal.id}`);
+    if (!opened.ok) return opened;
     if (!(await this.deps.proposals.decide(proposal.id, "accepted", this.deps.now()))) {
-      await this.deps.investors.setStatus(made.value.offerId, ["open"], "cancelled");
+      await this.deps.deals.retract(opened.value.dealId);
       return fail("proposal_not_found");
     }
     return this.deps.company.reloaded(view.company.id, caller.id);

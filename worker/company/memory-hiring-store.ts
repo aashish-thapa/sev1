@@ -1,8 +1,9 @@
 /** In-memory hiring and company-list storage with D1's rules (one application per posting, one company per player), for tests. */
 import type { CategoryId } from "../../src/domain/company/catalog.ts";
 import type { MyApplication } from "../../src/storage/company-protocol.ts";
-import type { CompanyDirectoryStore, CompanyListing } from "./directory-store.ts";
+import type { CompanyDirectoryStore, CompanyListing, RoundRow } from "./directory-store.ts";
 import type { ApplicationRow, HiringStore, InterviewRow, PostingRow } from "./hiring-store.ts";
+import type { MemoryInvestorStore } from "./memory-investor-store.ts";
 import type { MemoryCompanyStore } from "./memory-store.ts";
 
 export class MemoryHiringStore implements HiringStore {
@@ -122,10 +123,12 @@ export class MemoryHiringStore implements HiringStore {
 export class MemoryCompanyDirectory implements CompanyDirectoryStore {
   private readonly companies: MemoryCompanyStore;
   private readonly hiring: MemoryHiringStore;
+  private readonly investors: MemoryInvestorStore | null;
 
-  constructor(companies: MemoryCompanyStore, hiring: MemoryHiringStore) {
+  constructor(companies: MemoryCompanyStore, hiring: MemoryHiringStore, investors: MemoryInvestorStore | null = null) {
     this.companies = companies;
     this.hiring = hiring;
+    this.investors = investors;
   }
 
   async search(prefix: string, category: CategoryId | null, limit: number): Promise<CompanyListing[]> {
@@ -158,7 +161,18 @@ export class MemoryCompanyDirectory implements CompanyDirectoryStore {
           revenue7dCents: revenue.filter((line) => line.workDay > company.workDay - 7).reduce((sum, line) => sum + line.amountCents, 0),
           postings: [...this.hiring.postings.values()].filter((posting) => posting.companyId === company.id && posting.isOpen),
           lines: this.companies.bookLines(company.id),
+          lastRound: this.lastRound(company.id),
         };
       });
+  }
+
+  /** The latest investment booked into the company, priced by the offer it paid (as D1's join does). */
+  private lastRound(companyId: string): RoundRow | null {
+    const paid = this.companies.ledger.filter((line) => line.companyId === companyId && line.reason === "investment");
+    for (const line of paid.reverse()) {
+      const offer = [...(this.investors?.offers.values() ?? [])].find((candidate) => candidate.investRef === line.ref && candidate.companyId === companyId);
+      if (offer) return { amountCents: offer.amountCents, equityBps: offer.equityBps, workDay: line.workDay, at: line.at };
+    }
+    return null;
   }
 }

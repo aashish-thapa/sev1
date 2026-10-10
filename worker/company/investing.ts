@@ -1,10 +1,13 @@
 /**
- * Investing, server side: a founder offers a slice of the company to a named player, who accepts (and
- * then pays from their wallet in their next save) or declines. The stake itself lands with that save,
- * in the same batch, so money and equity can't part ways.
+ * Investing, server side: the terms a founder and investor agree in a meeting become an accepted offer,
+ * which the investor pays from their wallet in their next save. The stake itself lands with that save,
+ * in the same batch, so money and equity can't part ways. Offers made before meetings existed can still
+ * be accepted, declined or cancelled here.
  */
 import { checkInvestmentOffer } from "../../src/domain/company/investors.ts";
-import type { AcceptOfferResponse, Company, OfferRequest } from "../../src/storage/company-protocol.ts";
+import type { Terms } from "../../src/domain/company/deal.ts";
+import type { AcceptOfferResponse, Company } from "../../src/storage/company-protocol.ts";
+import { dealOfferId } from "./deal-store.ts";
 import type { CompanyStore, CompanyView } from "./store.ts";
 import type { InvestorStore, OfferRow } from "./investor-store.ts";
 import { capTableOf, founderOf } from "./ownership.ts";
@@ -13,14 +16,13 @@ import type { Caller, CompanyProblem, CompanyService, Outcome } from "./service.
 /** How long an accepted offer waits for the investor's save to pay it before the audit stops vouching for it. */
 export const ACCEPTED_OFFER_MS = 24 * 60 * 60 * 1000;
 
-const investRefOf = (offerId: string) => `company:invest:${offerId}`;
+export const investRefOf = (offerId: string) => `company:invest:${offerId}`;
 
 export type InvestingDeps = {
   readonly investors: InvestorStore;
-  readonly companies: Pick<CompanyStore, "companyById" | "findUser">;
+  readonly companies: Pick<CompanyStore, "companyById">;
   readonly company: Pick<CompanyService, "foundersCompany" | "reloaded">;
   readonly now: () => number;
-  readonly newId: () => string;
   readonly isOverLimit: (key: string) => Promise<boolean>;
   /** The player's wallet balance as of their last save (zero with none). */
   readonly balanceOf: (userId: string) => Promise<number>;
@@ -42,47 +44,40 @@ export class InvestingService {
     this.deps = deps;
   }
 
-  async offer(caller: Caller, request: OfferRequest, requestKey: string | null): Promise<Outcome<Company>> {
-    const founded = await this.deps.company.foundersCompany(caller);
-    if (!founded.ok) return founded;
-    const view = founded.value;
-    const investor = await this.deps.companies.findUser(request.investor.trim());
-    if (!investor) return fail("unknown_user");
-    const made = await this.offerTo(view, investor, { amountCents: request.amountCents, equityBps: request.equityBps }, requestKey);
-    return made.ok ? this.deps.company.reloaded(view.company.id, caller.id) : made;
+  /** Why the founder couldn't sell `investor` these terms, counting every offer still in play; null when they could. */
+  async check(view: CompanyView, investor: string, terms: Terms): Promise<CompanyProblem | null> {
+    const { investors } = this.deps;
+    const [shares, live] = await Promise.all([investors.shares(view.company.id), investors.liveOffers(view.company.id)]);
+    return checkInvestmentOffer(capTableOf(founderOf(view), shares), { investor, ...terms }, live);
   }
 
   /**
-   * Offers `investor` a stake in the founder's company, checked against every offer still in play so the
-   * founder keeps control. Shared by a founder's own offer and an accepted proposal.
+   * Books the terms of an agreed deal as an accepted offer, re-checked against every offer now in play so the
+   * founder keeps control. The investor's next save pays it under the returned ref; a retry books it once.
    */
-  async offerTo(
-    view: CompanyView,
-    investor: { readonly id: string; readonly username: string },
-    terms: { readonly amountCents: number; readonly equityBps: number },
-    requestKey: string | null,
-  ): Promise<Outcome<{ offerId: string }>> {
-    const { investors } = this.deps;
-    const [shares, live] = await Promise.all([investors.shares(view.company.id), investors.liveOffers(view.company.id)]);
-    const problem = checkInvestmentOffer(capTableOf(founderOf(view), shares), { investor: investor.username, ...terms }, live);
-    if (problem) return fail(problem);
-    const id = this.deps.newId();
-    await investors.createOffer(
-      {
+  async book(view: CompanyView, investor: { readonly id: string; readonly username: string }, terms: Terms, dealId: string): Promise<Outcome<AcceptOfferResponse>> {
+    const id = dealOfferId(dealId);
+    const booked = await this.deps.investors.offer(id);
+    if (!booked) {
+      const problem = await this.check(view, investor.username, terms);
+      if (problem) return fail(problem);
+      await this.deps.investors.createOffer(
+        {
+          id,
+          companyId: view.company.id,
+          investorId: investor.id,
+          investor: investor.username,
+          amountCents: terms.amountCents,
+          equityBps: terms.equityBps,
+          status: "accepted",
+          investRef: investRefOf(id),
+          expiresAt: this.deps.now() + ACCEPTED_OFFER_MS,
+          createdAt: this.deps.now(),
+        },
         id,
-        companyId: view.company.id,
-        investorId: investor.id,
-        investor: investor.username,
-        amountCents: terms.amountCents,
-        equityBps: terms.equityBps,
-        status: "open",
-        investRef: investRefOf(id),
-        expiresAt: null,
-        createdAt: this.deps.now(),
-      },
-      requestKey,
-    );
-    return ok({ offerId: id });
+      );
+    }
+    return ok({ investRef: investRefOf(id), amountCents: terms.amountCents });
   }
 
   async cancel(caller: Caller, offerId: string): Promise<Outcome<Company>> {

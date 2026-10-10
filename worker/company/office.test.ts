@@ -62,4 +62,16 @@ describe("company office", () => {
     expect(await office.access(entered.code, null)).toEqual({ kind: "denied" });
     expect(await office.access("ZZZZ", null)).toEqual({ kind: "not-an-office" });
   });
+
+  it("lets in an investor holding a deal's pass, and nobody else from outside", async () => {
+    const pass = async (companyId: string, userId: string) => companyId === "acme" && userId === "investor";
+    const office = new CompanyOffice(new MemoryOffices(), async () => true, sequence(), pass);
+    const code = await office.roomOf("acme");
+    if (!code) throw new Error("no code");
+    expect(await office.enter("founder")).toEqual({ code });
+    expect(await office.access(code, "investor")).toEqual({ kind: "visitor" });
+    expect(await office.access(code, "founder")).toEqual({ kind: "member" });
+    expect(await office.access(code, "rival")).toEqual({ kind: "denied" });
+    expect(await office.access(code, null)).toEqual({ kind: "denied" });
+  });
 });

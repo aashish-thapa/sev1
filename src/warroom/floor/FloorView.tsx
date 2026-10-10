@@ -282,7 +282,7 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
         <color attach="background" args={[0, 0, 0]} />
         <PerformanceMonitor onDecline={stepDown} onFallback={stepDown} />
         <Office panic={panic} reduceMotion={reduceMotion} hasShadows={settings.hasShadows} />
-        <People comms={comms} now={cluster.t} getPlayer={getPlayer} reduceMotion={reduceMotion} panic={panic} />
+        <People comms={comms} now={cluster.t} getPlayer={getPlayer} reduceMotion={reduceMotion} panic={panic} teammates={teammates} />
         <Teammates teammates={teammates} reduceMotion={reduceMotion} />
         <SelfBody seed={selfAvatarSeed} getPlayer={getPlayer} reduceMotion={reduceMotion} />
         {racks.map((rack) => (

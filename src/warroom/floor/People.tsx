@@ -23,18 +23,33 @@ type Props = {
   reduceMotion: boolean;
   /** 0 calm … 1 meltdown. */
   panic: number;
+  /** Other players in a shared room; colleagues make room for them too. */
+  teammates: readonly Teammate[];
 };
 
 type Level = { readonly current: number };
 
-export function People({ comms, now, getPlayer, reduceMotion, panic }: Props) {
+export function People({ comms, now, getPlayer, reduceMotion, panic, teammates }: Props) {
   const panicLevel = useRef(panic);
   useEffect(() => {
     panicLevel.current = panic;
   }, [panic]);
   const crowd = useRef<Crowd>(new Map());
+  const others = useRef(teammates);
+  useEffect(() => {
+    others.current = teammates;
+  }, [teammates]);
   useFrame(() => {
-    crowd.current.set("player", getPlayer());
+    const everyone = crowd.current;
+    everyone.set("player", getPlayer());
+    const present = new Set<string>();
+    for (const teammate of others.current) {
+      if (!teammate.position) continue;
+      const key = `teammate:${teammate.id}`;
+      present.add(key);
+      everyone.set(key, teammate.position);
+    }
+    for (const key of everyone.keys()) if (key.startsWith("teammate:") && !present.has(key)) everyone.delete(key);
   });
   return (
     <>
@@ -45,7 +60,7 @@ export function People({ comms, now, getPlayer, reduceMotion, panic }: Props) {
   );
 }
 
-type PersonProps = Omit<Props, "panic"> & { person: Person; panic: Level; crowd: { readonly current: Crowd } };
+type PersonProps = Omit<Props, "panic" | "teammates"> & { person: Person; panic: Level; crowd: { readonly current: Crowd } };
 
 function PersonModel({ person, comms, now, getPlayer, reduceMotion, panic, crowd }: PersonProps) {
   const body = useRef<Group>(null);

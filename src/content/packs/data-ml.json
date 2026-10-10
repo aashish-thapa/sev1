@@ -981,5 +981,951 @@
       "why": "Velocity features like txn_count_1h are only right if materialized continuously. With the DAG paused, every lookup returns the last value written, so a card busy on Oct 7 still looks busy today and gets sent to review. Lookups still hit in 2–3 ms, so nothing errors; only the score distribution drifts.",
       "tell": "A 1-hour feature’s newest event is three days old, PSI rises from the hour the DAG was paused, and the model version hasn’t changed."
     }
+  },
+  {
+    "id": "data-airflow-backfill-datetime-now",
+    "kind": "find-line",
+    "topic": "data-pipelines",
+    "difficulty": 1,
+    "alert": {
+      "service": "finance-dags",
+      "title": "Backfill finished but daily_revenue is still empty for Oct 1–7",
+      "severity": "SEV3",
+      "firedAt": "11:20"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "daily_revenue backfill, task load_day",
+        "lines": [
+          {
+            "ts": "11:02:14.208",
+            "level": "INFO",
+            "source": "load_day",
+            "text": "logical_date=2026-10-01 day=2026-10-10 rows=18204 wrote s3://lake/marts/daily_revenue/dt=2026-10-10/"
+          },
+          {
+            "ts": "11:03:31.775",
+            "level": "INFO",
+            "source": "load_day",
+            "text": "logical_date=2026-10-02 day=2026-10-10 rows=18311 wrote s3://lake/marts/daily_revenue/dt=2026-10-10/"
+          },
+          {
+            "ts": "11:04:47.019",
+            "level": "INFO",
+            "source": "load_day",
+            "text": "logical_date=2026-10-03 day=2026-10-10 rows=18390 wrote s3://lake/marts/daily_revenue/dt=2026-10-10/"
+          },
+          {
+            "ts": "11:09:58.442",
+            "level": "INFO",
+            "source": "load_day",
+            "text": "logical_date=2026-10-07 day=2026-10-10 rows=18716 wrote s3://lake/marts/daily_revenue/dt=2026-10-10/"
+          },
+          {
+            "ts": "11:10:02.003",
+            "level": "INFO",
+            "source": "backfill",
+            "text": "daily_revenue backfill 2026-10-01 → 2026-10-07: 7 of 7 runs succeeded"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "warehouse after the backfill",
+        "items": [
+          {
+            "key": "why the backfill",
+            "value": "load_day failed Oct 1–7 (warehouse credentials rotated)"
+          },
+          {
+            "key": "command",
+            "value": "airflow dags backfill -s 2026-10-01 -e 2026-10-07 daily_revenue"
+          },
+          {
+            "key": "dt=2026-10-01 … 10-07",
+            "value": "0 rows each"
+          },
+          {
+            "key": "dt=2026-10-10",
+            "value": "overwritten 7 times in 8 minutes"
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "label": "dags/daily_revenue.py",
+        "language": "python",
+        "startLine": 1,
+        "lines": [
+          "from datetime import datetime, timezone",
+          "",
+          "from airflow.decorators import dag, task",
+          "from include.warehouse import run_sql",
+          "",
+          "@dag(",
+          "    schedule=\"@daily\",",
+          "    start_date=datetime(2026, 1, 1, tzinfo=timezone.utc),",
+          "    catchup=False,",
+          ")",
+          "def daily_revenue():",
+          "    @task",
+          "    def load_day():",
+          "        day = datetime.now(timezone.utc).date().isoformat()",
+          "        run_sql(\"sql/daily_revenue.sql\", params={\"day\": day})",
+          "",
+          "    load_day()",
+          "",
+          "daily_revenue()"
+        ]
+      }
+    ],
+    "question": "Tap the line that sends every backfill run to today's partition.",
+    "answer": {
+      "evidence": 2,
+      "line": 13
+    },
+    "explanation": {
+      "cause": "load_day takes its date from datetime.now(), not from the run’s logical date",
+      "why": "A backfill creates one run per past day, but every run executes today, so now() returned Oct 10 seven times. Each run overwrote dt=2026-10-10 and Oct 1–7 stayed empty. catchup=False is irrelevant: the backfill command runs anyway. Take the day from the run’s context, e.g. def load_day(ds=None).",
+      "tell": "Each run logs a different logical_date (Oct 1–7) but the same day=2026-10-10 and the same target path."
+    },
+    "source": {
+      "title": "Airflow docs — Best Practices: never use now() inside a task",
+      "url": "https://airflow.apache.org/docs/apache-airflow/stable/best-practices.html"
+    }
+  },
+  {
+    "id": "ml-batchnorm-train-mode-single-item",
+    "kind": "diagnose",
+    "topic": "machine-learning",
+    "difficulty": 1,
+    "alert": {
+      "service": "image-tagger",
+      "title": "image-tagger: 31% of POST /tag return 500 since v2.4",
+      "severity": "SEV2",
+      "firedAt": "15:22"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "image-tagger v2.4",
+        "lines": [
+          {
+            "ts": "15:18:02.114",
+            "level": "INFO",
+            "source": "image-tagger",
+            "text": "POST /tag images=16 status=200 latency=212ms"
+          },
+          {
+            "ts": "15:18:02.530",
+            "level": "INFO",
+            "source": "image-tagger",
+            "text": "POST /tag images=1 status=500 latency=38ms"
+          },
+          {
+            "ts": "15:18:02.531",
+            "level": "ERROR",
+            "source": "torch",
+            "text": "ValueError: Expected more than 1 value per channel when training, got input size torch.Size([1, 512])"
+          },
+          {
+            "ts": "15:18:03.007",
+            "level": "INFO",
+            "source": "image-tagger",
+            "text": "POST /tag images=8 status=200 latency=131ms"
+          },
+          {
+            "ts": "15:18:03.442",
+            "level": "INFO",
+            "source": "image-tagger",
+            "text": "POST /tag images=1 status=500 latency=35ms"
+          },
+          {
+            "ts": "15:18:03.443",
+            "level": "ERROR",
+            "source": "torch",
+            "text": "ValueError: Expected more than 1 value per channel when training, got input size torch.Size([1, 512])"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "v2.4 release and traffic",
+        "items": [
+          {
+            "key": "v2.4 change",
+            "value": "loads the model with the training repo’s load_checkpoint()"
+          },
+          {
+            "key": "weights",
+            "value": "same checkpoint as v2.3 (sha 9e41c0)"
+          },
+          {
+            "key": "failing requests",
+            "value": "all have images=1; batched requests return 200"
+          },
+          {
+            "key": "single-image share",
+            "value": "31% of traffic"
+          },
+          {
+            "key": "GPU memory",
+            "value": "11.2 of 24 GiB used"
+          }
+        ]
+      }
+    ],
+    "question": "Why do single-image requests fail since v2.4?",
+    "options": [
+      "Checkpoint head dimension doesn't match the backbone",
+      "Model served in training mode; BatchNorm needs >1 item",
+      "Single images not resized to the model's input shape",
+      "GPU out of memory on large single-image uploads"
+    ],
+    "answer": 1,
+    "explanation": {
+      "cause": "v2.4 serves the model in training mode, and BatchNorm can’t normalize a batch of one",
+      "why": "In train() mode BatchNorm computes its statistics from the batch, and one value per channel gives it nothing to compute, so PyTorch raises this ValueError. Batched requests pass but are still wrong: their stats come from the batch and dropout stays on. Call model.eval() after loading and serve under torch.inference_mode().",
+      "tell": "Every 500 has images=1, batched requests on the same checkpoint succeed, and the error itself says “when training”."
+    }
+  },
+  {
+    "id": "data-spark-static-overwrite-wipes-history",
+    "kind": "find-line",
+    "topic": "data-pipelines",
+    "difficulty": 2,
+    "alert": {
+      "service": "sessions-mart",
+      "title": "Monte Carlo: marts.daily_sessions lost 730 of 731 partitions",
+      "severity": "SEV2",
+      "firedAt": "12:44"
+    },
+    "evidence": [
+      {
+        "type": "facts",
+        "label": "marts.daily_sessions",
+        "items": [
+          {
+            "key": "partitions at 12:30",
+            "value": "731 (dt=2024-10-09 … 2026-10-09)"
+          },
+          {
+            "key": "partitions at 12:41",
+            "value": "1 (dt=2026-10-08)"
+          },
+          {
+            "key": "12:38",
+            "value": "on-call ran backfill_sessions.py 2026-10-08 to fix one day"
+          },
+          {
+            "key": "nightly sessions job",
+            "value": "same path with .mode(\"append\"), two years without trouble"
+          },
+          {
+            "key": "partitionOverwriteMode",
+            "value": "not set (default STATIC)"
+          },
+          {
+            "key": "S3 versioning",
+            "value": "on; deleted objects have delete markers"
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "label": "jobs/backfill_sessions.py",
+        "language": "python",
+        "startLine": 1,
+        "lines": [
+          "import sys",
+          "",
+          "from pyspark.sql import SparkSession, functions as F",
+          "",
+          "spark = SparkSession.builder.appName(\"backfill_sessions\").getOrCreate()",
+          "day = sys.argv[1]",
+          "",
+          "events = spark.read.parquet(\"s3://lake/raw/events/\").where(F.col(\"dt\") == day)",
+          "",
+          "sessions = (",
+          "    events.groupBy(\"dt\", \"user_id\")",
+          "    .agg(F.min(\"event_ts\").alias(\"first_ts\"), F.count(\"*\").alias(\"events\"))",
+          ")",
+          "",
+          "(sessions.write",
+          "    .mode(\"overwrite\")",
+          "    .partitionBy(\"dt\")",
+          "    .parquet(\"s3://lake/marts/daily_sessions/\"))"
+        ]
+      }
+    ],
+    "question": "Tap the line that deleted two years of partitions.",
+    "answer": {
+      "evidence": 1,
+      "line": 15
+    },
+    "explanation": {
+      "cause": "In the default STATIC mode, overwrite on a partitioned path first deletes every partition",
+      "why": "With spark.sql.sources.partitionOverwriteMode=static, Spark deletes every partition matching the write’s partition spec before writing, and partitionBy(\"dt\") with no fixed value matches all of them. The backfill wrote one day into an empty table. Add .option(\"partitionOverwriteMode\", \"dynamic\") to replace only the partitions written.",
+      "tell": "Partitions fell from 731 to 1 at the backfill, the survivor is the backfilled day, the nightly job appends to the same path, and the mode is the default STATIC."
+    },
+    "source": {
+      "title": "Spark docs — Configuration: spark.sql.sources.partitionOverwriteMode",
+      "url": "https://spark.apache.org/docs/latest/configuration.html"
+    }
+  },
+  {
+    "id": "data-yarn-overhead-pandas-udf",
+    "kind": "diagnose",
+    "topic": "data-pipelines",
+    "difficulty": 2,
+    "alert": {
+      "service": "basket-scoring",
+      "title": "Airflow: score_baskets failed, Spark job aborted in stage 6",
+      "severity": "SEV2",
+      "firedAt": "03:52"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "spark driver, stage 6 (applyInPandas)",
+        "lines": [
+          {
+            "ts": "03:31:40.118",
+            "level": "INFO",
+            "source": "YarnAllocator",
+            "text": "Completed container container_e07_1728540012345_0412_01_000015 on host: ip-10-0-5-12.ec2.internal (state: COMPLETE, exit status: -104)"
+          },
+          {
+            "ts": "03:31:40.119",
+            "level": "WARN",
+            "source": "YarnAllocator",
+            "text": "Container killed by YARN for exceeding physical memory limits. 9.1 GB of 9 GB physical memory used. Consider boosting spark.executor.memoryOverhead."
+          },
+          {
+            "ts": "03:44:02.551",
+            "level": "INFO",
+            "source": "YarnAllocator",
+            "text": "Completed container container_e07_1728540012345_0412_01_000031 on host: ip-10-0-7-40.ec2.internal (state: COMPLETE, exit status: -104)"
+          },
+          {
+            "ts": "03:44:02.552",
+            "level": "WARN",
+            "source": "YarnAllocator",
+            "text": "Container killed by YARN for exceeding physical memory limits. 9.0 GB of 9 GB physical memory used. Consider boosting spark.executor.memoryOverhead."
+          },
+          {
+            "ts": "03:51:17.904",
+            "level": "ERROR",
+            "source": "TaskSetManager",
+            "text": "Task 41 in stage 6.0 failed 4 times; aborting job"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "executor config + Spark UI, stage 6",
+        "items": [
+          {
+            "key": "spark.executor.memory",
+            "value": "8g"
+          },
+          {
+            "key": "spark.executor.memoryOverhead",
+            "value": "not set (default 10% = 819 MiB)"
+          },
+          {
+            "key": "spark.executor.pyspark.memory",
+            "value": "not set"
+          },
+          {
+            "key": "executor JVM heap, peak",
+            "value": "3.2 of 8 GiB used · GC time 1%"
+          },
+          {
+            "key": "shuffle read per task",
+            "value": "median 214 MiB · max 251 MiB"
+          },
+          {
+            "key": "change on Oct 9",
+            "value": "scoring moved into applyInPandas (pandas + model per group)"
+          }
+        ]
+      }
+    ],
+    "question": "Why does YARN keep killing stage 6's executors?",
+    "options": [
+      "Executor heap too small; raise spark.executor.memory",
+      "One skewed key overloading a single task",
+      "Python workers outgrowing the off-heap memory overhead",
+      "YARN's virtual-memory check misfiring on the JVM"
+    ],
+    "answer": 2,
+    "explanation": {
+      "cause": "applyInPandas runs pandas in Python workers outside the heap, inside the 819 MiB overhead",
+      "why": "YARN caps the whole container (heap + overhead), and with spark.executor.pyspark.memory unset, Python workers must fit in the overhead. Since Oct 9 each task holds pandas groups and a model in Python, blowing past 819 MiB while the heap idles at 3.2 GiB. Raising executor memory mostly adds idle heap. Raise spark.executor.memoryOverhead.",
+      "tell": "YARN kills on physical memory while the heap peaks at 3.2 of 8 GiB, shuffle reads are even, and the kills began when scoring moved into applyInPandas."
+    },
+    "source": {
+      "title": "Spark docs — Configuration: spark.executor.memoryOverhead",
+      "url": "https://spark.apache.org/docs/latest/configuration.html"
+    }
+  },
+  {
+    "id": "ml-query-encoder-index-model-mismatch",
+    "kind": "diagnose",
+    "topic": "machine-learning",
+    "difficulty": 2,
+    "alert": {
+      "service": "product-search",
+      "title": "Search CTR down 58% since 14:05 (semantic search)",
+      "severity": "SEV2",
+      "firedAt": "14:31"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "mean top-1 cosine similarity, 5-min buckets",
+        "unit": "cos",
+        "points": [
+          0.78,
+          0.79,
+          0.77,
+          0.78,
+          0.78,
+          0.79,
+          0.78,
+          0.77,
+          0.21,
+          0.2,
+          0.22,
+          0.21,
+          0.21,
+          0.2
+        ],
+        "markAt": 8
+      },
+      {
+        "type": "facts",
+        "label": "14:05 deploy and the index",
+        "items": [
+          {
+            "key": "search-api 3.8 (14:05)",
+            "value": "query encoder text-embed-v2 → text-embed-v3"
+          },
+          {
+            "key": "products-hnsw index",
+            "value": "built Oct 2 from text-embed-v2 vectors"
+          },
+          {
+            "key": "vector dimension",
+            "value": "768 in both models; no errors logged"
+          },
+          {
+            "key": "ANN recall@10 vs exact search",
+            "value": "0.97 on the same index (unchanged)"
+          },
+          {
+            "key": "index doc count",
+            "value": "4.1M (unchanged)"
+          },
+          {
+            "key": "short vs long queries",
+            "value": "1–3 word queries dropped as much as long ones"
+          }
+        ]
+      }
+    ],
+    "question": "Why did semantic search relevance collapse at 14:05?",
+    "options": [
+      "HNSW ef_search too low, so ANN misses true neighbours",
+      "Stale index missing products added since Oct 2",
+      "New tokenizer truncating long queries",
+      "v3 query vectors searched against v2 document vectors"
+    ],
+    "answer": 3,
+    "explanation": {
+      "cause": "Queries are embedded by text-embed-v3, but the index still holds text-embed-v2 vectors",
+      "why": "Two embedding models put text in unrelated vector spaces, even at the same dimension, so cosine scores between them are noise. The ANN index is working: it finds the v2 vectors nearest to a v3 query, which just aren’t relevant. Re-embed the corpus with v3 and swap indexes, or roll the query encoder back to v2.",
+      "tell": "Similarity fell from 0.78 to 0.21 in the 14:05 bucket, the index was built from v2, and exact search on the same index agrees with ANN (recall 0.97)."
+    }
+  },
+  {
+    "id": "data-parquet-pandas-null-int-to-double",
+    "kind": "diagnose",
+    "topic": "data-pipelines",
+    "difficulty": 3,
+    "alert": {
+      "service": "retail-marts",
+      "title": "Airflow: daily_sales_rollup failed 3 runs in a row (Spark read error)",
+      "severity": "SEV2",
+      "firedAt": "06:40"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "spark driver, daily_sales_rollup",
+        "lines": [
+          {
+            "ts": "06:12:31.077",
+            "level": "INFO",
+            "source": "rollup",
+            "text": "reading raw.pos_sales dt BETWEEN 2026-10-03 AND 2026-10-09 (7 partitions)"
+          },
+          {
+            "ts": "06:13:02.419",
+            "level": "ERROR",
+            "source": "driver",
+            "text": "org.apache.spark.SparkException: Parquet column cannot be converted in file s3://lake/raw/pos_sales/dt=2026-10-09/pos_sales.parquet. Column: [quantity], Expected: bigint, Found: DOUBLE."
+          },
+          {
+            "ts": "06:13:02.419",
+            "level": "ERROR",
+            "source": "driver",
+            "text": "Caused by: org.apache.spark.sql.execution.datasources.SchemaColumnConvertNotSupportedException: column: [quantity], physicalType: DOUBLE, logicalType: bigint"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "raw.pos_sales and its exporter",
+        "items": [
+          {
+            "key": "Glue table raw.pos_sales",
+            "value": "quantity bigint (unchanged since 2024)"
+          },
+          {
+            "key": "files dt=10-01 … 10-08",
+            "value": "quantity INT64; they read fine"
+          },
+          {
+            "key": "pos-exporter",
+            "value": "pandas DataFrame.to_parquet(); code unchanged since May"
+          },
+          {
+            "key": "NULL quantity rows per day",
+            "value": "0 every day until Oct 9; Oct 9: 3 rows"
+          },
+          {
+            "key": "POS firmware 7.2 (Oct 9)",
+            "value": "voided lines now arrive with no quantity"
+          },
+          {
+            "key": "Oct 9 file",
+            "value": "footer valid; opens in pyarrow, 41,203 rows"
+          }
+        ]
+      }
+    ],
+    "question": "Why can't Spark read the Oct 9 POS file?",
+    "options": [
+      "Corrupt Parquet file from an interrupted S3 upload",
+      "Someone altered the Glue table's quantity type",
+      "NULL quantities made pandas write the column as float",
+      "A vectorized-reader bug; disable it and rerun"
+    ],
+    "answer": 2,
+    "explanation": {
+      "cause": "Three NULL quantities turned the pandas int64 column into float64, written as DOUBLE",
+      "why": "NumPy-backed pandas has no integer NaN, so an int column with any missing value becomes float64, and to_parquet writes it as DOUBLE. Spark reads every file with the table’s bigint schema and can’t convert DOUBLE. Nothing in the exporter changed; the data did. Cast to the nullable Int64 dtype or pass an explicit pyarrow schema.",
+      "tell": "Only the Oct 9 file fails, it holds DOUBLE where the table says bigint, and Oct 9 is the first day with NULL quantity. Table and exporter code are unchanged."
+    },
+    "source": {
+      "title": "pandas docs — Nullable integer data type",
+      "url": "https://pandas.pydata.org/docs/user_guide/integer_na.html"
+    }
+  },
+  {
+    "id": "data-dst-fallback-hour-overwritten",
+    "kind": "find-line",
+    "topic": "data-pipelines",
+    "difficulty": 3,
+    "alert": {
+      "service": "orders-mart",
+      "title": "Reconciliation: orders_hourly Apr 5 total 1.3% below OMS",
+      "severity": "SEV3",
+      "firedAt": "09:00"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "load_hour runs (UTC), Apr 4",
+        "lines": [
+          {
+            "ts": "15:06:51.330",
+            "level": "INFO",
+            "source": "load_hour",
+            "text": "hour_start=2026-04-04T14:00Z rows=1388 wrote dt=2026-04-05/hr=01"
+          },
+          {
+            "ts": "16:07:02.812",
+            "level": "INFO",
+            "source": "load_hour",
+            "text": "hour_start=2026-04-04T15:00Z rows=1214 wrote dt=2026-04-05/hr=02"
+          },
+          {
+            "ts": "17:06:58.104",
+            "level": "INFO",
+            "source": "load_hour",
+            "text": "hour_start=2026-04-04T16:00Z rows=1097 wrote dt=2026-04-05/hr=02"
+          },
+          {
+            "ts": "18:07:10.559",
+            "level": "INFO",
+            "source": "load_hour",
+            "text": "hour_start=2026-04-04T17:00Z rows=1003 wrote dt=2026-04-05/hr=03"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Apr 5 (Sydney) reconciliation",
+        "items": [
+          {
+            "key": "OMS orders, Apr 5",
+            "value": "96,412"
+          },
+          {
+            "key": "mart orders, Apr 5",
+            "value": "95,198 (−1,214)"
+          },
+          {
+            "key": "load_hour runs for Apr 5",
+            "value": "25 · partitions written: 24"
+          },
+          {
+            "key": "Apr 5, 03:00 AEDT",
+            "value": "clocks went back to 02:00 AEST (daylight saving ended)"
+          },
+          {
+            "key": "every other day",
+            "value": "mart matches OMS exactly"
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "label": "jobs/orders_hourly.py",
+        "language": "python",
+        "startLine": 1,
+        "lines": [
+          "from datetime import datetime, timedelta",
+          "from zoneinfo import ZoneInfo",
+          "",
+          "from pyspark.sql import functions as F",
+          "",
+          "SYD = ZoneInfo(\"Australia/Sydney\")",
+          "",
+          "",
+          "def load_hour(spark, hour_start_utc: datetime) -> None:",
+          "    part = hour_start_utc.astimezone(SYD).strftime(\"dt=%Y-%m-%d/hr=%H\")",
+          "    hour_end_utc = hour_start_utc + timedelta(hours=1)",
+          "    orders = spark.read.table(\"raw.orders\").where(",
+          "        (F.col(\"created_at\") >= hour_start_utc) & (F.col(\"created_at\") < hour_end_utc)",
+          "    )",
+          "    orders.write.mode(\"overwrite\").parquet(f\"s3://lake/marts/orders_hourly/{part}\")"
+        ]
+      }
+    ],
+    "question": "Tap the line that loses an hour of orders.",
+    "answer": {
+      "evidence": 2,
+      "line": 9
+    },
+    "explanation": {
+      "cause": "The partition key is the local Sydney hour, which repeats when daylight saving ends",
+      "why": "At 03:00 AEDT on Apr 5 clocks went back to 02:00 AEST, so UTC hours 15:00 and 16:00 both map to hr=02. The 16:00Z run overwrote the 15:00Z run’s 1,214 orders. The overwrite itself is right: it keeps retries idempotent. Partition by UTC hour and convert to local time when querying.",
+      "tell": "The 15:00Z and 16:00Z runs both wrote dt=2026-04-05/hr=02, 25 runs made 24 partitions, and the shortfall is exactly the first run’s 1,214 rows."
+    }
+  },
+  {
+    "id": "ml-ddp-rank0-eval-collective-hang",
+    "kind": "find-line",
+    "topic": "machine-learning",
+    "difficulty": 3,
+    "alert": {
+      "service": "llm-pretrain",
+      "title": "Training job lm-1b-run7 killed: NCCL watchdog timeout on all 8 ranks",
+      "severity": "SEV2",
+      "firedAt": "02:51"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "ranks 0 and 3, PyTorch 2.5.1",
+        "lines": [
+          {
+            "ts": "02:39:12.604",
+            "level": "INFO",
+            "source": "rank0/train",
+            "text": "step=5000 loss=2.318 lr=2.9e-04 tokens/s=412k"
+          },
+          {
+            "ts": "02:39:13.010",
+            "level": "INFO",
+            "source": "rank3/train",
+            "text": "step=5000 loss=2.311 lr=2.9e-04 tokens/s=409k"
+          },
+          {
+            "ts": "02:49:14.377",
+            "level": "ERROR",
+            "source": "rank3/c10d",
+            "text": "[Rank 3] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=60001, OpType=ALLREDUCE, NumelIn=263168, NumelOut=263168, Timeout(ms)=600000) ran for 600041 milliseconds before timing out."
+          },
+          {
+            "ts": "02:49:14.378",
+            "level": "ERROR",
+            "source": "rank3/c10d",
+            "text": "[Rank 3] To avoid data inconsistency, we are taking the entire process down."
+          },
+          {
+            "ts": "02:49:41.902",
+            "level": "ERROR",
+            "source": "rank0/c10d",
+            "text": "[Rank 0] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=60001, OpType=ALLREDUCE, NumelIn=1, NumelOut=1, Timeout(ms)=600000) ran for 600039 milliseconds before timing out."
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "run context",
+        "items": [
+          {
+            "key": "Oct 9 commit 4be21f",
+            "value": "“only compute and log val metrics on rank 0”"
+          },
+          {
+            "key": "first eval since that commit",
+            "value": "step 5000, where every rank hung"
+          },
+          {
+            "key": "val_loader",
+            "value": "DistributedSampler: each rank holds 1/8 of the val set"
+          },
+          {
+            "key": "DDP all-reduces per step",
+            "value": "12 buckets (5000 steps × 12 = 60000)"
+          },
+          {
+            "key": "nccl-tests + IB counters",
+            "value": "clean on all 8 GPUs after the hang"
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "label": "train.py",
+        "language": "python",
+        "startLine": 88,
+        "lines": [
+          "def evaluate(model, loader):",
+          "    model.eval()",
+          "    total = torch.zeros(1, device=\"cuda\")",
+          "    with torch.no_grad():",
+          "        for x, y in loader:",
+          "            total += F.cross_entropy(model.module(x).flatten(0, 1), y.flatten())",
+          "    dist.all_reduce(total)",
+          "    model.train()",
+          "    return total.item() / (len(loader) * dist.get_world_size())",
+          "",
+          "",
+          "for step, (x, y) in enumerate(train_loader, start=1):",
+          "    loss = F.cross_entropy(model(x).flatten(0, 1), y.flatten())",
+          "    loss.backward()",
+          "    optimizer.step()",
+          "    optimizer.zero_grad(set_to_none=True)",
+          "    if dist.get_rank() == 0 and step % 5000 == 0:",
+          "        log.info(\"step=%d val_loss=%.4f\", step, evaluate(model, val_loader))"
+        ]
+      }
+    ],
+    "question": "Tap the line that hangs all eight ranks.",
+    "answer": {
+      "evidence": 2,
+      "line": 16
+    },
+    "explanation": {
+      "cause": "Only rank 0 calls evaluate(), so its all_reduce has no partner on the other seven ranks",
+      "why": "NCCL matches collectives by order, not by name. Collective 60001 is rank 0’s 1-element val all_reduce but ranks 1–7’s first gradient bucket of step 5001, so the sizes disagree and all eight block until the 10-minute watchdog. The all_reduce itself is needed: each rank holds 1/8 of the val set. Run evaluate on every rank; log on rank 0.",
+      "tell": "Every rank times out on SeqNum 60001, but rank 0’s is a 1-element ALLREDUCE and rank 3’s has 263,168 elements, at the first eval since the rank-0-only commit."
+    }
+  },
+  {
+    "id": "ml-point-in-time-leak-current-features",
+    "kind": "find-line",
+    "topic": "machine-learning",
+    "difficulty": 3,
+    "alert": {
+      "service": "churn-model",
+      "title": "Model monitor: churn-v4 live AUC 0.62 vs 0.95 offline",
+      "severity": "SEV3",
+      "firedAt": "08:15"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "live AUC by scoring day (v3 → v4), 30-day labels",
+        "unit": "AUC",
+        "points": [
+          0.79,
+          0.8,
+          0.79,
+          0.78,
+          0.79,
+          0.8,
+          0.79,
+          0.62,
+          0.61,
+          0.63,
+          0.62,
+          0.62,
+          0.61,
+          0.62
+        ],
+        "markAt": 7
+      },
+      {
+        "type": "facts",
+        "label": "churn-v3 vs churn-v4",
+        "items": [
+          {
+            "key": "v3 training set",
+            "value": "as-of daily feature snapshots · offline 0.81, live 0.79"
+          },
+          {
+            "key": "v4 training set",
+            "value": "new builder (Aug 20), live Aug 25 · offline 0.95, live 0.62"
+          },
+          {
+            "key": "split (v3 and v4)",
+            "value": "time-based: train Jan–Apr, validate May–Jun"
+          },
+          {
+            "key": "top v4 feature",
+            "value": "days_since_last_login, 64% of total gain"
+          },
+          {
+            "key": "churners' days_since_last_login",
+            "value": "in training rows: median 171 d · at snapshot_date: 6 d"
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "label": "sql/build_churn_training_set.sql",
+        "language": "sql",
+        "startLine": 1,
+        "lines": [
+          "SELECT",
+          "  l.customer_id,",
+          "  l.snapshot_date,",
+          "  f.days_since_last_login,",
+          "  f.sessions_30d,",
+          "  f.support_tickets_90d,",
+          "  f.plan_tier,",
+          "  l.churned_within_30d AS label",
+          "FROM ml.churn_labels AS l",
+          "JOIN features.customer_features_current AS f ON f.customer_id = l.customer_id",
+          "WHERE l.snapshot_date BETWEEN DATE '2026-01-01' AND DATE '2026-06-30';"
+        ]
+      }
+    ],
+    "question": "Tap the line that makes churn-v4 look far better offline than live.",
+    "answer": {
+      "evidence": 2,
+      "line": 9
+    },
+    "explanation": {
+      "cause": "Historical labels are joined to current feature values, read after the outcome happened",
+      "why": "A January row must see features as of its snapshot_date, but customer_features_current holds values as of its build date. Customers who churned haven’t logged in since, so their days_since_last_login is huge in training: the label leaks into the feature. Live, the model sees only pre-churn values. Join snapshots as of snapshot_date.",
+      "tell": "Churners show 171 days since login in training but 6 days at their snapshot date, the split is already time-based, and v3’s as-of join had no offline/live gap."
+    },
+    "source": {
+      "title": "Feast docs — Point-in-time joins",
+      "url": "https://docs.feast.dev/getting-started/concepts/point-in-time-joins"
+    }
+  },
+  {
+    "id": "ml-negative-downsampling-uncalibrated-bids",
+    "kind": "diagnose",
+    "topic": "machine-learning",
+    "difficulty": 3,
+    "alert": {
+      "service": "ads-bidder",
+      "title": "Ads pacing: 61% of campaigns spent their daily budget by 12:00",
+      "severity": "SEV2",
+      "firedAt": "12:05"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "mean pCTR ÷ observed CTR, hourly",
+        "unit": "ratio",
+        "points": [
+          1.02,
+          0.99,
+          1.01,
+          1.03,
+          1,
+          0.98,
+          1.02,
+          9.1,
+          9.2,
+          9,
+          9.1,
+          9.2,
+          9.1,
+          9.1
+        ],
+        "markAt": 7
+      },
+      {
+        "type": "facts",
+        "label": "ctr-v12 (deployed 06:00 today) vs ctr-v11",
+        "items": [
+          {
+            "key": "AUC offline",
+            "value": "v12 0.791 · v11 0.786"
+          },
+          {
+            "key": "AUC online since deploy",
+            "value": "v12 0.789 (6 h of clicks)"
+          },
+          {
+            "key": "observed CTR",
+            "value": "1.1%, flat for 30 days"
+          },
+          {
+            "key": "online/offline feature parity",
+            "value": "99.9% of rows match"
+          },
+          {
+            "key": "v12 training data",
+            "value": "all clicks; negatives sampled at 10% to halve training time"
+          },
+          {
+            "key": "bid formula",
+            "value": "bid = pCTR × advertiser value per click"
+          }
+        ]
+      }
+    ],
+    "question": "Why are campaigns burning through their budgets since ctr-v12?",
+    "options": [
+      "Real drift: users clicking less since the v12 launch",
+      "Train-serve skew in a feature added in v12",
+      "Negative downsampling left v12's pCTR uncalibrated",
+      "Label leakage inflating v12's offline AUC"
+    ],
+    "answer": 2,
+    "explanation": {
+      "cause": "v12 trained on 10% of negatives, so its probabilities run ~9× high, and bids use them raw",
+      "why": "Dropping 90% of non-clicks makes clicks look ten times more common, which lifts every prediction but keeps the ranking, so AUC doesn’t move. Bids multiply pCTR by value, so every bid is ~9× too high and budgets run out by noon. Recalibrate with q = p / (p + (1 − p) / w), w = 0.1, or upweight negatives 10×.",
+      "tell": "Online AUC matches offline and CTR is flat, yet mean pCTR ÷ CTR jumped from 1.0 to 9.1, which is what 10% negative sampling does at a 1.1% CTR."
+    },
+    "source": {
+      "title": "Google ML Crash Course — Imbalanced datasets: downsampling and upweighting",
+      "url": "https://developers.google.com/machine-learning/crash-course/overfitting/imbalanced-datasets"
+    }
   }
 ]

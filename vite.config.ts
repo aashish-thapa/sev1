@@ -29,8 +29,14 @@ export default defineConfig({
       workbox: {
         globPatterns: ["**/*.{js,css,html,svg,png,woff2}"],
         // The 3D hall is ~1 MB; fetch it the first time someone walks the floor, not on install.
-        globIgnores: ["**/FloorView-*.js"],
+        // People, props and surfaces (~25 MB) load when the office opens and are cached as they arrive.
+        globIgnores: ["**/FloorView-*.js", "office/**"],
         runtimeCaching: [
+          {
+            urlPattern: ({ url }) => url.pathname.startsWith("/office/"),
+            handler: "CacheFirst",
+            options: { cacheName: "office-assets", expiration: { maxEntries: 80 } },
+          },
           {
             urlPattern: ({ url }) => /\/assets\/FloorView-.*\.js$/.test(url.pathname),
             handler: "CacheFirst",

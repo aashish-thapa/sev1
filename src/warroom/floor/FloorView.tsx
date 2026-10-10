@@ -201,7 +201,9 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
     rackFootprintsRef.current = rackFootprints;
   }, [rackFootprints]);
   const lastWhere = useRef<string>("");
-  const [isAwayFromDesk, setAwayFromDesk] = useState(true);
+  const [knowsControls, setKnowsControls] = useState(hasLearnedControls);
+  const knowsControlsRef = useRef(knowsControls);
+  const walkedSoFar = useRef(0);
   const strideLeft = useRef(STRIDE_METRES);
   const onPlayerMove = useCallback(
     (player: Player) => {
@@ -213,9 +215,14 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
         lastWhere.current = key;
         onWhereabouts?.(where);
       }
-      const isAway = Math.hypot(player.x - PLAYER_DESK.x, player.z - PLAYER_DESK.z) > DESK_HINT_DISTANCE;
-      setAwayFromDesk((current) => (current === isAway ? current : isAway));
       const moved = Math.hypot(player.x - previous.x, player.z - previous.z);
+      walkedSoFar.current += moved;
+      // A few real steps, not the nudge the room gives you as it loads.
+      if (walkedSoFar.current > LEARNED_AFTER_METRES && !knowsControlsRef.current) {
+        knowsControlsRef.current = true;
+        rememberControlsLearned();
+        setKnowsControls(true);
+      }
       const presence = presenceOf(player, readStance(), isOnLaptopRef.current);
       if (hasPresenceChanged(lastPresence.current, presence)) {
         lastPresence.current = presence;
@@ -363,10 +370,8 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
       {!isBusy && (
         <LifeHud
           cup={cup}
-          caffeine={coffee.caffeineLeft()}
           onSip={coffee.sip}
           standup={standup.notice}
-          showDeskHint={isPaged && seating.stance.kind === "standing" && isAwayFromDesk}
         />
       )}
       {noteWall.isOpen && <StickyWallPanel notes={noteWall.notes} onPin={noteWall.pin} onClose={noteWall.close} />}
@@ -375,7 +380,7 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
           <kbd>L</kbd> Laptop
         </button>
       )}
-      {!isBusy && (
+      {!isBusy && !knowsControls && (
         <p className="floor__help" aria-hidden="true">
           Drag to look · stick or WASD to walk
         </p>
@@ -396,7 +401,25 @@ type RigControl = {
 /** Sitting down or getting up glides the camera instead of cutting. */
 const POSE_CHANGE_SECONDS = 0.6;
 /** Paged and further than this from your desk: the floor reminds you where it is. */
-const DESK_HINT_DISTANCE = 5;
+const CONTROLS_LEARNED_KEY = "sev1.floor.knowsControls";
+const LEARNED_AFTER_METRES = 1;
+
+/** The how-to-move line is for your first steps only; after that the screen stays clear. */
+function hasLearnedControls(): boolean {
+  try {
+    return window.localStorage.getItem(CONTROLS_LEARNED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function rememberControlsLearned(): void {
+  try {
+    window.localStorage.setItem(CONTROLS_LEARNED_KEY, "1");
+  } catch {
+    // Private mode or blocked storage: the hint just shows again next visit.
+  }
+}
 
 type RigProps = {
   start: Player;

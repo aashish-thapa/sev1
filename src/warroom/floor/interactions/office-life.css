@@ -25,11 +25,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.life__chip--good {
-  border-color: var(--color-good);
-  color: var(--color-good);
-}
-
 .life__chip--action {
   min-height: 44px;
   color: var(--color-ink);
@@ -79,19 +74,6 @@
 .life__notice strong {
   margin-right: var(--space-2xs);
   color: var(--color-accent);
-}
-
-.life__hint {
-  position: absolute;
-  left: 50%;
-  bottom: calc(max(var(--space-md), env(safe-area-inset-bottom)) + 64px);
-  max-width: min(30rem, calc(100% - 2 * var(--space-md)));
-  margin: 0;
-  color: var(--color-ink-2);
-  font-size: var(--text-xs);
-  text-align: center;
-  transform: translateX(-50%);
-  pointer-events: none;
 }
 
 /* Up close at the team wall: a calm sheet over the floor. */

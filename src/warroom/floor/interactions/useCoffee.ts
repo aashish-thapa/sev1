@@ -51,7 +51,6 @@ export function useCoffee() {
     usables,
     sip,
     machine: MACHINE?.footprint ?? null,
-    caffeineLeft: () => caffeineLeft(coffeeRef.current, nowSeconds()),
     pace: useCallback(() => walkSpeedScale(coffeeRef.current, nowSeconds()), []),
   };
 }

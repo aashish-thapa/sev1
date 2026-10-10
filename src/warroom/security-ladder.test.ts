@@ -3,6 +3,7 @@ import { applyFrame, encodeFrame, IncidentFrameSchema } from "../multiplayer/fra
 import { advance, debrief, declareResolved, openIncident, type Incident } from "./incident.ts";
 import type { Scenario } from "./scenario.ts";
 import { botFloodSingleIp, FLOOD_IP } from "./scenarios/bot-flood-single-ip.ts";
+import { AUTO_CONTAIN_AT, CARD_TESTING_ALERT, cardTestingSoar, TESTER_RANGE } from "./scenarios/card-testing-soar.ts";
 import { checkoutCommerce } from "./scenarios/checkout-commerce.ts";
 import { credentialStuffingHosting, SIGN_IN_ALERT } from "./scenarios/credential-stuffing-hosting.ts";
 import { unlockedWarRooms } from "./scenarios/index.ts";
@@ -213,7 +214,7 @@ describe("siem resolve --contained-by", () => {
 
 // ── The security ladder ─────────────────────────────────────────────────────────
 
-const LADDER: readonly Scenario[] = [botFloodSingleIp, credentialStuffingHosting];
+const LADDER: readonly Scenario[] = [botFloodSingleIp, credentialStuffingHosting, cardTestingSoar];
 /** Paced like solutions.test.ts: first move 20 s in, a command every 8 s, then time for the edge to settle. */
 const FIRST_MOVE_AT = 20;
 const THINKING_SECONDS = 8;
@@ -426,5 +427,53 @@ describe("credential-stuffing-hosting", () => {
     const loose = trapped(scenario, "waf ratelimit 60/1m");
     expect(attackBlocked(loose)).toBeCloseTo(0.42, 2);
     expect(loose.cluster.errorRate).toBeGreaterThan(0.05);
+  });
+});
+
+describe("card-testing-soar", () => {
+  const scenario = cardTestingSoar;
+  /** What the playbook's (or anyone's) top-500 block does here: a third of the customers, a few percent of the testers. */
+  const expectTop500 = (incident: Incident) => {
+    expect(customersBlocked(incident)).toBeGreaterThan(0.35);
+    expect(customersBlocked(incident)).toBeLessThan(0.36);
+    expect(attackBlocked(incident)).toBeLessThan(0.035);
+  };
+  const correct = () => closeOut(scenario, solved(scenario)).result;
+
+  it("hides the testers below hundreds of customer addresses, and in one hosting /16 by network", () => {
+    const opened = openIncident(scenario);
+    expect(shellText(scenario, "waf top 100", opened)).not.toContain("hosting");
+    expect(shellText(scenario, "waf top --by asn", opened)).toMatch(/^AS213230\s+HETZNER-CLOUD2-AS\s+hosting \/ datacenter\s+4,000\s+[\d,]+\s+\S+%\s+5\.161\.0\.0\/16$/m);
+    expect(shellText(scenario, `siem show ${CARD_TESTING_ALERT}`, opened)).toContain("Searches:  siem search card-velocity");
+  });
+
+  it("blocking the top 500 by hand turns away 35% of customers and barely touches the testers", () => {
+    const blunt = trapped(scenario, "waf block --top 500");
+    expectTop500(blunt);
+    const { result } = closeOut(scenario, blunt);
+    expect(securityObjective(result)?.isMet).toBe(false);
+    expect(result.points).toBeLessThan(correct().points - 50);
+  });
+
+  it("a plain true positive runs the playbook's top-500 block at once", () => {
+    const plain = trapped(scenario, `siem resolve ${CARD_TESTING_ALERT} --disposition true-positive`);
+    expect(commerceOf(plain).wafRules.at(-1)?.createdBy).toContain("soar:playbook");
+    expectTop500(plain);
+    expect(plain.cluster.errorRate).toBeLessThan(0.05);
+    expect(securityObjective(closeOut(scenario, plain).result)?.isMet).toBe(false);
+  });
+
+  it("even after the right block, a plain true positive still runs the playbook", () => {
+    const both = trapped(scenario, `waf block ${TESTER_RANGE}`, `siem resolve ${CARD_TESTING_ALERT} --disposition true-positive`);
+    expect(attackBlocked(both)).toBe(1);
+    expect(customersBlocked(both)).toBeGreaterThan(0.35);
+  });
+
+  it("waiting past the timer lets the playbook block the top 500 by itself", () => {
+    const before = playTo(scenario, AUTO_CONTAIN_AT - 1, openIncident(scenario));
+    expect(customersBlocked(before)).toBe(0);
+    const after = playTo(scenario, AUTO_CONTAIN_AT + 1, before);
+    expectTop500(after);
+    expect(after.cluster.logs.waf?.at(-1)?.text).toContain("soar:playbook/auto-contain");
   });
 });

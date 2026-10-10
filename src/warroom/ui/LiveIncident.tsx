@@ -15,6 +15,7 @@ import { ServiceMap } from "./ServiceMap.tsx";
 import { Terminal } from "./Terminal.tsx";
 import { loadFloor } from "./floorLoader.ts";
 import { promptFor, suggestionsFor } from "./laptop-identity.ts";
+import type { PlayerPresence } from "../floor/interactions/presence.ts";
 import type { IncidentFeed, Teammate, TeamActivity } from "./feed.ts";
 import { useIncident } from "./useIncident.ts";
 
@@ -39,7 +40,7 @@ export type TeamContext = {
   readonly selfId: string;
   readonly teammates: readonly Teammate[];
   readonly activity: readonly TeamActivity[];
-  onPresence(position: { x: number; z: number; yaw: number }): void;
+  onPresence(presence: PlayerPresence): void;
 };
 
 /** Solo play: the incident runs here, in the browser. */

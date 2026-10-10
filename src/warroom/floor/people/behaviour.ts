@@ -16,6 +16,8 @@ export const PANIC_THRESHOLD = 0.5;
 const CALM_STANDING: Readonly<Record<StandingActivity, ClipName>> = {
   chatting: "talk",
   "on-phone": "phone",
+  // Hands up in front of the chest, eyes down: the same pose holds an open laptop.
+  "on-laptop": "phone",
   presenting: "talk",
   waiting: "idle",
 };
@@ -31,7 +33,7 @@ export function motionFor(situation: Situation, panic: number, reduceMotion: boo
       return { clip: isPanicked ? "talk-nervous" : "talk", speed: 0 };
     case "standing":
       // Under an outage the phone comes out and everyone talks at once.
-      if (isPanicked) return { clip: situation.activity === "on-phone" ? "phone" : "talk-nervous", speed: 0 };
+      if (isPanicked) return { clip: situation.activity === "on-phone" || situation.activity === "on-laptop" ? "phone" : "talk-nervous", speed: 0 };
       return { clip: CALM_STANDING[situation.activity], speed: 0 };
   }
 }

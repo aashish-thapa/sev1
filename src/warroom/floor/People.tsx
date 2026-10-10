@@ -14,6 +14,7 @@ import { easeSidestep, rightOf, sidestepFor, type Crowd } from "./people/crowd.t
 import { SpeechBubble } from "./people/SpeechBubble.tsx";
 import { StandIn } from "./people/StandIn.tsx";
 import { follow, STILL_SPEED, type Follower } from "./people/follow.ts";
+import { HeldLaptop } from "./people/HeldLaptop.tsx";
 import { useVisit } from "./people/useVisit.ts";
 import type { Conversation } from "./interactions/useSmallTalk.ts";
 
@@ -157,28 +158,41 @@ export function Teammates({ teammates, reduceMotion }: { teammates: readonly Tea
   );
 }
 
+/** Standing, the laptop is held at chest height; seated, it's open on the desk in front of them. */
+const LAPTOP_IN_HANDS = [0, 1.08, 0.3] as const;
+const LAPTOP_ON_DESK = [0, 0.76, 0.42] as const;
+/** A seated head sits lower, and so does the name tag above it. */
+const SEATED_TAG_DROP = 0.42;
+
+function statusOf(position: Teammate["position"]): string | null {
+  if (position?.isOnLaptop) return "on laptop";
+  return position?.stance === "seated" ? "at their desk" : null;
+}
+
 function TeammateModel({ teammate, reduceMotion }: { teammate: Teammate; reduceMotion: boolean }) {
   const body = useRef<Group>(null);
   const target = teammate.position;
+  const isSeated = target?.stance === "seated";
+  const isOnLaptop = target?.isOnLaptop ?? false;
   const follower = useRef<Follower>({ x: target?.x ?? 0, z: target?.z ?? 0, speed: 0 });
   const badge = teammate.badge === null ? undefined : badgeById(teammate.badge);
-  const tag = useMemo(
-    () =>
-      badge
-        ? bubbleTexture(teammate.name, `${teammate.roleLabel} · ${badge.title}`, { glyph: badge.glyph, colorToken: `--color-tier-${badge.tier}` })
-        : bubbleTexture(teammate.name, teammate.roleLabel),
-    [badge, teammate.name, teammate.roleLabel],
-  );
+  const status = statusOf(target);
+  const tag = useMemo(() => {
+    const line = [teammate.roleLabel, status, badge?.title].filter(Boolean).join(" · ");
+    return badge ? bubbleTexture(teammate.name, line, { glyph: badge.glyph, colorToken: `--color-tier-${badge.tier}` }) : bubbleTexture(teammate.name, line);
+  }, [badge, status, teammate.name, teammate.roleLabel]);
   useEffect(() => () => tag.dispose(), [tag]);
   const motion = () => {
     const { speed } = follower.current;
-    return motionFor(speed > STILL_SPEED ? { state: "walking", speed } : { state: "standing", activity: "waiting" }, 0, reduceMotion);
+    if (isSeated) return motionFor({ state: "seated" }, 0, reduceMotion);
+    if (speed > STILL_SPEED) return motionFor({ state: "walking", speed }, 0, reduceMotion);
+    return motionFor({ state: "standing", activity: isOnLaptop ? "on-laptop" : "waiting" }, 0, reduceMotion);
   };
 
   useFrame((_, delta) => {
     const group = body.current;
     if (!group || !target) return;
-    // Presence arrives ~10×/s; easing toward it makes movement read as walking, and gives the legs a real speed.
+    // Presence arrives a few times a second; easing toward it makes movement read as walking, and gives the legs a real speed.
     follower.current = follow(follower.current, target, delta);
     group.position.x = follower.current.x;
     group.position.z = follower.current.z;
@@ -193,7 +207,8 @@ function TeammateModel({ teammate, reduceMotion }: { teammate: Teammate; reduceM
       <Suspense fallback={<StandIn isSeated={false} />}>
         <Avatar id={avatarFor(teammate.id)} motion={motion} />
       </Suspense>
-      <sprite position={[0, HEAD_HEIGHT + 0.37, 0]} scale={[0.3 * aspect, 0.3, 1]}>
+      {isOnLaptop && <HeldLaptop position={isSeated ? LAPTOP_ON_DESK : LAPTOP_IN_HANDS} />}
+      <sprite position={[0, HEAD_HEIGHT + 0.37 - (isSeated ? SEATED_TAG_DROP : 0), 0]} scale={[0.3 * aspect, 0.3, 1]}>
         <spriteMaterial map={tag} transparent depthWrite={false} />
       </sprite>
     </group>

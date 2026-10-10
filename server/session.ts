@@ -76,7 +76,7 @@ export function openSession({ connection, rooms, findScenario, logger }: Session
         seated = null;
         return;
       case "presence":
-        return inRoom((room, playerId) => room.presence(playerId, { x: message.x, z: message.z, yaw: message.yaw }));
+        return inRoom((room, playerId) => room.presence(playerId, { x: message.x, z: message.z, yaw: message.yaw, stance: message.stance, isOnLaptop: message.isOnLaptop }));
       case "command":
         return inRoom((room, playerId) => room.command(playerId, message.line));
       case "declare":

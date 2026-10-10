@@ -1,4 +1,5 @@
 import type { Incident } from "../incident.ts";
+import type { PlayerPresence } from "../floor/interactions/presence.ts";
 import type { CommsMessage } from "../scenario.ts";
 import type { TerminalLine } from "./useIncident.ts";
 
@@ -23,7 +24,8 @@ export type Teammate = {
   readonly roleLabel: string;
   /** The badge they chose to show (an achievements catalog id), or null. */
   readonly badge: string | null;
-  readonly position: { readonly x: number; readonly z: number; readonly yaw: number } | null;
+  /** Where they are and what they're doing; null until their first update arrives. */
+  readonly position: PlayerPresence | null;
 };
 
 /** One line in the team activity feed: who ran what. */

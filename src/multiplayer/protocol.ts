@@ -37,8 +37,12 @@ export const PositionSchema = z.object({
   x: z.number().min(-MAX_COORDINATE).max(MAX_COORDINATE),
   z: z.number().min(-MAX_COORDINATE).max(MAX_COORDINATE),
   yaw: z.number().min(-4 * Math.PI).max(4 * Math.PI),
+  /** Seated players report their chair and the desk's heading, so others see them at the desk. */
+  stance: z.enum(["standing", "seated"]).default("standing"),
+  /** Laptop open: teammates see them working on it. */
+  isOnLaptop: z.boolean().default(false),
 });
-export type Position = z.infer<typeof PositionSchema>;
+export type Position = z.output<typeof PositionSchema>;
 
 const ResumeSchema = z.object({ playerId: PlayerIdSchema, token: z.string().min(1).max(128) });
 export type Resume = z.infer<typeof ResumeSchema>;

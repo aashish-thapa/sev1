@@ -249,7 +249,7 @@ export const NAV_EDGES: readonly (readonly [string, string])[] = [
 // ── People ────────────────────────────────────────────────────────
 
 /** What someone standing still is doing — it picks their animation. */
-export type StandingActivity = "chatting" | "on-phone" | "presenting" | "waiting";
+export type StandingActivity = "chatting" | "on-phone" | "on-laptop" | "presenting" | "waiting";
 
 export type Person =
   | { readonly kind: "seated"; readonly id: string; readonly desk: Desk; readonly avatar: AvatarId }

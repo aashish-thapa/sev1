@@ -25,6 +25,7 @@ import { StickyWallPanel } from "./interactions/StickyWallPanel.tsx";
 import type { Usable } from "./interactions/usable.ts";
 import { useCoffee } from "./interactions/useCoffee.ts";
 import { useSeating } from "./interactions/useSeating.ts";
+import { hasPresenceChanged, presenceOf, type PlayerPresence } from "./interactions/presence.ts";
 import { useSmallTalk } from "./interactions/useSmallTalk.ts";
 import { useStandup } from "./interactions/useStandup.ts";
 import { useStickyWall } from "./interactions/useStickyWall.ts";
@@ -63,7 +64,8 @@ type Props = {
   /** Other players in a shared room. */
   teammates?: readonly Teammate[];
   /** Your own position, for teammates to see (the room client throttles it). */
-  onPresence?: (position: { x: number; z: number; yaw: number }) => void;
+  /** What teammates should see of you; sent whenever it changes. */
+  onPresence?: (presence: PlayerPresence) => void;
   /** Picks your own body; teammates derive the same avatar from the same seed. */
   selfAvatarSeed: string;
   /** An incident is live and it's yours: the floor points you back to your desk. */
@@ -107,6 +109,12 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
   const wrapper = useRef<HTMLDivElement>(null);
   const [start] = useState(() => startFor(role));
   const isLaptopOpenRef = useRef(isLaptopOpen);
+  // Only the laptop (not overlays or the note wall) shows on your body for teammates.
+  const isOnLaptopRef = useRef(isLaptopOpen);
+  const lastPresence = useRef<PlayerPresence | null>(null);
+  useEffect(() => {
+    isOnLaptopRef.current = isLaptopOpen;
+  }, [isLaptopOpen]);
   // Racks are laid out around their own origin, then wheeled into the data-centre room.
   const racks = useMemo(
     () =>
@@ -137,6 +145,7 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
   const getPlayer = useCallback(() => controls.current.player, []);
   const career = useCareer();
   const seating = useSeating(getPlayer);
+  const readStance = seating.readStance;
   const coffee = useCoffee();
   const smallTalk = useSmallTalk(panic);
   const noteWall = useStickyWall();
@@ -207,14 +216,18 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
       const isAway = Math.hypot(player.x - PLAYER_DESK.x, player.z - PLAYER_DESK.z) > DESK_HINT_DISTANCE;
       setAwayFromDesk((current) => (current === isAway ? current : isAway));
       const moved = Math.hypot(player.x - previous.x, player.z - previous.z);
-      if (moved > 0.001 || Math.abs(player.yaw - previous.yaw) > 0.01) onPresence?.({ x: player.x, z: player.z, yaw: player.yaw });
+      const presence = presenceOf(player, readStance(), isOnLaptopRef.current);
+      if (hasPresenceChanged(lastPresence.current, presence)) {
+        lastPresence.current = presence;
+        onPresence?.(presence);
+      }
       strideLeft.current -= moved;
       if (strideLeft.current <= 0) {
         strideLeft.current = STRIDE_METRES;
         onStep?.(where.surface);
       }
     },
-    [onPresence, onStep, onWhereabouts],
+    [onPresence, onStep, onWhereabouts, readStance],
   );
   const moveStick = useCallback((x: number, y: number) => {
     controls.current.stick = { x, y };

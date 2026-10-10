@@ -71,3 +71,24 @@ describe("server audit of purchases", () => {
     expect(purchaseRef(purchase)).toBe(`solution:scaled-to-zero:${AT}`);
   });
 });
+
+describe("company money in the wallet", () => {
+  it("spends a company seed once under its funding ref, and refuses when short", async () => {
+    const { fundCompany } = await import("./purchases.ts");
+    const before = richPlayer(1);
+    const funded = fundCompany(before.wallet, "company:fund:c1:n1", 10_000, AT);
+    if (!funded.ok) throw new Error("expected the seed to be spent");
+    expect(funded.wallet.balanceCents).toBe(before.wallet.balanceCents - 10_000);
+    expect(funded.wallet.spentCents.company).toBe(10_000);
+    expect(fundCompany(funded.wallet, "company:fund:c1:n1", 10_000, AT)).toEqual({ ok: true, wallet: funded.wallet });
+    expect(fundCompany(before.wallet, "company:fund:c2:n2", before.wallet.balanceCents + 1, AT)).toEqual({ ok: false, shortByCents: 1 });
+  });
+
+  it("earns a payout once, however many times it's claimed", async () => {
+    const { earnPayroll } = await import("./purchases.ts");
+    const payout = { id: "c1:1:u1", amountCents: 12_000, workDay: 1 };
+    const once = earnPayroll(richPlayer(0).wallet, payout, AT);
+    expect(once.earnedCents.payroll).toBe(12_000);
+    expect(earnPayroll(once, payout, AT)).toBe(once);
+  });
+});

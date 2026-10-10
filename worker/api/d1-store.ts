@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Title } from "../../src/domain/career.ts";
-import type { AccountStore, LedgerRow, RankedAccount, SavedProgress, Standing, User } from "./store.ts";
+import { companyMoveStatements } from "../company/d1-store.ts";
+import { NO_COMPANY_MOVES, type AccountStore, type CompanyMoves, type LedgerRow, type RankedAccount, type SavedProgress, type Standing, type User } from "./store.ts";
 
 const TagsSchema = z.array(z.string().min(1).max(40)).max(16);
 
@@ -63,7 +64,7 @@ export class D1AccountStore implements AccountStore {
     return row ? { body: row.body, updatedAt: row.updated_at } : null;
   }
 
-  async saveProgress(userId: string, progress: SavedProgress, standing: Standing, credits: readonly LedgerRow[]): Promise<void> {
+  async saveProgress(userId: string, progress: SavedProgress, standing: Standing, credits: readonly LedgerRow[], moves: CompanyMoves = NO_COMPANY_MOVES): Promise<void> {
     // One batch is one transaction: the saved wallet, its standing and the books never disagree.
     await this.db.batch([
       this.db
@@ -77,6 +78,7 @@ export class D1AccountStore implements AccountStore {
           .prepare("INSERT INTO ledger (id, user_id, amount_cents, reason, source_ref, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, source_ref) DO NOTHING")
           .bind(credit.id, userId, credit.amountCents, credit.reason, credit.sourceRef, credit.createdAt),
       ),
+      ...companyMoveStatements(this.db, userId, moves, progress.updatedAt),
     ]);
   }
 

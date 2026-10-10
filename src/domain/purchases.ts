@@ -4,7 +4,7 @@
  * senior you are. A bought solution makes the run assisted: no bonus, no experience.
  */
 import type { Level } from "./career.ts";
-import { LEDGER_LIMIT, type LedgerEntry, type Wallet } from "./economy.ts";
+import { LEDGER_LIMIT, pay, payRef, type LedgerEntry, type SpendReason, type Wallet } from "./economy.ts";
 
 export type SolutionTier = 1 | 2 | 3 | 4 | 5;
 
@@ -40,26 +40,37 @@ export type SpendOutcome = { readonly ok: true; readonly wallet: Wallet } | { re
 
 /** Charges for a purchase once. Already bought under this ref: the wallet comes back unchanged. */
 export function spend(wallet: Wallet, purchase: SolutionPurchase, at: number): SpendOutcome {
-  const ref = purchaseRef(purchase);
-  if (wallet.ledger.some((entry) => entry.ref === ref)) return { ok: true, wallet };
   const price = solutionPriceCents(purchase.tier, purchase.level);
-  if (price > wallet.balanceCents) return { ok: false, shortByCents: price - wallet.balanceCents };
-  const entry: LedgerEntry = {
-    seq: wallet.nextSeq,
-    at,
-    reason: purchase.kind,
-    ref,
-    amountCents: -price,
-    units: 1,
-    note: `Solution bought · ${purchase.title}`.slice(0, 120),
-  };
+  return charge(wallet, { reason: purchase.kind, ref: purchaseRef(purchase), cents: price, note: `Solution bought · ${purchase.title}` }, at);
+}
+
+/**
+ * Puts your money into a company: the server issued `fundingRef` and the exact amount, and credits
+ * the company when this spend reaches it in a save. Spending again under the same ref changes nothing.
+ */
+export function fundCompany(wallet: Wallet, fundingRef: string, cents: number, at: number): SpendOutcome {
+  if (!Number.isInteger(cents) || cents <= 0) return { ok: false, shortByCents: 0 };
+  return charge(wallet, { reason: "company", ref: fundingRef, cents, note: "Invested in your company" }, at);
+}
+
+/** Pay a company booked for you, earned into the wallet once under `payroll:<id>`. */
+export function earnPayroll(wallet: Wallet, payout: { readonly id: string; readonly amountCents: number; readonly workDay: number }, at: number): Wallet {
+  return pay(wallet, { kind: "payroll", ref: payRef.payroll(payout.id), amountCents: payout.amountCents, workDay: payout.workDay }, at);
+}
+
+type Charge = { readonly reason: SpendReason; readonly ref: string; readonly cents: number; readonly note: string };
+
+function charge(wallet: Wallet, { reason, ref, cents, note }: Charge, at: number): SpendOutcome {
+  if (wallet.ledger.some((entry) => entry.ref === ref)) return { ok: true, wallet };
+  if (cents > wallet.balanceCents) return { ok: false, shortByCents: cents - wallet.balanceCents };
+  const entry: LedgerEntry = { seq: wallet.nextSeq, at, reason, ref, amountCents: -cents, units: 1, note: note.slice(0, 120) };
   return {
     ok: true,
     wallet: {
       ...wallet,
-      balanceCents: wallet.balanceCents - price,
-      spentCents: { ...wallet.spentCents, solution: wallet.spentCents.solution + price },
-      boughtUnits: { ...wallet.boughtUnits, solution: wallet.boughtUnits.solution + 1 },
+      balanceCents: wallet.balanceCents - cents,
+      spentCents: { ...wallet.spentCents, [reason]: wallet.spentCents[reason] + cents },
+      boughtUnits: { ...wallet.boughtUnits, [reason]: wallet.boughtUnits[reason] + 1 },
       nextSeq: wallet.nextSeq + 1,
       ledger: [...wallet.ledger, entry].slice(-LEDGER_LIMIT),
     },

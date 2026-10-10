@@ -1,17 +1,18 @@
 import { z } from "zod";
 import { featuredBadge } from "../../src/domain/achievements.ts";
-import { isPlausibleProgress, type TierOf } from "../../src/domain/audit.ts";
+import { isPlausibleProgress, NO_COMPANY_CLAIMS, type TierOf } from "../../src/domain/audit.ts";
 import { careerLevel } from "../../src/domain/career.ts";
+import { payRef } from "../../src/domain/economy.ts";
 import { shownTags } from "../../src/domain/tags.ts";
 import { emptyProgress, ProgressSchema, type Progress } from "../../src/domain/progress.ts";
 import type { Account, SyncedProgress } from "../../src/storage/account-protocol.ts";
 import { LEADERBOARD_SIZE, type Leaderboard } from "../../src/storage/leaderboard-protocol.ts";
 import { hashPassword, verifyPassword } from "./password.ts";
-import type { AccountStore, LedgerRow, Standing, User } from "./store.ts";
+import type { AccountStore, CompanyBank, CompanyMoves, LedgerRow, Standing, User } from "./store.ts";
 import { hashToken, newSessionToken } from "./tokens.ts";
 
 export const SESSION_SECONDS = 30 * 24 * 60 * 60;
-const ATTEMPT_WINDOW_MS = 15 * 60_000;
+export const ATTEMPT_WINDOW_MS = 15 * 60_000;
 /** Per username and per address, per window: enough for typos, too few to guess a password. */
 const LOGIN_ATTEMPTS_PER_USER = 10;
 const LOGIN_ATTEMPTS_PER_ADDRESS = 40;
@@ -35,6 +36,17 @@ export type SaveResult = { readonly ok: true; readonly updatedAt: number } | { r
 
 type Clock = () => number;
 
+/** Seeds and payroll claims new in this save, for the company books to settle alongside it. */
+function companyMovesOf(previous: Progress, next: Progress): CompanyMoves {
+  const fresh = next.wallet.ledger.filter((entry) => entry.seq >= previous.wallet.nextSeq);
+  return {
+    fundingRefs: fresh.filter((entry) => entry.reason === "company").map((entry) => entry.ref),
+    payoutIds: fresh.filter((entry) => entry.reason === "payroll").map((entry) => entry.ref.slice(PAYROLL_REF_PREFIX.length)),
+  };
+}
+
+const PAYROLL_REF_PREFIX = payRef.payroll("");
+
 /** What the client may know about an account. */
 export function accountOf(user: User): Account {
   return { username: user.username, tags: [...user.tags] };
@@ -52,11 +64,14 @@ export class AccountService {
   private readonly now: Clock;
   /** Prices solutions bought in a synced save; without it, purchases are refused. */
   private readonly tierOf: TierOf | undefined;
+  /** What companies are waiting for from or owe each player; without it, company money in a save is refused. */
+  private readonly bank: CompanyBank | undefined;
 
-  constructor(store: AccountStore, now: Clock, tierOf?: TierOf) {
+  constructor(store: AccountStore, now: Clock, tierOf?: TierOf, bank?: CompanyBank) {
     this.store = store;
     this.now = now;
     this.tierOf = tierOf;
+    this.bank = bank;
   }
 
   /** Creates the account and, when it's plausible, keeps the progress earned before signing up. */
@@ -109,9 +124,11 @@ export class AccountService {
     const current = await this.progressOf(user);
     const since = current?.updatedAt ?? user.createdAt;
     const elapsedSeconds = Math.max(0, (this.now() - since) / 1000);
-    if (!isPlausibleProgress(current?.progress ?? emptyProgress(), next, elapsedSeconds, this.tierOf)) return { ok: false, current };
+    const previous = current?.progress ?? emptyProgress();
+    const claims = this.bank ? await this.bank.claimsFor(user.id, this.now()) : NO_COMPANY_CLAIMS;
+    if (!isPlausibleProgress(previous, next, elapsedSeconds, this.tierOf, claims)) return { ok: false, current };
     const updatedAt = this.now();
-    await this.store.saveProgress(user.id, { body: JSON.stringify(next), updatedAt }, standingOf(next), this.creditsSince(current?.progress ?? emptyProgress(), next));
+    await this.store.saveProgress(user.id, { body: JSON.stringify(next), updatedAt }, standingOf(next), this.creditsSince(previous, next), companyMovesOf(previous, next));
     return { ok: true, updatedAt };
   }
 

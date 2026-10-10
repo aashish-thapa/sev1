@@ -2,7 +2,39 @@
 import { z } from "zod";
 import { ProgressSchema } from "../domain/progress.ts";
 
-export const API_ERRORS = ["invalid", "username_taken", "bad_credentials", "rate_limited", "signed_out", "rejected", "forbidden", "not_found", "billing_unavailable", "no_subscription", "already_subscribed", "payment_provider"] as const;
+/** Startup-mode refusals, one code per rule the server enforced (see worker/company/service.ts). */
+export const COMPANY_ERRORS = [
+  "not_in_company",
+  "not_founder",
+  "not_active",
+  "already_in_company",
+  "below_founding_minimum",
+  "below_minimum",
+  "no_free_desk",
+  "not_enough_funds",
+  "no_free_rack",
+  "unknown_user",
+  "self_invite",
+  "already_invited",
+  "invitation_not_found",
+  "already_settled_today",
+] as const;
+
+export const API_ERRORS = [
+  "invalid",
+  "username_taken",
+  "bad_credentials",
+  "rate_limited",
+  "signed_out",
+  "rejected",
+  "forbidden",
+  "not_found",
+  "billing_unavailable",
+  "no_subscription",
+  "already_subscribed",
+  "payment_provider",
+  ...COMPANY_ERRORS,
+] as const;
 export type ApiError = (typeof API_ERRORS)[number];
 
 /** `tags` are granted marks such as "creator"; older servers omit them. */

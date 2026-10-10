@@ -25,7 +25,7 @@ const TIME_SLACK = 1.25;
 const EVENT_ALLOWANCE = 2;
 const MAX_INCIDENT_CENTS = 100 * INCIDENT_CENTS_PER_POINT;
 const MAX_CARD_CENTS = Math.max(...Object.values(CARD_BONUS_CENTS));
-const EARN_REASONS = ["salary", "card", "incident"] as const satisfies readonly PayReason[];
+const EARN_REASONS = ["salary", "card", "incident", "payroll"] as const satisfies readonly PayReason[];
 
 /** Looks up the tier of a scenario by id; the Worker answers from the scenario registry. */
 export type TierOf = (scenarioId: string) => SolutionTier | undefined;
@@ -33,15 +33,28 @@ export type TierOf = (scenarioId: string) => SolutionTier | undefined;
 /** With no registry, nothing can be bought — every purchase line is rejected. */
 const NO_TIERS: TierOf = () => undefined;
 
-/** Is a purchase line charged at least the price for its scenario at the buyer's level? */
-type FairPrice = (entry: LedgerEntry) => boolean;
+/**
+ * Money the server has promised to move for this player, by wallet ref: company fundings it is
+ * waiting for (the exact seed each) and payroll it booked and not yet paid. Loaded before the audit,
+ * so the audit itself stays pure.
+ */
+export type CompanyClaims = {
+  readonly fundings: ReadonlyMap<string, number>;
+  readonly payouts: ReadonlyMap<string, number>;
+};
+
+export const NO_COMPANY_CLAIMS: CompanyClaims = { fundings: new Map(), payouts: new Map() };
+
+/** Does the server stand behind this new ledger line (a purchase it can price, or pay it booked)? */
+type Vouch = (entry: LedgerEntry) => boolean;
 
 export function isPlausibleWallet(
   previous: Wallet,
   next: Wallet,
   elapsedSeconds: number,
   topLevel: Level = 4,
-  isFairPrice: FairPrice = () => false,
+  isAllowedSpend: Vouch = () => false,
+  isBookedPay: Vouch = () => false,
 ): boolean {
   if (!(elapsedSeconds >= 0)) return false;
   const seconds = elapsedSeconds * TIME_SLACK;
@@ -72,8 +85,15 @@ export function isPlausibleWallet(
   if (incidents > seconds / MIN_SECONDS_PER_INCIDENT + EVENT_ALLOWANCE) return false;
   if (delta("incident", "earnedCents") > incidents * MAX_INCIDENT_CENTS) return false;
 
-  const purchases = freshLines(previous, next).filter((entry) => (SPEND_REASONS as readonly string[]).includes(entry.reason));
-  if (purchases.some((entry) => entry.amountCents >= 0 || !isFairPrice(entry))) return false;
+  const fresh = freshLines(previous, next);
+  const purchases = fresh.filter((entry) => (SPEND_REASONS as readonly string[]).includes(entry.reason));
+  if (purchases.some((entry) => entry.amountCents >= 0 || !isAllowedSpend(entry))) return false;
+  // Payroll comes only from payouts the server booked, and each new cent of it must be one of those lines.
+  const payroll = fresh.filter((entry) => entry.reason === "payroll");
+  if (payroll.some((entry) => entry.amountCents <= 0 || !isBookedPay(entry))) return false;
+  if (delta("payroll", "earnedCents") !== payroll.reduce((sum, entry) => sum + entry.amountCents, 0)) return false;
+  const companySpend = purchases.filter((entry) => entry.reason === "company").reduce((sum, entry) => sum - entry.amountCents, 0);
+  if (next.spentCents.company - previous.spentCents.company !== companySpend) return false;
 
   return isLedgerConsistent(previous, next);
 }
@@ -82,23 +102,32 @@ export function isPlausibleWallet(
  * Is `next` an honest successor of `previous` after `elapsedSeconds`? `tierOf` prices any
  * solutions bought in between; without it, a save containing a new purchase is refused.
  */
-export function isPlausibleProgress(previous: Progress, next: Progress, elapsedSeconds: number, tierOf: TierOf = NO_TIERS): boolean {
+export function isPlausibleProgress(
+  previous: Progress,
+  next: Progress,
+  elapsedSeconds: number,
+  tierOf: TierOf = NO_TIERS,
+  company: CompanyClaims = NO_COMPANY_CLAIMS,
+): boolean {
   // Career level reads correctCards and passed War Rooms, so each may only grow by work that was also paid for.
   const newCorrect = next.correctCards - previous.correctCards;
   const newPaidCards = next.wallet.paidUnits.card - previous.wallet.paidUnits.card;
   const newPaidIncidents = next.wallet.paidUnits.incident - previous.wallet.paidUnits.incident;
   const lowestLevel = careerLevel(previous).level;
-  const isFairPrice: FairPrice = (entry) => {
+  const isAllowedSpend: Vouch = (entry) => {
+    // A company seed must be exactly what the server is waiting for, under the ref it issued.
+    if (entry.reason === "company") return company.fundings.get(entry.ref) === -entry.amountCents;
     const scenarioId = scenarioOfPurchase(entry.ref);
     const tier = scenarioId === null ? undefined : tierOf(scenarioId);
     // Price rises with level, so charging at the level the buyer started this sync from is the floor.
     return tier !== undefined && -entry.amountCents >= solutionPriceCents(tier, lowestLevel);
   };
+  const isBookedPay: Vouch = (entry) => company.payouts.get(entry.ref) === entry.amountCents;
   return (
     newCorrect >= 0 &&
     newCorrect <= newPaidCards &&
     improvedPassingWarRooms(previous, next) <= newPaidIncidents &&
-    isPlausibleWallet(previous.wallet, next.wallet, elapsedSeconds, careerLevel(next).level, isFairPrice)
+    isPlausibleWallet(previous.wallet, next.wallet, elapsedSeconds, careerLevel(next).level, isAllowedSpend, isBookedPay)
   );
 }
 

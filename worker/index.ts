@@ -1,5 +1,5 @@
 import { findScenario } from "../server/scenarios.ts";
-import { AccountService } from "./api/accounts.ts";
+import { AccountService, ATTEMPT_WINDOW_MS } from "./api/accounts.ts";
 import { D1AccountStore } from "./api/d1-store.ts";
 import { handleApi } from "./api/routes.ts";
 import { D1EntitlementStore } from "./billing/d1-store.ts";
@@ -10,6 +10,10 @@ import { PUBLIC_ROOMS_PATH, type PublicRoomList } from "../src/multiplayer/proto
 import { DIRECTORY_NAME } from "./directory-object.ts";
 import type { Env } from "./env.ts";
 import { routeRoomSocket } from "./rooms.ts";
+import { D1CompanyStore } from "./company/d1-store.ts";
+import { handleCompany, INVITATIONS_PATH } from "./company/routes.ts";
+import { CompanyService } from "./company/service.ts";
+import { COMPANY_PATH } from "../src/storage/company-protocol.ts";
 import { D1AdminStore } from "./admin/d1-store.ts";
 import { ADMIN_PREFIX, handleAdmin } from "./admin/routes.ts";
 import { AdminService } from "./admin/service.ts";
@@ -26,6 +30,9 @@ function billingFor(env: Env, store: D1EntitlementStore): BillingService | null 
 export { DirectoryObject } from "./directory-object.ts";
 export { RoomObject } from "./room-object.ts";
 
+/** Company writes (found, buy, invite, pay, settle) one account may make per attempt window. */
+const COMPANY_WRITES_PER_WINDOW = 60;
+
 /** Composition root: rooms, the account API, and everything else from the built site. */
 export default {
   async fetch(request, env) {
@@ -39,8 +46,22 @@ export default {
       return Response.json(list, { headers: { "cache-control": "no-store" } });
     }
     if (pathname.startsWith("/api/")) {
-      const accounts = new AccountService(new D1AccountStore(env.DB), Date.now, (id) => findScenario(id)?.tier);
+      const companyStore = new D1CompanyStore(env.DB);
+      const accountStore = new D1AccountStore(env.DB);
+      const accounts = new AccountService(accountStore, Date.now, (id) => findScenario(id)?.tier, companyStore);
       const entitlements = new D1EntitlementStore(env.DB);
+      if (pathname === COMPANY_PATH || pathname.startsWith(`${COMPANY_PATH}/`) || pathname.startsWith(`${INVITATIONS_PATH}/`)) {
+        const companies = new CompanyService({
+          store: companyStore,
+          now: Date.now,
+          newId: () => crypto.randomUUID(),
+          isOverLimit: async (key) => {
+            const windowStart = Math.floor(Date.now() / ATTEMPT_WINDOW_MS) * ATTEMPT_WINDOW_MS;
+            return (await accountStore.countAttempt(key, windowStart)) > COMPANY_WRITES_PER_WINDOW;
+          },
+        });
+        return handleCompany(request, accounts, companies);
+      }
       if (pathname.startsWith(ADMIN_PREFIX)) {
         const store = new D1AccountStore(env.DB);
         const admin = new AdminService({

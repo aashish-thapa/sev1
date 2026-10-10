@@ -10,6 +10,9 @@ import { PUBLIC_ROOMS_PATH, type PublicRoomList } from "../src/multiplayer/proto
 import { DIRECTORY_NAME } from "./directory-object.ts";
 import type { Env } from "./env.ts";
 import { routeRoomSocket } from "./rooms.ts";
+import { D1AdminStore } from "./admin/d1-store.ts";
+import { ADMIN_PREFIX, handleAdmin } from "./admin/routes.ts";
+import { AdminService } from "./admin/service.ts";
 import { shownTags } from "../src/domain/tags.ts";
 import { sessionTokenOf } from "./api/http.ts";
 
@@ -38,6 +41,16 @@ export default {
     if (pathname.startsWith("/api/")) {
       const accounts = new AccountService(new D1AccountStore(env.DB), Date.now, (id) => findScenario(id)?.tier);
       const entitlements = new D1EntitlementStore(env.DB);
+      if (pathname.startsWith(ADMIN_PREFIX)) {
+        const store = new D1AccountStore(env.DB);
+        const admin = new AdminService({
+          store: new D1AdminStore(env.DB),
+          topAccounts: (limit) => store.topAccounts(limit),
+          publicRooms: async () => (await env.DIRECTORY.getByName(DIRECTORY_NAME).list()).length,
+          now: Date.now,
+        });
+        return handleAdmin(request, accounts, admin);
+      }
       if (pathname.startsWith(BILLING_PREFIX)) return handleBilling(request, accounts, billingFor(env, entitlements));
       return handleApi(request, accounts, (userId) => entitlements.entitlementsOf(userId));
     }

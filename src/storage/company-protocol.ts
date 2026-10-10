@@ -183,6 +183,12 @@ export const CompanySummarySchema = z.object({
   lifetimeRevenueCents: Cents,
   /** Open postings only. */
   postings: z.array(PostingSchema).max(20),
+  /** What it's worth now (see domain/company/valuation.ts); older servers omit it. */
+  valuationCents: Cents.default(0),
+  /** Worth at each of the last 30 work days, oldest first: the market's view of how it's doing. */
+  valuationHistory: z.array(z.object({ workDay: Count, valuationCents: Cents })).max(30).default([]),
+  /** Change over the last 7 work days in basis points; null until it has a week behind it. */
+  weekChangeBps: z.int().nullable().default(null),
 });
 export type CompanySummary = z.output<typeof CompanySummarySchema>;
 

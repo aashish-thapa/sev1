@@ -316,6 +316,45 @@ export const checkoutMeltdown: Scenario = {
     { at: 190, from: "Grace Liu · Finance", text: "The revenue dashboard says the sale is way ahead of forecast but paid orders are down. Which is real? I need a refund list before people start filing disputes — each chargeback costs us $15." },
     { at: 260, from: "Elena Ruiz · VP Engineering", text: "The sale email goes to 2M inboxes at 10:30. What do we need to stop, and who owns it?" },
   ],
+  hints: [
+    "This is several problems at once. Each role can see a different piece of it from its own tools.",
+    "Some of the traffic hitting checkout is your own customers’ apps trying again, and again.",
+    "Fixing the servers alone won’t stop the storm, and stopping the storm alone leaves the bad build running.",
+  ],
+  solution: {
+    infrastructure: [
+      { command: "kubectl logs deployment/checkout-api", why: "Payment-gateway timeouts and 504s: the gateway is drowning in charges." },
+      { command: 'psql -c "select state, count(*) from pg_stat_activity group by state"', why: "Almost every session is idle yet held by the app: v4.12.0 leaks a pooled connection on each gateway timeout." },
+      { command: "kubectl rollout history deployment/checkout-api", why: "v4.12.0 is the newest build; v4.11.3 before it didn’t leak." },
+      { command: "kubectl rollout undo deployment/checkout-api", why: "Rolls back the leak. On its own it won’t hold while clients keep retrying." },
+      { command: "kubectl rollout status deployment/checkout-api", why: "Every pod should end up on v4.11.3." },
+    ],
+    frontend: [
+      { command: "rum errors", why: "The browser retries every timed-out checkout up to four times." },
+      { command: `flags history ${RETRY_FLAG}`, why: "Auto-retry was switched on for web shortly before the storm." },
+      { command: `flags set ${RETRY_FLAG} off --note "retries with no backoff are amplifying the outage"`, why: "Stops web clients retrying every timeout instantly." },
+      { command: "rum overview", why: "REQ/TAP should fall from 2.8 back toward 1.0 as open tabs pick up the flag." },
+    ],
+    mobile: [
+      { command: "releases status ios", why: "iOS 7.3.0 sends four checkout requests per order; 7.2.4 sends one." },
+      { command: `remote-config get ${RETRY_CONFIG_KEY}`, why: "Its retry policy is immediate: no backoff at all." },
+      { command: `remote-config set ${RETRY_CONFIG_KEY} backoff --note "stop immediate retries during the incident"`, why: "Changes the apps already installed. Halting the release wouldn’t touch them." },
+      { command: `remote-config history ${RETRY_CONFIG_KEY}`, why: "Confirms the change went out." },
+    ],
+    security: [
+      { command: "siem alerts", why: `${STUFFING_ALERT} looks like credential stuffing, and the playbook will auto-block 500 IPs in minutes.` },
+      { command: `siem show ${STUFFING_ALERT}`, why: "A burst of POST /checkout from thousands of IPs. The saved searches tell you whose traffic it is." },
+      { command: "siem search checkout-sessions", why: "Same cart, same card, years-old accounts with past orders: real customers retrying, not attackers." },
+      { command: "waf top", why: "The top talkers are mobile carriers at a handful of requests a minute. Blocking them turns buyers away." },
+      { command: `siem resolve ${STUFFING_ALERT} --disposition benign --note "customer retry storm, not stuffing"`, why: "Closes it before the playbook auto-blocks real customers." },
+    ],
+    data: [
+      { command: "reconcile preview", why: "Thousands of charges captured with no paid order, still accruing. A batch now would miss the ones still coming." },
+      { command: "reconcile preview", why: "Wait until the other roles have stopped the storm, then check again: no new orphaned captures." },
+      { command: "reconcile submit", why: "Once the preview finds no new orphaned captures, refund every one of them." },
+      { command: "reconcile status", why: "The refund batch is queued for every orphaned charge." },
+    ],
+  },
   postmortem: {
     question: "What turned a slow payment gateway into a checkout meltdown?",
     options: [

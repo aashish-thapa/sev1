@@ -44,6 +44,21 @@ export const oomAfterDeploy: Scenario = {
     { at: 120, from: "Sam Tan · Eng manager", text: "Is it the payment gateway again? Their status page is green." },
     { at: 240, from: "Elena Ruiz · VP Engineering", text: "Flapping all afternoon isn't acceptable. What's the plan?" },
   ],
+  hints: [
+    "It fails in waves, not all at once. What happens to the pods between waves?",
+    "A pod’s description remembers how its last container died.",
+    "Restarting only resets the clock on whatever keeps growing inside the pods.",
+  ],
+  solution: {
+    infrastructure: [
+      { command: "kubectl get pods", why: "Restarts climb pod by pod, never all at once, which is why checkout fails in waves." },
+      { command: "kubectl describe pods", why: "Pods that restarted show Last State: Terminated, Reason: OOMKilled, Exit Code 137. They hit their 1Gi memory limit." },
+      { command: "kubectl logs deployment/checkout-api", why: "Full garbage collections with the heap at its ceiling and the exchange-rate cache still growing." },
+      { command: "kubectl rollout history deployment/checkout-api", why: "v4.15.0 added the in-memory cache; v4.12.1 didn’t have it." },
+      { command: "kubectl rollout undo deployment/checkout-api", why: "Rolling back removes the leak. Restarting would only start the clock again." },
+      { command: "kubectl rollout status deployment/checkout-api", why: "Wait for the rollout to finish, then declare resolved and watch it stay quiet." },
+    ],
+  },
   postmortem: {
     question: "Why did the pods keep restarting?",
     options: [

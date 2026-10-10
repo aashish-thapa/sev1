@@ -98,51 +98,59 @@ const events: Subcommand = (_args, { cluster }) => {
   return { output: out(...table([["LAST SEEN", "TYPE", "REASON", "OBJECT", "MESSAGE"], ...rows])) };
 };
 
+/** `kubectl describe pod`'s text for one pod. */
+function describePod(cluster: ClusterState, pod: Pod, deployment: Deployment): string[] {
+  const revision = revisionOf(deployment, pod.revision);
+  const podEvents = cluster.events.filter((event) => event.object === `pod/${pod.name}`).slice(-6);
+  return [
+    `Name:             ${pod.name}`,
+    `Namespace:        ${NAMESPACE}`,
+    `Labels:           app=${deployment.name}`,
+    `                  pod-template-hash=${pod.templateHash}`,
+    `Status:           ${podStatus(pod).status}`,
+    "Containers:",
+    `  ${deployment.name}:`,
+    `    Image:          ${IMAGE_REGISTRY}/${deployment.name}:${revision.tag}`,
+    `    State:          ${pod.phase === "CrashLoopBackOff" ? "Waiting" : "Running"}`,
+    ...(pod.phase === "CrashLoopBackOff" ? ["      Reason:       CrashLoopBackOff"] : []),
+    ...(pod.lastTermination
+      ? ["    Last State:     Terminated", `      Reason:       ${pod.lastTermination.reason}`, `      Exit Code:    ${pod.lastTermination.exitCode}`]
+      : []),
+    `    Ready:          ${podStatus(pod).ready === "1/1" ? "True" : "False"}`,
+    `    Restart Count:  ${pod.restarts}`,
+    "    Limits:",
+    "      cpu:     1",
+    "      memory:  1Gi",
+    "    Readiness:      http-get http://:8080/healthz delay=10s timeout=1s period=10s #success=1 #failure=3",
+    "    Environment:",
+    `      SPRING_DATASOURCE_URL:            jdbc:postgresql://${cluster.database.host}:5432/orders`,
+    `      SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:  ${deployment.poolSize}`,
+    "Events:",
+    ...(podEvents.length === 0
+      ? ["  <none>"]
+      : table([
+          ["  Type", "Reason", "Age", "From", "Message"],
+          ["  ----", "------", "----", "----", "-------"],
+          ...podEvents.map((event) => [`  ${event.type}`, event.reason, age(cluster.t - event.t), event.reason === "Scheduled" ? "default-scheduler" : "kubelet", event.message]),
+        ])),
+  ];
+}
+
 const describe: Subcommand = (args, context) => {
   const { cluster } = context;
   const [resource, nameArg] = args.filter((arg) => !arg.startsWith("-"));
   const [kind, slashName] = (resource ?? "").split("/");
   const name = slashName ?? nameArg;
-  if (POD_WORDS.includes(kind) && name) {
+  if (POD_WORDS.includes(kind)) {
+    // Like kubectl, no name describes every pod.
+    if (!name) {
+      const pods = allPods(cluster).filter(({ pod }) => isLive(pod));
+      if (pods.length === 0) return { output: out(`No resources found in ${NAMESPACE} namespace.`) };
+      return { output: out(...pods.flatMap(({ pod, deployment }, index) => [...(index > 0 ? [""] : []), ...describePod(cluster, pod, deployment)])) };
+    }
     const found = findPod(cluster, name);
     if (!found) return { output: err(`Error from server (NotFound): pods "${name}" not found`) };
-    const { pod, deployment } = found;
-    const revision = revisionOf(deployment, pod.revision);
-    const podEvents = cluster.events.filter((event) => event.object === `pod/${pod.name}`).slice(-6);
-    return {
-      output: out(
-        `Name:             ${pod.name}`,
-        `Namespace:        ${NAMESPACE}`,
-        `Labels:           app=${deployment.name}`,
-        `                  pod-template-hash=${pod.templateHash}`,
-        `Status:           ${podStatus(pod).status}`,
-        "Containers:",
-        `  ${deployment.name}:`,
-        `    Image:          ${IMAGE_REGISTRY}/${deployment.name}:${revision.tag}`,
-        `    State:          ${pod.phase === "CrashLoopBackOff" ? "Waiting" : "Running"}`,
-        ...(pod.phase === "CrashLoopBackOff" ? ["      Reason:       CrashLoopBackOff"] : []),
-        ...(pod.lastTermination
-          ? ["    Last State:     Terminated", `      Reason:       ${pod.lastTermination.reason}`, `      Exit Code:    ${pod.lastTermination.exitCode}`]
-          : []),
-        `    Ready:          ${podStatus(pod).ready === "1/1" ? "True" : "False"}`,
-        `    Restart Count:  ${pod.restarts}`,
-        "    Limits:",
-        "      cpu:     1",
-        "      memory:  1Gi",
-        "    Readiness:      http-get http://:8080/healthz delay=10s timeout=1s period=10s #success=1 #failure=3",
-        "    Environment:",
-        `      SPRING_DATASOURCE_URL:            jdbc:postgresql://${cluster.database.host}:5432/orders`,
-        `      SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:  ${deployment.poolSize}`,
-        "Events:",
-        ...(podEvents.length === 0
-          ? ["  <none>"]
-          : table([
-              ["  Type", "Reason", "Age", "From", "Message"],
-              ["  ----", "------", "----", "----", "-------"],
-              ...podEvents.map((event) => [`  ${event.type}`, event.reason, age(cluster.t - event.t), event.reason === "Scheduled" ? "default-scheduler" : "kubelet", event.message]),
-            ])),
-      ),
-    };
+    return { output: out(...describePod(cluster, found.pod, found.deployment)) };
   }
   const deploymentName = deploymentTarget(args);
   if (deploymentName) {

@@ -49,6 +49,20 @@ export const crashOnCheckout: Scenario = {
     { at: 130, from: "Priya Nair · Senior SRE (your mentor)", text: "When a fresh deploy breaks and the old one worked, roll back first and debug after: kubectl rollout undo deployment/checkout-api." },
     { at: 220, from: "Elena Ruiz · VP Engineering", text: "Support says carts are failing at payment. ETA?" },
   ],
+  hints: [
+    "The pods aren’t gone; they keep dying. Look at their status and how often they restart.",
+    "A crashing app usually says why in its last log lines.",
+    "It began right after a release, and the release before it was fine.",
+  ],
+  solution: {
+    infrastructure: [
+      { command: "kubectl get pods", why: "CrashLoopBackOff with climbing restarts: the app starts, then dies." },
+      { command: "kubectl logs deployment/checkout-api", why: "Each crash ends on the same IllegalStateException: v4.14.0 needs a config property prod doesn’t have." },
+      { command: "kubectl rollout history deployment/checkout-api", why: "v4.14.0 went out just before the page; v4.12.1 before it was healthy." },
+      { command: "kubectl rollout undo deployment/checkout-api", why: "Back to v4.12.1, which never reads that property. Roll back first, debug after." },
+      { command: "kubectl rollout status deployment/checkout-api", why: "Wait for the old build to replace every crashing pod, then declare resolved." },
+    ],
+  },
   postmortem: {
     question: "Why were the pods crashing?",
     options: [

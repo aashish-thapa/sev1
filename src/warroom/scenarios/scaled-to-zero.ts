@@ -47,6 +47,19 @@ export const scaledToZero: Scenario = {
     { at: 110, from: "Priya Nair · Senior SRE (your mentor)", text: "It normally runs 3 replicas. kubectl scale deployment/checkout-api --replicas=3 brings them back." },
     { at: 200, from: "Elena Ruiz · VP Engineering", text: "Checkout still down? Customers are noticing." },
   ],
+  hints: [
+    "Every request fails and nothing was deployed. Start with what’s actually running.",
+    "If there’s nothing running at all, something told Kubernetes to want nothing. The cluster’s recent events say what changed.",
+    "Put it back the way it normally runs: it had three of them.",
+  ],
+  solution: {
+    infrastructure: [
+      { command: "kubectl get pods", why: "No pods at all: this isn’t a crash, nothing is running." },
+      { command: "kubectl get events", why: "A ScalingReplicaSet to 0 with no deploy around it means someone scaled it down by hand." },
+      { command: "kubectl scale deployment/checkout-api --replicas=3", why: "Puts back the three replicas it normally runs." },
+      { command: "kubectl get pods", why: "Wait until all three show 1/1 Ready, then declare resolved." },
+    ],
+  },
   postmortem: {
     question: "What took checkout down?",
     options: [

@@ -96,6 +96,20 @@ export const checkoutPoolLeak: Scenario = {
     { at: 170, from: "PagerDuty", text: "Escalated to SEV1 — checkout success rate below 50%." },
     { at: 260, from: "Elena Ruiz · VP Engineering", text: "What’s the ETA? The autumn campaign email goes out at 10:30." },
   ],
+  hints: [
+    "Traffic is flat, yet the pool is empty. Who is holding the connections?",
+    "Ask Postgres what those connections are doing, and compare it with what the app says.",
+    "Restarts buy you minutes. Something in the newest build doesn’t give connections back.",
+  ],
+  solution: {
+    infrastructure: [
+      { command: "kubectl logs deployment/checkout-api", why: "Hikari: total=20, active=20, idle=0. Every connection is checked out, so requests wait 30 s for one and fail." },
+      { command: 'psql -c "select state, count(*) from pg_stat_activity group by state"', why: "Postgres sees those sessions as idle: borrowed and never returned. That’s a leak, not load." },
+      { command: "kubectl rollout history deployment/checkout-api", why: "v4.12.0 added a retry wrapper around the payment-gateway client." },
+      { command: "kubectl rollout undo deployment/checkout-api", why: "Rolling back removes the leak. A restart would only empty the pool for it to drain again." },
+      { command: "kubectl rollout status deployment/checkout-api", why: "Wait until every pod runs the old build, then declare resolved." },
+    ],
+  },
   postmortem: {
     question: "What was the root cause?",
     options: [

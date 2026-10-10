@@ -92,6 +92,22 @@ export const ordersIndexInvalid: Scenario = {
     { at: 190, from: "PagerDuty", text: "Escalated to SEV1 — checkout success rate below 60%." },
     { at: 270, from: "Elena Ruiz · VP Engineering", text: "Breakfast promo emails land at 09:15. Where are we?" },
   ],
+  hints: [
+    "Postgres is busy, not idle. Find out what all those sessions are running.",
+    "Ask the planner how it runs that query.",
+    "Rolling back the app doesn’t touch the database. Look at what the morning’s migration left behind.",
+  ],
+  solution: {
+    infrastructure: [
+      { command: 'psql -c "select state, count(*) from pg_stat_activity group by state"', why: "Mostly active sessions: the database is doing slow work, not sitting on leaked connections." },
+      { command: 'psql -c "select query, calls, mean_exec_time from pg_stat_statements order by mean_exec_time desc limit 5"', why: "One checkout query takes hundreds of milliseconds and gets slower." },
+      { command: "psql -c \"explain select id from orders where customer_id = $1 and status = 'pending'\"", why: "Seq Scan on orders: that query isn’t using an index." },
+      { command: 'psql -c "\\d orders"', why: "The index it needs is marked INVALID, and the old one is gone." },
+      { command: "kubectl logs job/migrate-0142", why: "The migration’s CREATE INDEX timed out, and it dropped the old index anyway." },
+      { command: 'psql -c "REINDEX INDEX CONCURRENTLY orders_customer_status_created_idx"', why: "Rebuilds the index without locking orders. A plain REINDEX would block checkout until it finishes." },
+      { command: 'psql -c "select * from pg_stat_progress_create_index"', why: "Watch the rebuild finish, then declare resolved once the error rate drops." },
+    ],
+  },
   postmortem: {
     question: "What was the root cause?",
     options: [

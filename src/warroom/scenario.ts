@@ -39,6 +39,9 @@ export type Objective = {
   readonly isMet: boolean;
 };
 
+/** One move of a worked solution: the exact command to run, and in one line why. */
+export type SolutionStep = { readonly command: string; readonly why: string };
+
 /**
  * How hard an incident is, matched to the career level that unlocks it (tier = level + 1):
  * 1 guided, one cause, one fix · 2 diagnose · 3 a plausible fix backfires ·
@@ -75,6 +78,13 @@ export type Scenario = {
   readonly externals: readonly ExternalService[];
   readonly comms: readonly CommsMessage[];
   readonly postmortem: Postmortem;
+  /** Two to four nudges, vaguest first. They point at where to look and never give the command. */
+  readonly hints: readonly string[];
+  /**
+   * The worked answer for each role the incident pages: what to look at, the fix, then how to
+   * see it worked. Every role in `roles` has steps, and playing them closes the incident well.
+   */
+  readonly solution: Readonly<Partial<Record<Role, readonly SolutionStep[]>>>;
 };
 
 export function clockAt(scenario: Scenario, t: number, withMillis = false, salt = 0): string {

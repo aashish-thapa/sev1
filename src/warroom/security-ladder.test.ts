@@ -1,11 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { openIncident } from "./incident.ts";
+import { applyFrame, encodeFrame, IncidentFrameSchema } from "../multiplayer/frame.ts";
+import { advance, debrief, declareResolved, openIncident, type Incident } from "./incident.ts";
+import type { Scenario } from "./scenario.ts";
+import { botFloodSingleIp, FLOOD_IP } from "./scenarios/bot-flood-single-ip.ts";
 import { checkoutCommerce } from "./scenarios/checkout-commerce.ts";
+import { unlockedWarRooms } from "./scenarios/index.ts";
 import { scaledToZero } from "./scenarios/scaled-to-zero.ts";
 import { runLine } from "./shell/shell.ts";
 import { attackLoad } from "./sim/attack.ts";
 import type { Attack, Commerce, SiemAlert, WafRule } from "./sim/commerce.ts";
-import { cidrReach, containmentRule, DISTINCT_SOURCE_IPS, ja4Reach, parseCidr, rateLimitReach, topReach, topSources, topTalkerShare } from "./sim/edge.ts";
+import {
+  blockedAttackShare,
+  blockedShare,
+  cidrReach,
+  containmentRule,
+  DISTINCT_SOURCE_IPS,
+  ja4Reach,
+  parseCidr,
+  rateLimitReach,
+  topReach,
+  topSources,
+  topTalkerShare,
+} from "./sim/edge.ts";
 
 const PYTHON_JA4 = "t13d4312h1_c7886603b240_b26ce05bbdd6";
 const CHROMIUM_JA4 = "t13d1517h2_8daaf6152771_cb7bf5808d99";
@@ -191,5 +207,175 @@ describe("siem resolve --contained-by", () => {
     const { text, commerce } = securityShell(blocked([noPlaybook]), "siem resolve SEC-1 --disposition true-positive");
     expect(commerce?.wafRules).toHaveLength(1);
     expect(text).toContain("no SOAR containment playbook");
+  });
+});
+
+// ── The security ladder ─────────────────────────────────────────────────────────
+
+const LADDER: readonly Scenario[] = [botFloodSingleIp];
+/** Paced like solutions.test.ts: first move 20 s in, a command every 8 s, then time for the edge to settle. */
+const FIRST_MOVE_AT = 20;
+const THINKING_SECONDS = 8;
+const SETTLE_SECONDS = 180;
+/** A trap played at this second, the way a hurried analyst would. */
+const TRAP_AT = 40;
+
+function play(scenario: Scenario, incident: Incident, seconds: number): Incident {
+  let current = incident;
+  for (let index = 0; index < seconds; index += 1) current = advance(current, scenario).incident;
+  return current;
+}
+
+function playTo(scenario: Scenario, t: number, incident: Incident): Incident {
+  return play(scenario, incident, Math.max(0, t - incident.cluster.t));
+}
+
+/** Runs one line on the security laptop and applies whatever it changed; fails on anything the tool turns down. */
+function as(scenario: Scenario, line: string, incident: Incident): Incident {
+  const result = runLine(line, { cluster: incident.cluster, scenario, history: [], role: "security" });
+  const errors = result.output.filter((output) => output.tone === "err").map((output) => output.text);
+  if (errors.length > 0) throw new Error(`${line}: ${errors.join("\n")}`);
+  return result.cluster ? { ...incident, cluster: result.cluster } : incident;
+}
+
+function shellText(scenario: Scenario, line: string, incident: Incident): string {
+  return runLine(line, { cluster: incident.cluster, scenario, history: [], role: "security" })
+    .output.map((output) => output.text)
+    .join("\n");
+}
+
+function commerceOf(incident: Incident): Commerce {
+  const { commerce } = incident.cluster;
+  if (!commerce) throw new Error("no commerce");
+  return commerce;
+}
+
+const customersBlocked = (incident: Incident) => blockedShare(commerceOf(incident).wafRules);
+const attackBlocked = (incident: Incident) => blockedAttackShare(commerceOf(incident).wafRules);
+
+/** Every command of the worked solution a few seconds apart, as solutions.test.ts plays them. */
+function solved(scenario: Scenario): Incident {
+  let incident = play(scenario, openIncident(scenario), FIRST_MOVE_AT);
+  for (const step of scenario.solution.security ?? []) {
+    incident = play(scenario, as(scenario, step.command, incident), THINKING_SECONDS);
+  }
+  return play(scenario, incident, SETTLE_SECONDS);
+}
+
+/** Lines played at TRAP_AT, then time to settle. */
+function trapped(scenario: Scenario, ...lines: readonly string[]): Incident {
+  let incident = playTo(scenario, TRAP_AT, openIncident(scenario));
+  for (const line of lines) incident = as(scenario, line, incident);
+  return play(scenario, incident, SETTLE_SECONDS);
+}
+
+/** Declares resolved (when the pager allows it) and plays out the monitoring window. */
+function closeOut(scenario: Scenario, incident: Incident) {
+  const declared = declareResolved(incident, scenario);
+  const closed = play(scenario, declared.incident, 700);
+  return { refused: declared.notice?.kind === "refused", closed, result: debrief(closed, scenario, true) };
+}
+
+/** Checkouts lost over the minute that ends at `t`, nobody acting. */
+function lostInMinuteTo(scenario: Scenario, t: number): number {
+  const before = playTo(scenario, t - 60, openIncident(scenario));
+  return playTo(scenario, t, before).cluster.failedCheckouts - before.cluster.failedCheckouts;
+}
+
+const securityObjective = (result: ReturnType<typeof closeOut>["result"]) => result.objectives?.find((objective) => objective.label.includes("customers"));
+
+describe("the security ladder", () => {
+  it("climbs one tier per rung, security only, and opens by career level", () => {
+    expect(LADDER.map((scenario) => scenario.tier)).toEqual(LADDER.map((_, index) => index + 1));
+    for (const scenario of LADDER) expect(scenario.roles).toEqual(["security"]);
+    for (const level of [0, 1, 2, 3] as const) expect(unlockedWarRooms("security", level)).toEqual(LADDER.slice(0, level + 1).toReversed());
+  });
+});
+
+describe.each(LADDER.map((scenario) => [scenario.id, scenario] as const))("%s", (_id, scenario) => {
+  it("gets worse if nobody acts: the pager refuses, and more checkouts are lost each minute", () => {
+    const opened = openIncident(scenario);
+    expect(opened.cluster.errorRate).toBeGreaterThan(0.1);
+    expect(declareResolved(opened, scenario).notice?.kind).toBe("refused");
+    expect(lostInMinuteTo(scenario, 600)).toBeGreaterThan(lostInMinuteTo(scenario, 60) * 1.1);
+    expect(declareResolved(playTo(scenario, 600, opened), scenario).notice?.kind).toBe("refused");
+  });
+
+  it("closes at S or A when the worked solution is followed, with no customer blocked", () => {
+    const incident = solved(scenario);
+    expect(incident.cluster.errorRate).toBe(0);
+    expect(customersBlocked(incident)).toBe(0);
+    const { refused, closed, result } = closeOut(scenario, incident);
+    expect(refused).toBe(false);
+    expect(closed.phase.name).toBe("closed");
+    expect(result.isRootCauseFixed).toBe(true);
+    expect(result.objectives?.every((objective) => objective.isMet)).toBe(true);
+    expect(["S", "A"]).toContain(result.grade);
+  });
+
+  it("is deterministic", () => {
+    expect(solved(scenario).cluster).toEqual(solved(scenario).cluster);
+    expect(playTo(scenario, 120, openIncident(scenario)).cluster).toEqual(playTo(scenario, 120, openIncident(scenario)).cluster);
+  });
+
+  it("round-trips its attack, rules and alerts through multiplayer frames", () => {
+    const roundTrip = (previous: Incident | null, next: Incident) =>
+      applyFrame(previous, IncidentFrameSchema.parse(JSON.parse(JSON.stringify(encodeFrame(previous, next)))));
+    const steps = scenario.solution.security ?? [];
+    let server = openIncident(scenario);
+    let client = roundTrip(null, server);
+    for (let second = 0; second < 90; second += 1) {
+      let next = advance(server, scenario).incident;
+      const step = steps[(second - FIRST_MOVE_AT) / THINKING_SECONDS];
+      if (step) next = as(scenario, step.command, next);
+      client = roundTrip(client, next);
+      server = next;
+    }
+    expect(attackBlocked(server)).toBeGreaterThan(0.5);
+    expect(client).toEqual(server);
+    expect(commerceOf(client).attack).toEqual(commerceOf(openIncident(scenario)).attack);
+  });
+
+  it("follows the content rules: hints, a postmortem with one answer, SIEM evidence", () => {
+    expect(scenario.hints.length).toBeGreaterThanOrEqual(2);
+    expect(scenario.hints.length).toBeLessThanOrEqual(4);
+    const { options, answerIndex, explanation } = scenario.postmortem;
+    expect(options).toHaveLength(4);
+    for (const option of options) expect(option.length).toBeLessThanOrEqual(64);
+    const longestDistractor = Math.max(...options.filter((_, index) => index !== answerIndex).map((option) => option.length));
+    expect(options[answerIndex].length - longestDistractor).toBeLessThanOrEqual(4);
+    expect(explanation.cause.length).toBeLessThanOrEqual(90);
+    expect(explanation.why.length).toBeLessThanOrEqual(340);
+    expect(explanation.tell.length).toBeLessThanOrEqual(200);
+    expect(scenario.releasedAt).toBeUndefined();
+    expect(scenario.suggestions?.security?.length).toBeGreaterThan(0);
+    const opened = openIncident(scenario);
+    expect(scenario.evidence?.length).toBeGreaterThan(0);
+    for (const view of scenario.evidence ?? []) {
+      expect(view.tool).toBe("siem");
+      expect(shellText(scenario, `siem search ${view.name}`, opened)).not.toMatch(/NaN|Infinity|undefined|unknown saved search/);
+    }
+  });
+});
+
+describe("bot-flood-single-ip", () => {
+  const scenario = botFloodSingleIp;
+
+  it("shows one hosting address far above every customer, and the script behind it", () => {
+    const opened = openIncident(scenario);
+    expect(shellText(scenario, "waf top 3", opened)).toMatch(new RegExp(`^1\\s+${FLOOD_IP}\\s+9,000\\s+14061\\s+DIGITALOCEAN-ASN\\s+hosting`, "m"));
+    expect(shellText(scenario, "siem search edge-requests", opened)).toContain("python-requests/2.32.3");
+  });
+
+  it("blocking the top 500 clears the 5xx but turns away 39% of customers", () => {
+    const correct = closeOut(scenario, solved(scenario)).result;
+    const blunt = trapped(scenario, "waf block --top 500");
+    expect(customersBlocked(blunt)).toBeCloseTo(0.393, 3);
+    expect(attackBlocked(blunt)).toBe(1);
+    expect(blunt.cluster.errorRate).toBe(0);
+    const { refused, result } = closeOut(scenario, blunt);
+    expect(refused).toBe(false);
+    expect(securityObjective(result)?.isMet).toBe(false);
+    expect(result.points).toBeLessThan(correct.points - 50);
   });
 });

@@ -2,6 +2,7 @@ import type { Level } from "../../domain/career.ts";
 import { isPro, isReleasedFor, type Entitlements } from "../../domain/entitlements.ts";
 import type { Role } from "../../domain/incident.ts";
 import type { Scenario } from "../scenario.ts";
+import { botFloodSingleIp } from "./bot-flood-single-ip.ts";
 import { checkoutMeltdown } from "./checkout-meltdown.ts";
 import { checkoutPoolLeak } from "./checkout-pool-leak.ts";
 import { crashOnCheckout } from "./crash-on-checkout.ts";
@@ -10,14 +11,14 @@ import { ordersIndexInvalid } from "./orders-index-invalid.ts";
 import { scaledToZero } from "./scaled-to-zero.ts";
 
 /** Every live incident the game ships; the app and the room server read this one list. */
-export const SCENARIOS: readonly Scenario[] = [scaledToZero, crashOnCheckout, oomAfterDeploy, checkoutPoolLeak, ordersIndexInvalid, checkoutMeltdown];
+export const SCENARIOS: readonly Scenario[] = [scaledToZero, crashOnCheckout, oomAfterDeploy, checkoutPoolLeak, ordersIndexInvalid, checkoutMeltdown, botFloodSingleIp];
 
 /** Each role's own War Rooms, easiest first. A role's ladder grows as its incidents are written. */
 const LADDERS: Readonly<Record<Role, readonly Scenario[]>> = {
   infrastructure: [scaledToZero, crashOnCheckout, oomAfterDeploy, checkoutPoolLeak, ordersIndexInvalid],
   frontend: [],
   mobile: [],
-  security: [],
+  security: [botFloodSingleIp],
   data: [],
 };
 

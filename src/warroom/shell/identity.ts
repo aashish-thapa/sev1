@@ -9,7 +9,7 @@ export const SSO_GROUPS: Record<Role, readonly string[]> = {
   frontend: ["eng-web", "flags-prod-writers"],
   mobile: ["eng-mobile", "remote-config-publishers", "app-store-release-managers"],
   security: ["sec-soc", "waf-admins"],
-  data: ["data-eng", "payments-recon"],
+  data: ["data-eng", "payments-recon", "ml-platform"],
 };
 
 export function operatorName(role: Role): string {

@@ -12,12 +12,16 @@ import { deadKillSwitch } from "./dead-kill-switch.ts";
 import { crashOnCheckout } from "./crash-on-checkout.ts";
 import { credentialStuffingHosting } from "./credential-stuffing-hosting.ts";
 import { forcedUpdateWall } from "./forced-update-wall.ts";
+import { fraudModelRegression } from "./fraud-model-regression.ts";
+import { fraudThresholdFailOpen } from "./fraud-threshold-fail-open.ts";
 import { iosRetryConfig } from "./ios-retry-config.ts";
 import { oomAfterDeploy } from "./oom-after-deploy.ts";
 import { ordersIndexInvalid } from "./orders-index-invalid.ts";
 import { pinnedCertRotation } from "./pinned-cert-rotation.ts";
+import { refundDoubleCharges } from "./refund-double-charges.ts";
 import { residentialProxyStuffing } from "./residential-proxy-stuffing.ts";
 import { scaledToZero } from "./scaled-to-zero.ts";
+import { staleFraudFeatures } from "./stale-fraud-features.ts";
 import { staleServiceWorker } from "./stale-service-worker.ts";
 import { webAutoRetryStorm } from "./web-auto-retry-storm.ts";
 
@@ -41,6 +45,10 @@ export const SCENARIOS: readonly Scenario[] = [
   credentialStuffingHosting,
   cardTestingSoar,
   residentialProxyStuffing,
+  refundDoubleCharges,
+  fraudModelRegression,
+  fraudThresholdFailOpen,
+  staleFraudFeatures,
 ];
 
 /** Each role's own War Rooms, easiest first. A role's ladder grows as its incidents are written. */
@@ -49,7 +57,7 @@ const LADDERS: Readonly<Record<Role, readonly Scenario[]>> = {
   frontend: [webAutoRetryStorm, addressAutocomplete500s, deadKillSwitch, staleServiceWorker],
   mobile: [iosRetryConfig, androidStagedRollout500s, forcedUpdateWall, pinnedCertRotation],
   security: [botFloodSingleIp, credentialStuffingHosting, cardTestingSoar, residentialProxyStuffing],
-  data: [],
+  data: [refundDoubleCharges, fraudModelRegression, fraudThresholdFailOpen, staleFraudFeatures],
 };
 
 export function findScenario(id: string): Scenario | undefined {

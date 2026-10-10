@@ -47,6 +47,20 @@ export type Objective = {
 /** One move of a worked solution: the exact command to run, and in one line why. */
 export type SolutionStep = { readonly command: string; readonly why: string };
 
+export type EvidenceTool = "siem" | "rum" | "warehouse" | "releases" | "models";
+
+/**
+ * A saved view a scenario adds to one of the role tools, listed beside the tool's own
+ * (`siem search <name>`, `rum <name>`, `warehouse run <name>`, `releases <name>`). It lives on
+ * the scenario, not in state, so it costs nothing on the wire.
+ */
+export type Evidence = {
+  readonly tool: EvidenceTool;
+  readonly name: string;
+  readonly description: string;
+  readonly run: (state: ClusterState) => readonly string[];
+};
+
 /** What the pager watches when it isn't checkout 5xx: a 0–1 share whose healthy baseline is 0. */
 export type AlertMetric = {
   readonly label: string;
@@ -77,6 +91,10 @@ export type Scenario = {
    * fix doesn't show in 5xx (customers blocked or declined before the cluster), or the pager lies.
    */
   readonly alertMetric?: AlertMetric;
+  /** Saved views this incident adds to the role tools; one named like a built-in view replaces it. */
+  readonly evidence?: readonly Evidence[];
+  /** Starter chips per role; a role without an entry gets neutral look-around commands. */
+  readonly suggestions?: Partial<Record<Role, readonly string[]>>;
   /** Lost checkouts that cost one debrief point; scales scoring to the incident's traffic and unavoidable damage. */
   readonly lostCheckoutsPerPoint?: number;
   /** Per-role outcomes beyond the root cause; each unmet one costs points in the debrief. */

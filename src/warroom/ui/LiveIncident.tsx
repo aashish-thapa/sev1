@@ -89,7 +89,7 @@ export function LiveIncident({ scenario, role, isPaged, onPage, onClosed, onLeav
     onComplete: complete,
     isDisabled: phase.name === "monitoring",
     prompt: promptFor(role),
-    suggestions: suggestionsFor(role, deploymentName),
+    suggestions: suggestionsFor(scenario, role, deploymentName),
   };
   const hud = <IncidentHud incident={incident} scenario={watched} isPaged={isPaged} onPage={onPage} onDeclare={declare} onLeave={onLeave} />;
 

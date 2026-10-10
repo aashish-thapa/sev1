@@ -1,7 +1,7 @@
 import { segmentStats, type SegmentStats } from "../../sim/clients.ts";
 import type { Commerce } from "../../sim/commerce.ts";
 import { blockedShare } from "../../sim/edge.ts";
-import { commerceCommand, count, WINDOW_SECONDS } from "../commerce-command.ts";
+import { commerceCommand, count, runEvidence, viewNames, WINDOW_SECONDS } from "../commerce-command.ts";
 import { ssoRefusal } from "../identity.ts";
 import { dim, err, out, table, type OutputLine, type ShellContext, type ShellResult } from "../types.ts";
 
@@ -99,9 +99,11 @@ export const rum = commerceCommand({
   summary: "Real-user monitoring for checkout-web (last 5 min)",
   roles: ["frontend"],
   refuse: (_args, { role }) => ssoRefusal("rum", "eng-web", role),
-  run([sub], context, commerce) {
-    const handler = SUBCOMMANDS[sub ?? "overview"];
-    return handler ? handler(context, commerce) : { output: err(`rum: unknown command "${sub}"`, `Commands: ${Object.keys(SUBCOMMANDS).join(", ")}`) };
+  run([sub = "overview"], context, commerce) {
+    const scenarioView = runEvidence(context, "rum", sub);
+    if (scenarioView) return scenarioView;
+    const handler = SUBCOMMANDS[sub];
+    return handler ? handler(context, commerce) : { output: err(`rum: unknown command "${sub}"`, `Commands: ${viewNames(context, "rum", Object.keys(SUBCOMMANDS)).join(", ")}`) };
   },
-  complete: (args) => (args.length === 0 ? Object.keys(SUBCOMMANDS) : []),
+  complete: (args, _partial, context) => (args.length === 0 ? viewNames(context, "rum", Object.keys(SUBCOMMANDS)) : []),
 });

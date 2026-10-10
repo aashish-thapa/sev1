@@ -1,7 +1,7 @@
 import { clockAt } from "../../scenario.ts";
 import { visibleOrphans, WAREHOUSE_LAG_SECONDS } from "../../sim/commerce-actions.ts";
 import type { Commerce } from "../../sim/commerce.ts";
-import { commerceCommand, count } from "../commerce-command.ts";
+import { commerceCommand, count, evidenceFor, runEvidence, viewNames } from "../commerce-command.ts";
 import { ssoRefusal } from "../identity.ts";
 import { sqlTable } from "../sql-table.ts";
 import { dim, err, out, table, type OutputLine, type ShellContext, type ShellResult } from "../types.ts";
@@ -112,10 +112,13 @@ function tables(commerce: Commerce): ShellResult {
   };
 }
 
-function saved(): ShellResult {
+function saved(context: ShellContext): ShellResult {
+  const own = evidenceFor(context, "warehouse");
+  const builtIns = Object.entries(SAVED).filter(([name]) => !own.some((entry) => entry.name === name));
+  const rows = [...builtIns.map(([name, query]) => [name, query.description]), ...own.map((entry) => [entry.name, entry.description])];
   return {
     output: [
-      ...out(...table([["NAME", "DESCRIPTION"], ...Object.entries(SAVED).map(([name, query]) => [name, query.description])])),
+      ...out(...table([["NAME", "DESCRIPTION"], ...rows])),
       ...dim("warehouse run <name> runs one; warehouse show <name> prints its SQL"),
     ],
   };
@@ -150,12 +153,16 @@ export const warehouse = commerceCommand({
       case "tables":
         return tables(commerce);
       case "saved":
-        return saved();
+        return saved(context);
       case "show": {
+        const own = evidenceFor(context, "warehouse").find((entry) => entry.name === rest[0]);
+        if (own) return { output: out(`-- ${own.description}`) };
         const target = rest[0] ? SAVED[rest[0]] : undefined;
         return target ? { output: out(target.sql) } : { output: err(`warehouse: no saved query "${rest[0] ?? ""}"`) };
       }
       case "run": {
+        const scenarioView = runEvidence(context, "warehouse", rest[0]);
+        if (scenarioView) return scenarioView;
         const target = rest[0] ? SAVED[rest[0]] : undefined;
         return target ? { output: target.run(context, commerce) } : { output: err(`warehouse: no saved query "${rest[0] ?? ""}" (warehouse saved)`) };
       }
@@ -165,9 +172,9 @@ export const warehouse = commerceCommand({
         return { output: err(`warehouse: unknown command "${sub}"`, "Commands: tables, saved, show, run, query") };
     }
   },
-  complete(args) {
+  complete(args, _partial, context) {
     if (args.length === 0) return ["tables", "saved", "show", "run", "query"];
-    if (args.length === 1 && (args[0] === "run" || args[0] === "show")) return Object.keys(SAVED);
+    if (args.length === 1 && (args[0] === "run" || args[0] === "show")) return viewNames(context, "warehouse", Object.keys(SAVED));
     return [];
   },
 });

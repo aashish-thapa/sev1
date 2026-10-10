@@ -2,11 +2,12 @@ import { segmentId, segmentStats } from "../../sim/clients.ts";
 import { setReleasePaused } from "../../sim/commerce-actions.ts";
 import { findPlatform, type Commerce, type Platform } from "../../sim/commerce.ts";
 import { rolloutLabel } from "../../sim/rollout.ts";
-import { applied, commerceCommand, percent } from "../commerce-command.ts";
+import { applied, commerceCommand, percent, runEvidence, viewNames } from "../commerce-command.ts";
 import { ssoRefusal } from "../identity.ts";
 import { dim, err, out, table, type ShellContext, type ShellResult } from "../types.ts";
 
 const MOBILE = ["ios", "android"];
+const COMMANDS = ["status", "halt", "resume", "rollback"];
 const DISPLAY_NAME: Record<string, string> = { ios: "iOS", android: "Android" };
 
 function crashFree(version: string): string {
@@ -73,6 +74,8 @@ export const releases = commerceCommand({
   roles: ["mobile"],
   refuse: (_args, { role }) => ssoRefusal("releases", "app-store-release-managers", role),
   run([sub, ...rest], context, commerce) {
+    const scenarioView = runEvidence(context, "releases", sub);
+    if (scenarioView) return scenarioView;
     switch (sub) {
       case undefined:
       case "status":
@@ -85,11 +88,11 @@ export const releases = commerceCommand({
       case "rollback":
         return rollback(rest);
       default:
-        return { output: err(`releases: unknown command "${sub}"`, "Commands: status, halt, resume, rollback") };
+        return { output: err(`releases: unknown command "${sub}"`, `Commands: ${viewNames(context, "releases", COMMANDS).join(", ")}`) };
     }
   },
-  complete(args, _partial, _context, commerce) {
-    if (args.length === 0) return ["status", "halt", "resume", "rollback"];
+  complete(args, _partial, context, commerce) {
+    if (args.length === 0) return viewNames(context, "releases", COMMANDS);
     if (args.length === 1) return MOBILE;
     if (args.length === 2 && ["halt", "resume", "rollback"].includes(args[0])) {
       const platform = findPlatform(commerce, args[1]);

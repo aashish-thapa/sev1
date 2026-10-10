@@ -184,6 +184,12 @@ export const checkoutMeltdown: Scenario = {
   briefing:
     "The Autumn Sale opened at 10:00. Three minutes in, checkout is failing, support says customers are being charged three and four times, and security has a high-severity alert open on the checkout path. Infra, frontend, mobile, security and data are all paged. No single laptop can fix this.",
   roles: ["infrastructure", "frontend", "mobile", "security", "data"],
+  suggestions: {
+    frontend: ["rum overview", "rum session", "flags list", "flags history checkout.auto_retry", "flags set payment_element_v2 off", "flags set checkout.auto_retry off"],
+    mobile: ["releases status", "remote-config get checkout_retry_policy", "releases halt ios 7.3.0", "remote-config set checkout_retry_policy backoff"],
+    security: ["siem show SEC-4471", "siem search auth-summary", "siem search checkout-sessions", "waf top", "waf block --top 500", "siem resolve SEC-4471 --disposition benign"],
+    data: ["warehouse run revenue-vs-orders", "warehouse run orphaned-captures", "warehouse run multi-charge-carts", "reconcile submit"],
+  },
   teamPlaybook: [
     { role: "frontend", by: "Priya Shah", at: 55, line: "flags set checkout.auto_retry off", says: "Turned off checkout.auto_retry on web — that release was retrying every timeout with no backoff." },
     { role: "infrastructure", by: "Sam Tan", at: 70, line: "kubectl rollout undo deployment/checkout-api", says: "Rolling checkout-api back to v4.11.3. The pool was leaking on gateway timeouts." },

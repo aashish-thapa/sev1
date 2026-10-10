@@ -15,8 +15,16 @@ export function laptopBanner(scenario: Scenario, role: Role): string[] {
   ];
 }
 
-/** Starter commands for the chip row: how to look around, the real fix, and the tempting wrong moves. */
-export function suggestionsFor(role: Role, deploymentName: string): readonly string[] {
+/**
+ * Starter commands for the chip row: how to look around, the real fix, and the tempting wrong moves.
+ * A scenario can list its own per role; otherwise the role gets its everyday ones, which for the
+ * commerce roles only look around, so they give nothing away in an incident that isn't the meltdown.
+ */
+export function suggestionsFor(scenario: Scenario, role: Role, deploymentName: string): readonly string[] {
+  return scenario.suggestions?.[role] ?? everydayChips(role, deploymentName);
+}
+
+function everydayChips(role: Role, deploymentName: string): readonly string[] {
   switch (role) {
     case "infrastructure":
       return [
@@ -30,12 +38,12 @@ export function suggestionsFor(role: Role, deploymentName: string): readonly str
         `kubectl scale deployment/${deploymentName} --replicas=6`,
       ];
     case "frontend":
-      return ["rum overview", "rum session", "flags list", "flags history checkout.auto_retry", "flags set payment_element_v2 off", "flags set checkout.auto_retry off"];
+      return ["rum overview", "rum errors", "flags list"];
     case "mobile":
-      return ["releases status", "remote-config get checkout_retry_policy", "releases halt ios 7.3.0", "remote-config set checkout_retry_policy backoff"];
+      return ["releases status", "remote-config list"];
     case "security":
-      return ["siem show SEC-4471", "siem search auth-summary", "siem search checkout-sessions", "waf top", "waf block --top 500", "siem resolve SEC-4471 --disposition benign"];
+      return ["siem alerts", "waf rules", "waf top"];
     case "data":
-      return ["warehouse run revenue-vs-orders", "warehouse run orphaned-captures", "warehouse run multi-charge-carts", "reconcile submit"];
+      return ["warehouse saved", "warehouse tables", "reconcile status"];
   }
 }

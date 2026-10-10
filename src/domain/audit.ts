@@ -6,7 +6,7 @@
 import { careerLevel, type Level } from "./career.ts";
 import {
   CARD_BONUS_CENTS,
-  INCIDENT_CENTS_PER_POINT,
+  INCIDENT_CENTS_PER_POINT_BY_TIER,
   INCIDENT_MIN_POINTS,
   LEDGER_LIMIT,
   MIN_SECONDS_PER_CARD,
@@ -24,7 +24,7 @@ import type { Tier } from "./tier.ts";
 /** Network and timer jitter between syncs: allow this much extra time and a couple of extra events. */
 const TIME_SLACK = 1.25;
 const EVENT_ALLOWANCE = 2;
-const MAX_INCIDENT_CENTS = 100 * INCIDENT_CENTS_PER_POINT;
+const MAX_INCIDENT_CENTS = 100 * Math.max(...Object.values(INCIDENT_CENTS_PER_POINT_BY_TIER));
 const MAX_CARD_CENTS = Math.max(...Object.values(CARD_BONUS_CENTS));
 const EARN_REASONS = ["salary", "card", "incident"] as const satisfies readonly PayReason[];
 

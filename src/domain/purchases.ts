@@ -1,7 +1,7 @@
 /**
- * What earned money buys. Today: the step-by-step solution to a live incident — priced so it
- * always costs more than the incident pays, and dearer the harder the incident and the more
- * senior you are. A bought solution makes the run assisted: no bonus, no experience.
+ * What earned money buys. Today: the step-by-step solution to a live incident, dearer the harder
+ * the incident and the more senior you are. A bought solution makes the run assisted: no bonus,
+ * no experience.
  */
 import type { Level } from "./career.ts";
 import { LEDGER_LIMIT, type LedgerEntry, type Wallet } from "./economy.ts";

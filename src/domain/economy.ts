@@ -4,6 +4,7 @@
  */
 import { z } from "zod";
 import type { Level } from "./career.ts";
+import type { Tier } from "./tier.ts";
 
 /**
  * Paid per minute of active play, by career level, at real time: an intern's $24/h up to staff's
@@ -16,8 +17,8 @@ export const CARD_BONUS_CENTS: Readonly<Record<1 | 2 | 3, number>> = { 1: 1_500,
 /** Practice pays a fraction of the rated bonus: it's learning, not the job. */
 export const PRACTICE_SHARE = 0.4;
 
-/** Each debrief point is worth this much, so a perfect 100 pays $600. */
-export const INCIDENT_CENTS_PER_POINT = 600;
+/** Each debrief point is worth this much, by tier: a perfect tier-1 run pays $600, a perfect tier-5 run $3,600. */
+export const INCIDENT_CENTS_PER_POINT_BY_TIER: Readonly<Record<Tier, number>> = { 1: 600, 2: 900, 3: 1_500, 4: 2_400, 5: 3_600 };
 /** Below this the fix did more harm than good (grade D): no bonus. */
 export const INCIDENT_MIN_POINTS = 35;
 
@@ -34,7 +35,7 @@ export const LEDGER_LIMIT = 200;
 export type Payment =
   | { readonly kind: "salary"; readonly ref: string; readonly minutes: number; readonly level: Level }
   | { readonly kind: "card"; readonly ref: string; readonly difficulty: 1 | 2 | 3; readonly mode: "rated" | "practice"; readonly title: string }
-  | { readonly kind: "incident"; readonly ref: string; readonly points: number; readonly title: string; readonly isTeam: boolean };
+  | { readonly kind: "incident"; readonly ref: string; readonly points: number; readonly tier: Tier; readonly title: string; readonly isTeam: boolean };
 
 /** Stable identities for earnings (all times epoch milliseconds). */
 export const payRef = {
@@ -111,7 +112,7 @@ export function amountOf(payment: Payment): number {
       return payment.mode === "rated" ? full : Math.round(full * PRACTICE_SHARE);
     }
     case "incident":
-      return payment.points >= INCIDENT_MIN_POINTS ? Math.round(payment.points) * INCIDENT_CENTS_PER_POINT : 0;
+      return payment.points >= INCIDENT_MIN_POINTS ? Math.round(payment.points) * INCIDENT_CENTS_PER_POINT_BY_TIER[payment.tier] : 0;
   }
 }
 

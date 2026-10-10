@@ -67,7 +67,7 @@ export type ShiftGame = {
   readonly hintsUsedToday: number;
   /** Records one allowance hint opened today. */
   spendHint(): void;
-  recordWarRoom(scenario: { readonly id: string; readonly title: string }, result: Debrief, run: { readonly isTeam: boolean; readonly startedAt: number }): void;
+  recordWarRoom(scenario: { readonly id: string; readonly title: string; readonly tier: Tier }, result: Debrief, run: { readonly isTeam: boolean; readonly startedAt: number }): void;
   /** Pays salary for whole minutes of active play in the office. */
   paySalary(minutes: number): void;
 };
@@ -146,14 +146,14 @@ export function useShiftGame({ library, store, today: clock, now = Date.now }: G
     [commit, progress],
   );
   const recordWarRoom = useCallback(
-    (scenario: { readonly id: string; readonly title: string }, result: Debrief, run: { readonly isTeam: boolean; readonly startedAt: number }) => {
+    (scenario: { readonly id: string; readonly title: string; readonly tier: Tier }, result: Debrief, run: { readonly isTeam: boolean; readonly startedAt: number }) => {
       // A run closed with a bought solution counts as played, but pays nothing and teaches the ladder nothing.
       if (hasBoughtSolution(progress.wallet, { scenarioId: scenario.id, runStartedAt: run.startedAt })) {
         commit(recordAssistedRun(progress, scenario.id));
         return;
       }
       const recorded = recordWarRoomRun(progress, scenario.id, result.points, result.grade);
-      const bonus = { kind: "incident", ref: payRef.incident(scenario.id, run.startedAt), points: result.points, title: scenario.title, isTeam: run.isTeam } as const;
+      const bonus = { kind: "incident", ref: payRef.incident(scenario.id, run.startedAt), points: result.points, tier: scenario.tier, title: scenario.title, isTeam: run.isTeam } as const;
       commit(earn(recorded, bonus, now()));
     },
     [commit, now, progress],

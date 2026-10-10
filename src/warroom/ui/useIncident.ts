@@ -67,7 +67,7 @@ function reduce(state: State, action: Action, scenario: Scenario, role: Role): S
   switch (action.type) {
     case "tick": {
       const advanced = advance(state.incident, scenario);
-      const team = applyTeamwork(advanced.incident, scenario, role, state.teamworkDone);
+      const team = applyTeamwork(advanced.incident, scenario, new Set([role]), state.teamworkDone);
       const notices = [...state.notices, ...(advanced.notice ? [commsFor(advanced.notice, team.incident)] : []), ...team.messages];
       return { ...state, incident: team.incident, teamworkDone: team.done, notices };
     }

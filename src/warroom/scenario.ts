@@ -71,8 +71,8 @@ export type Scenario = {
   /** Per-role outcomes beyond the root cause; each unmet one costs points in the debrief. */
   readonly objectives?: (state: ClusterState) => readonly Objective[];
   /**
-   * What colleagues do when a solo player can't cover every role: each step is the correct
-   * move for one role, made by a named teammate at a realistic moment. The player's own role is never automated.
+   * What colleagues do for the roles no player covers, solo or in a room: each step is the correct
+   * move for one role, made by a named teammate at a realistic moment. A role a player holds is never automated.
    */
   readonly teamPlaybook?: readonly TeamPlay[];
   readonly externals: readonly ExternalService[];

@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { SpeakingContext } from "../../multiplayer/voice/context.ts";
 import { useVoice, type VoiceRoom } from "../../multiplayer/voice/useVoice.ts";
 import type { Role } from "../../domain/incident.ts";
 import { ROLE_INFO } from "../../domain/roles.ts";
@@ -83,7 +84,7 @@ export function TeamIncident({ room, scenario, role, overlay, onUseScreen, onClo
     .map((player) => ({ id: player.id, name: player.name, isMicOn: player.voice?.isMicOn ?? false }));
 
   return (
-    <>
+    <SpeakingContext value={voice.levels}>
       <LiveIncident
         scenario={scenario}
         role={role}
@@ -100,6 +101,6 @@ export function TeamIncident({ room, scenario, role, overlay, onUseScreen, onClo
         <VoiceControls voice={voice} selfId={team.selfId} members={members} />
         <TeamChat comms={room.comms} onSend={room.chat} />
       </aside>
-    </>
+    </SpeakingContext>
   );
 }

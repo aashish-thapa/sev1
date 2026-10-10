@@ -87,6 +87,8 @@ function Solution({ help, onSuggest }: Props) {
   const career = useCareer();
   const [isConfirming, setConfirming] = useState(false);
   const steps = help.scenario.solution[help.role] ?? [];
+  // A room can seat a role its incident doesn't page; there is nothing to sell that player.
+  if (steps.length === 0) return null;
   const isBought = hasBoughtSolution(wallet, { scenarioId: help.scenario.id, runStartedAt: help.runStartedAt });
   const price = solutionPriceCents(help.scenario.tier, career.level);
   const shortBy = price - wallet.balanceCents;

@@ -1,5 +1,8 @@
 import type { IncidentCard, Role } from "../domain/incident.ts";
+import type { Tier } from "../domain/tier.ts";
 import type { ClusterState } from "./sim/model.ts";
+
+export type { Tier };
 
 export type CommsMessage = {
   readonly at: number;
@@ -44,13 +47,6 @@ export type Objective = {
 /** One move of a worked solution: the exact command to run, and in one line why. */
 export type SolutionStep = { readonly command: string; readonly why: string };
 
-/**
- * How hard an incident is, matched to the career level that unlocks it (tier = level + 1):
- * 1 guided, one cause, one fix · 2 diagnose · 3 a plausible fix backfires ·
- * 4 the usual fix does nothing · 5 cloud-scale or cross-team.
- */
-export type Tier = 1 | 2 | 3 | 4 | 5;
-
 /** One playable live incident: a starting cluster, what "fixed" means, and the story around it. */
 export type Scenario = {
   readonly id: string;
@@ -75,8 +71,8 @@ export type Scenario = {
   /** Per-role outcomes beyond the root cause; each unmet one costs points in the debrief. */
   readonly objectives?: (state: ClusterState) => readonly Objective[];
   /**
-   * What colleagues do when a solo player can't cover every role: each step is the correct
-   * move for one role, made by a named teammate at a realistic moment. The player's own role is never automated.
+   * What colleagues do for the roles no player covers, solo or in a room: each step is the correct
+   * move for one role, made by a named teammate at a realistic moment. A role a player holds is never automated.
    */
   readonly teamPlaybook?: readonly TeamPlay[];
   readonly externals: readonly ExternalService[];

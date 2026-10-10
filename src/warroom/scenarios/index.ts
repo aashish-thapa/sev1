@@ -12,8 +12,14 @@ import { scaledToZero } from "./scaled-to-zero.ts";
 /** Every live incident the game ships; the app and the room server read this one list. */
 export const SCENARIOS: readonly Scenario[] = [scaledToZero, crashOnCheckout, oomAfterDeploy, checkoutPoolLeak, ordersIndexInvalid, checkoutMeltdown];
 
-/** Infra's own outages, easiest first. */
-const INFRA_SOLO: readonly Scenario[] = [scaledToZero, crashOnCheckout, oomAfterDeploy, checkoutPoolLeak, ordersIndexInvalid];
+/** Each role's own War Rooms, easiest first. A role's ladder grows as its incidents are written. */
+const LADDERS: Readonly<Record<Role, readonly Scenario[]>> = {
+  infrastructure: [scaledToZero, crashOnCheckout, oomAfterDeploy, checkoutPoolLeak, ordersIndexInvalid],
+  frontend: [],
+  mobile: [],
+  security: [],
+  data: [],
+};
 
 export function findScenario(id: string): Scenario | undefined {
   return SCENARIOS.find((scenario) => scenario.id === id);
@@ -24,13 +30,19 @@ export function isUnlocked(scenario: Scenario, level: Level): boolean {
   return scenario.tier <= level + 1;
 }
 
+/** A role's ladder and the cross-team incident, easiest first. */
+function warRoomsFor(role: Role): readonly Scenario[] {
+  return [...LADDERS[role], checkoutMeltdown];
+}
+
 /**
- * Solo War Rooms a player of `role` at `level` may play, hardest first, for a replay picker.
- * Roles without their own ladder yet only have the cross-team incident, and keep it at every level.
+ * Solo War Rooms a player of `role` at `level` may play, hardest first, for a replay picker. When
+ * the level unlocks none of them (a ladder still empty, or one whose easiest rung is out of reach),
+ * the cross-team incident stands in at any level, so solo play always has an incident.
  */
 export function unlockedWarRooms(role: Role, level: Level): readonly Scenario[] {
-  if (role !== "infrastructure") return [checkoutMeltdown];
-  return INFRA_SOLO.filter((scenario) => isUnlocked(scenario, level)).toReversed();
+  const unlocked = warRoomsFor(role).filter((scenario) => isUnlocked(scenario, level)).toReversed();
+  return unlocked.length > 0 ? unlocked : [checkoutMeltdown];
 }
 
 /**
@@ -44,16 +56,19 @@ export function soloScenarioFor(role: Role, rotation = 0, level: Level = 0): Sce
   return pool[turn];
 }
 
-/** Shared rooms always play the cross-team incident: it's the one nobody can fix alone. */
+/** The cross-team incident: every room may play it, and a new room starts on it. */
 export const TEAM_SCENARIO = checkoutMeltdown;
+
+/** War Rooms a host may open a room on: the cross-team incident first, whatever their level, then what they've unlocked. */
+export function roomWarRooms(role: Role, level: Level): readonly Scenario[] {
+  return [TEAM_SCENARIO, ...unlockedWarRooms(role, level).filter((scenario) => scenario !== TEAM_SCENARIO)];
+}
 
 /**
  * War Rooms a player may pick to practice (no pay, no experience): whatever their level unlocked,
  * and with Pro every released War Room for their role, hardest first.
  */
 export function practiceWarRooms(role: Role, level: Level, entitlements: Entitlements | null, now: number): readonly Scenario[] {
-  const pool = role === "infrastructure" ? INFRA_SOLO : [checkoutMeltdown];
-  return pool
-    .filter((scenario) => isReleasedFor(scenario.releasedAt, entitlements, now) && (isUnlocked(scenario, level) || isPro(entitlements, now)))
-    .toReversed();
+  const pool = isPro(entitlements, now) ? warRoomsFor(role).toReversed() : unlockedWarRooms(role, level);
+  return pool.filter((scenario) => isReleasedFor(scenario.releasedAt, entitlements, now));
 }

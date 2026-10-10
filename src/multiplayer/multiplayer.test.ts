@@ -5,6 +5,7 @@ import { silentLogger } from "../../server/log.ts";
 import { findScenario } from "../../server/scenarios.ts";
 import { startServer, type RunningServer, type ServerOptions } from "../../server/server.ts";
 import { advance, openIncident, type Incident } from "../warroom/incident.ts";
+import { checkoutMeltdown } from "../warroom/scenarios/checkout-meltdown.ts";
 import { checkoutPoolLeak as scenario } from "../warroom/scenarios/checkout-pool-leak.ts";
 import { runLine } from "../warroom/shell/shell.ts";
 import { backoffDelay } from "./backoff.ts";
@@ -222,9 +223,9 @@ describe("war room server", () => {
     return created.open();
   }
 
-  async function createRoom(role: "infrastructure" | "frontend" = "infrastructure") {
+  async function createRoom(role: "infrastructure" | "frontend" = "infrastructure", scenarioId = scenario.id) {
     const host = await probe();
-    host.send({ type: "create", scenarioId: scenario.id, name: "Maya", role });
+    host.send({ type: "create", scenarioId, name: "Maya", role });
     const welcome = await host.next("welcome");
     return { host, welcome };
   }
@@ -322,6 +323,42 @@ describe("war room server", () => {
     while (!rolledBack(hostIncident)) hostIncident = applyFrame(hostIncident, (await host.next("state")).frame);
     while (!rolledBack(guestIncident)) guestIncident = applyFrame(guestIncident, (await guest.next("state")).frame);
     expect(guestIncident.cluster.deployments[0].revisions).toEqual(hostIncident.cluster.deployments[0].revisions);
+  });
+
+  /** Who has posted to the room so far, as a late joiner's welcome shows it. */
+  async function postedBy(roomCode: string) {
+    const late = await probe();
+    late.send({ type: "join", roomCode, name: "Ana", role: "infrastructure" });
+    return (await late.next("welcome")).comms.map((message) => message.from);
+  }
+
+  /** The meltdown's colleagues as they sign their playbook moves; the script also has Priya and Sam post in other hats. */
+  const PRIYA = "Priya Shah · Frontend";
+  const SAM = "Sam Tan · Infra / SRE";
+  const JONAS = "Jonas Weber · Mobile";
+  const saidBy = (from: string) => (message: ServerMessageOf<"comms">) => message.message.from === from;
+
+  it("has colleagues play the meltdown's roles nobody in the room holds, and never a seated one", async () => {
+    await boot();
+    const { host, welcome } = await createRoom("infrastructure", checkoutMeltdown.id);
+    // The meltdown's playbook: frontend at t=55, infra at 70, mobile at 80.
+    expect((await host.next("comms", saidBy(PRIYA))).message.text).toContain("checkout.auto_retry");
+    await host.next("comms", saidBy(JONAS));
+    const posted = await postedBy(welcome.roomCode);
+    expect(posted).toContain(PRIYA);
+    expect(posted).not.toContain(SAM);
+  });
+
+  it("counts a dropped player's held seat as covered, so no colleague takes their job", async () => {
+    await boot();
+    const { host, welcome } = await createRoom("infrastructure", checkoutMeltdown.id);
+    const guest = await probe();
+    guest.send({ type: "join", roomCode: welcome.roomCode, name: "Sam", role: "frontend" });
+    await guest.next("welcome");
+    guest.close();
+    await host.next("players", (message) => message.players.some((player) => player.name === "Sam" && !player.isConnected));
+    await host.next("state", (message) => message.frame.cluster.t >= 60);
+    expect(await postedBy(welcome.roomCode)).not.toContain(PRIYA);
   });
 
   it("answers malformed messages with an error and keeps the room running", async () => {

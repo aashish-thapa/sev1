@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isPlausibleProgress } from "./audit.ts";
-import { INCIDENT_CENTS_PER_POINT, payRef } from "./economy.ts";
+import { INCIDENT_CENTS_PER_POINT_BY_TIER, payRef } from "./economy.ts";
 import { earn, emptyProgress, type Progress } from "./progress.ts";
 import { hasBoughtSolution, purchaseRef, solutionPriceCents, spend, type SolutionPurchase } from "./purchases.ts";
 
@@ -12,7 +12,7 @@ const purchase: SolutionPurchase = { kind: "solution", scenarioId: "scaled-to-ze
 function richPlayer(incidents: number): Progress {
   let progress = emptyProgress();
   for (let index = 0; index < incidents; index += 1) {
-    progress = earn(progress, { kind: "incident", ref: payRef.incident(`run-${index}`, AT + index), points: 100, title: "x", isTeam: false }, AT);
+    progress = earn(progress, { kind: "incident", ref: payRef.incident(`run-${index}`, AT + index), points: 100, tier: 1, title: "x", isTeam: false }, AT);
   }
   return progress;
 }
@@ -30,8 +30,8 @@ describe("solution prices", () => {
     expect(solutionPriceCents(5, 4)).toBe(3 * solutionPriceCents(5, 0));
   });
 
-  it("always cost more than a perfect incident pays from tier 2 at engineer level up", () => {
-    expect(solutionPriceCents(3, 2)).toBeGreaterThan(100 * INCIDENT_CENTS_PER_POINT);
+  it("cost Staff more than a perfect run pays on the two hardest tiers", () => {
+    for (const tier of [4, 5] as const) expect(solutionPriceCents(tier, 4)).toBeGreaterThan(100 * INCIDENT_CENTS_PER_POINT_BY_TIER[tier]);
   });
 });
 

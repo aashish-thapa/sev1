@@ -3,8 +3,9 @@ import type { IncidentLibrary } from "../content/library.ts";
 import type { LocalDate } from "../domain/calendar.ts";
 import { careerLevel } from "../domain/career.ts";
 import { ROLE_IDS, ROLES, roleOf, type IncidentCard, type Role } from "../domain/incident.ts";
-import { payRef } from "../domain/economy.ts";
-import { hasBoughtSolution, spend, type SolutionTier, type SpendOutcome } from "../domain/purchases.ts";
+import { paidTier, payRef } from "../domain/economy.ts";
+import { hasBoughtSolution, spend, type SpendOutcome } from "../domain/purchases.ts";
+import type { Tier } from "../domain/tier.ts";
 import { hasEarned } from "../domain/achievements.ts";
 import { chooseRole, earn, featureBadge, hasFinishedShift, hintsUsedOn, recordAssistedRun, spendHint as spendHintOn, recordAttempt, recordWarRoomRun, startShift, type Attempt, type Progress } from "../domain/progress.ts";
 import { overallRating, rateAttempt, STARTING_RATING } from "../domain/rating.ts";
@@ -61,12 +62,12 @@ export type ShiftGame = {
   closeDiscussion(): void;
   /** Records the run and pays the resolution bonus (every player in a team room is paid their own). */
   /** Buys the step-by-step solution for this run; the run then pays nothing and earns no experience. */
-  buySolution(scenario: { readonly id: string; readonly title: string; readonly tier: SolutionTier }, runStartedAt: number): SpendOutcome;
+  buySolution(scenario: { readonly id: string; readonly title: string; readonly tier: Tier }, runStartedAt: number): SpendOutcome;
   /** Allowance hints opened today (Pro's daily free hints). */
   readonly hintsUsedToday: number;
   /** Records one allowance hint opened today. */
   spendHint(): void;
-  recordWarRoom(scenario: { readonly id: string; readonly title: string }, result: Debrief, run: { readonly isTeam: boolean; readonly startedAt: number }): void;
+  recordWarRoom(scenario: { readonly id: string; readonly title: string; readonly tier: Tier }, result: Debrief, run: { readonly isTeam: boolean; readonly startedAt: number }): void;
   /** Pays salary for whole minutes of active play in the office. */
   paySalary(minutes: number): void;
 };
@@ -145,21 +146,22 @@ export function useShiftGame({ library, store, today: clock, now = Date.now }: G
     [commit, progress],
   );
   const recordWarRoom = useCallback(
-    (scenario: { readonly id: string; readonly title: string }, result: Debrief, run: { readonly isTeam: boolean; readonly startedAt: number }) => {
+    (scenario: { readonly id: string; readonly title: string; readonly tier: Tier }, result: Debrief, run: { readonly isTeam: boolean; readonly startedAt: number }) => {
       // A run closed with a bought solution counts as played, but pays nothing and teaches the ladder nothing.
       if (hasBoughtSolution(progress.wallet, { scenarioId: scenario.id, runStartedAt: run.startedAt })) {
         commit(recordAssistedRun(progress, scenario.id));
         return;
       }
       const recorded = recordWarRoomRun(progress, scenario.id, result.points, result.grade);
-      const bonus = { kind: "incident", ref: payRef.incident(scenario.id, run.startedAt), points: result.points, title: scenario.title, isTeam: run.isTeam } as const;
+      const tier = paidTier(scenario.tier, careerLevel(progress).level);
+      const bonus = { kind: "incident", ref: payRef.incident(scenario.id, run.startedAt), points: result.points, tier, title: scenario.title, isTeam: run.isTeam } as const;
       commit(earn(recorded, bonus, now()));
     },
     [commit, now, progress],
   );
   const spendHint = useCallback(() => commit(spendHintOn(progress, today)), [commit, progress, today]);
   const buySolution = useCallback(
-    (scenario: { readonly id: string; readonly title: string; readonly tier: SolutionTier }, runStartedAt: number): SpendOutcome => {
+    (scenario: { readonly id: string; readonly title: string; readonly tier: Tier }, runStartedAt: number): SpendOutcome => {
       const purchase = { kind: "solution", scenarioId: scenario.id, runStartedAt, tier: scenario.tier, level: careerLevel(progress).level, title: scenario.title } as const;
       const outcome = spend(progress.wallet, purchase, now());
       if (outcome.ok && outcome.wallet !== progress.wallet) commit({ ...progress, wallet: outcome.wallet });

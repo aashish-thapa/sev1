@@ -21,7 +21,7 @@ function playSolo(role: Role): Incident {
   let isDeclared = false;
   for (let second = 0; second < 1400 && incident.phase.name !== "closed"; second += 1) {
     incident = advance(incident, scenario).incident;
-    const team = applyTeamwork(incident, scenario, role, done);
+    const team = applyTeamwork(incident, scenario, new Set([role]), done);
     incident = team.incident;
     done = team.done;
     if (!hasMoved && incident.cluster.t >= PLAYER_MOVE[role].at) {
@@ -49,8 +49,19 @@ describe("solo play with colleagues covering the other roles", () => {
     let done: ReadonlySet<number> = new Set();
     for (let second = 0; second < 400; second += 1) {
       incident = advance(incident, scenario).incident;
-      ({ incident, done } = applyTeamwork(incident, scenario, "frontend", done));
+      ({ incident, done } = applyTeamwork(incident, scenario, new Set(["frontend"]), done));
     }
     expect(debrief(incident, scenario, true).objectives?.find((objective) => objective.role === "frontend")?.isMet).toBe(false);
+  });
+
+  it("leaves every covered role to its player and plays each uncovered role's step", () => {
+    let incident = openIncident(scenario);
+    let done: ReadonlySet<number> = new Set();
+    for (let second = 0; second < 400; second += 1) {
+      incident = advance(incident, scenario).incident;
+      ({ incident, done } = applyTeamwork(incident, scenario, new Set(["infrastructure", "frontend"]), done));
+    }
+    const played = [...done].map((index) => scenario.teamPlaybook?.[index]?.role);
+    expect(played.toSorted()).toEqual(["data", "mobile", "security"]);
   });
 });

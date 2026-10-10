@@ -32,7 +32,7 @@ export function App({ shareUrl, proSale, adminApi, ...services }: Props) {
   const room = useRoom({ url: roomUrl() });
   const role = game.progress.role ?? "infrastructure";
   const isInRoom = room.room !== null && room.status !== "left" && room.status !== "failed";
-  // Solo infra rotates through the pure infra outages; other roles and every team room get the cross-team meltdown.
+  // Solo play rotates through the role's unlocked War Rooms; a room plays the incident its host picked.
   const career = useMemo(() => careerLevel(game.progress), [game.progress]);
   const scenario = isInRoom ? (findScenario(room.room?.scenarioId ?? "") ?? TEAM_SCENARIO) : soloScenarioFor(role, warRoomPlays(game.progress), career.level);
 
@@ -95,7 +95,7 @@ export function App({ shareUrl, proSale, adminApi, ...services }: Props) {
           rooms={{
             status: room.status,
             error: room.error?.message ?? null,
-            onCreate: (name, visibility) => room.create(TEAM_SCENARIO.id, { name, role, badge }, visibility),
+            onCreate: (name, visibility, scenarioId) => room.create(scenarioId, { name, role, badge }, visibility),
             onJoin: (code, name) => room.join(code, { name, role, badge }),
             listPublic: fetchPublicRooms,
           }}

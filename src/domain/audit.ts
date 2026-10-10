@@ -13,6 +13,7 @@ import {
   MIN_SECONDS_PER_INCIDENT,
   SALARY_CENTS_PER_MINUTE,
   SPEND_REASONS,
+  scenarioOfIncident,
   type LedgerEntry,
   type PayReason,
   type Wallet,
@@ -31,9 +32,11 @@ const EARN_REASONS = ["salary", "card", "incident"] as const satisfies readonly 
 /** Looks up the tier of a scenario by id; the Worker answers from the scenario registry. */
 export type TierOf = (scenarioId: string) => Tier | undefined;
 
-/** With no registry, nothing can be bought — every purchase line is rejected. */
+/** With no registry, no incident payout or purchase can be priced — every such line is rejected. */
 const NO_TIERS: TierOf = () => undefined;
 
+/** Is an incident line paid no more than a perfect run of its scenario's tier? */
+type FairIncidentPay = (entry: LedgerEntry) => boolean;
 /** Is a purchase line charged at least the price for its scenario at the buyer's level? */
 type FairPrice = (entry: LedgerEntry) => boolean;
 
@@ -42,6 +45,7 @@ export function isPlausibleWallet(
   next: Wallet,
   elapsedSeconds: number,
   topLevel: Level = 4,
+  isFairIncidentPay: FairIncidentPay = () => false,
   isFairPrice: FairPrice = () => false,
 ): boolean {
   if (!(elapsedSeconds >= 0)) return false;
@@ -73,15 +77,17 @@ export function isPlausibleWallet(
   if (incidents > seconds / MIN_SECONDS_PER_INCIDENT + EVENT_ALLOWANCE) return false;
   if (delta("incident", "earnedCents") > incidents * MAX_INCIDENT_CENTS) return false;
 
-  const purchases = freshLines(previous, next).filter((entry) => (SPEND_REASONS as readonly string[]).includes(entry.reason));
+  const fresh = freshLines(previous, next);
+  if (fresh.some((entry) => entry.reason === "incident" && !isFairIncidentPay(entry))) return false;
+  const purchases = fresh.filter((entry) => (SPEND_REASONS as readonly string[]).includes(entry.reason));
   if (purchases.some((entry) => entry.amountCents >= 0 || !isFairPrice(entry))) return false;
 
   return isLedgerConsistent(previous, next);
 }
 
 /**
- * Is `next` an honest successor of `previous` after `elapsedSeconds`? `tierOf` prices any
- * solutions bought in between; without it, a save containing a new purchase is refused.
+ * Is `next` an honest successor of `previous` after `elapsedSeconds`? `tierOf` caps each incident
+ * payout and prices each solution bought in between; without it, a save with either is refused.
  */
 export function isPlausibleProgress(previous: Progress, next: Progress, elapsedSeconds: number, tierOf: TierOf = NO_TIERS): boolean {
   // Career level reads correctCards and passed War Rooms, so each may only grow by work that was also paid for.
@@ -89,9 +95,13 @@ export function isPlausibleProgress(previous: Progress, next: Progress, elapsedS
   const newPaidCards = next.wallet.paidUnits.card - previous.wallet.paidUnits.card;
   const newPaidIncidents = next.wallet.paidUnits.incident - previous.wallet.paidUnits.incident;
   const lowestLevel = careerLevel(previous).level;
+  const tierFrom = (scenarioId: string | null) => (scenarioId === null ? undefined : tierOf(scenarioId));
+  const isFairIncidentPay: FairIncidentPay = (entry) => {
+    const tier = tierFrom(scenarioOfIncident(entry.ref));
+    return tier !== undefined && entry.amountCents <= 100 * INCIDENT_CENTS_PER_POINT_BY_TIER[tier];
+  };
   const isFairPrice: FairPrice = (entry) => {
-    const scenarioId = scenarioOfPurchase(entry.ref);
-    const tier = scenarioId === null ? undefined : tierOf(scenarioId);
+    const tier = tierFrom(scenarioOfPurchase(entry.ref));
     // Price rises with level, so charging at the level the buyer started this sync from is the floor.
     return tier !== undefined && -entry.amountCents >= solutionPriceCents(tier, lowestLevel);
   };
@@ -99,7 +109,7 @@ export function isPlausibleProgress(previous: Progress, next: Progress, elapsedS
     newCorrect >= 0 &&
     newCorrect <= newPaidCards &&
     improvedPassingWarRooms(previous, next) <= newPaidIncidents &&
-    isPlausibleWallet(previous.wallet, next.wallet, elapsedSeconds, careerLevel(next).level, isFairPrice)
+    isPlausibleWallet(previous.wallet, next.wallet, elapsedSeconds, careerLevel(next).level, isFairIncidentPay, isFairPrice)
   );
 }
 
@@ -127,8 +137,17 @@ function isLedgerConsistent(previous: Wallet, next: Wallet): boolean {
   }
   const total = fresh.reduce((sum, entry) => sum + entry.amountCents, 0);
   const balanceDelta = next.balanceCents - previous.balanceCents;
-  if (fresh.length === next.nextSeq - previous.nextSeq) return total === balanceDelta;
+  if (fresh.length === next.nextSeq - previous.nextSeq) return total === balanceDelta && isBookedByReason(previous, next, fresh);
   // Lines go missing only when the cap evicts them oldest-first — so the whole ledger must then be new.
   const isEvictedByCap = next.ledger.length === LEDGER_LIMIT && fresh.length === LEDGER_LIMIT;
   return isEvictedByCap && total <= balanceDelta;
+}
+
+/** Each reason's totals move by exactly its own lines, so money paid under one reason can't be booked to another. */
+function isBookedByReason(previous: Wallet, next: Wallet, fresh: readonly LedgerEntry[]): boolean {
+  const linesFor = (reason: LedgerEntry["reason"]) => fresh.filter((entry) => entry.reason === reason).reduce((sum, entry) => sum + entry.amountCents, 0);
+  return (
+    EARN_REASONS.every((reason) => linesFor(reason) === next.earnedCents[reason] - previous.earnedCents[reason]) &&
+    SPEND_REASONS.every((reason) => -linesFor(reason) === next.spentCents[reason] - previous.spentCents[reason])
+  );
 }

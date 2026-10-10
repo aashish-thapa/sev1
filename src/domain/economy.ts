@@ -47,6 +47,12 @@ export const payRef = {
   incident: (scenarioId: string, runStartedAt: number) => `incident:${scenarioId}:${runStartedAt}`,
 } as const;
 
+/** The scenario an incident payout was for, read back from its `payRef.incident` ref; null for any other ref. */
+export function scenarioOfIncident(ref: string): string | null {
+  const match = /^incident:(.+):\d+$/.exec(ref);
+  return match ? match[1] : null;
+}
+
 const REASONS = ["salary", "card", "incident"] as const satisfies readonly Payment["kind"][];
 export type PayReason = (typeof REASONS)[number];
 /** What money can be spent on; purchases are negative ledger lines (see purchases.ts). */

@@ -140,8 +140,7 @@ Two drops on this branch:
 - **Drop 2, tiers 3–4** (8 scenarios): service-worker rollout, JA4, update wall, client-side defects, threshold/mode/features, `pipelines`.
 
 Sequence:
-1. Foundation (F-A … F-H) on top of Part 1.
-2. Then, in parallel worktrees: Frontend, Security and Data (each fills only its own hook file, its tools and its scenarios).
-3. Mobile after Frontend (it shares `clients.ts` and `releases.ts`).
+1. Foundation (F-A … F-H), plus P1 (client defects), which Frontend and Mobile share, on top of Part 1.
+2. Then all four roles in parallel worktrees, each running straight through tiers 1–4: each fills only its own hook file, its tools and its scenarios. Frontend and Mobile both touch `releases.ts` (rollout labels and the per-build column); the orchestrator resolves that at merge.
 
 Remaining shared files are `scenarios/index.ts` (one line per scenario) and `ladder.test.ts`; the orchestrator resolves those at merge.

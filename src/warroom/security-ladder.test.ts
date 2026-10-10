@@ -147,9 +147,42 @@ describe("waf block --ja4", () => {
     expect(securityShell(shopUnder(loginStuffing), `waf block --ja4 ${CHROMIUM_JA4}`).commerce?.wafRules.at(-1)).toMatchObject({ customerShare: 0.31, attackShare: 0 });
   });
 
-  it("refuses anything that isn't a JA4 fingerprint", () => {
+  it("refuses anything that isn't a fingerprint", () => {
     const { text, commerce } = securityShell(shopUnder(loginStuffing), "waf block --ja4 771,4865-4866,0-23");
     expect(text).toContain('"771,4865-4866,0-23" is not a JA4 fingerprint');
     expect(commerce).toBeUndefined();
+  });
+});
+
+describe("siem resolve --contained-by", () => {
+  const playbook: SiemAlert = { id: "SEC-1", title: "Card testing", rule: "test", severity: "high", openedAt: -60, autoContainAt: 300, containTopIps: 500, resolution: null };
+  const blocked = (alerts: readonly SiemAlert[]) => {
+    const shop = { ...shopUnder(cardTesters), alerts };
+    const commerce = securityShell(shop, "waf block 5.161.0.0/16").commerce;
+    if (!commerce) throw new Error("block failed");
+    return commerce;
+  };
+
+  it("closes a true positive on the analyst's own rule, and the playbook's block never runs", () => {
+    const { text, commerce } = securityShell(blocked([playbook]), 'siem resolve SEC-1 --disposition true-positive --contained-by r-0001 --note "card testers"');
+    expect(text).toContain("Containment recorded: r-0001 (block: ip.src in {5.161.0.0/16}");
+    expect(commerce?.wafRules.map((rule) => rule.id)).toEqual(["r-0001"]);
+    expect(commerce?.alerts[0]).toMatchObject({ autoContainAt: null, resolution: { disposition: "true-positive", note: "card testers (contained by r-0001)" } });
+  });
+
+  it("refuses a rule that doesn't exist, a disposition that isn't true-positive, or no rule at all", () => {
+    expect(securityShell(blocked([playbook]), "siem resolve SEC-1 --disposition true-positive --contained-by r-0042").text).toContain("rule r-0042 not found");
+    expect(securityShell(blocked([playbook]), "siem resolve SEC-1 --disposition benign --contained-by r-0001").text).toContain("goes with a true-positive");
+    const bare = securityShell(blocked([playbook]), "siem resolve SEC-1 --disposition true-positive --contained-by");
+    expect(bare.text).toContain("usage: siem resolve");
+    expect(bare.commerce).toBeUndefined();
+  });
+
+  it("still runs the playbook on a plain true positive, and blocks nothing for an alert that has none", () => {
+    expect(securityShell(blocked([playbook]), "siem resolve SEC-1 --disposition true-positive").commerce?.wafRules).toHaveLength(2);
+    const noPlaybook = { ...playbook, autoContainAt: null, containTopIps: 0 };
+    const { text, commerce } = securityShell(blocked([noPlaybook]), "siem resolve SEC-1 --disposition true-positive");
+    expect(commerce?.wafRules).toHaveLength(1);
+    expect(text).toContain("no SOAR containment playbook");
   });
 });

@@ -6,6 +6,7 @@
 import { z } from "zod";
 import { CATEGORY_IDS, ROOM_KIND_IDS, SERVER_TIER_IDS } from "../domain/company/catalog.ts";
 import { ROLE_IDS, type Role } from "../domain/incident.ts";
+import { CodeFixTaskSchema, PrReviewTaskSchema } from "../domain/work/task.ts";
 
 export const COMPANY_PATH = "/api/company";
 
@@ -15,6 +16,8 @@ const ServerTierIdSchema = z.enum(SERVER_TIER_IDS);
 const RoleSchema = z.enum(ROLE_IDS as [Role, ...Role[]]);
 const Cents = z.int().nonnegative();
 const SignedCents = z.int();
+const Count = z.int().nonnegative();
+const CompanyLevelSchema = z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]);
 
 /** Unfunded until the founder's seed spend lands (it expires after a day); active after. */
 export const COMPANY_STATES = ["unfunded", "active"] as const;
@@ -36,6 +39,8 @@ export const CompanyMemberSchema = z.object({
   payCents: Cents,
   isFounder: z.boolean(),
   joinedAt: z.number(),
+  /** Can open postings and hire or reject applicants; the founder always can. */
+  canHire: z.boolean().default(false),
 });
 
 export const SentInvitationSchema = z.object({ id: z.string(), username: z.string(), role: RoleSchema, payCents: Cents });
@@ -65,6 +70,13 @@ export const CompanySchema = z.object({
   ledger: z.array(CompanyLedgerLineSchema).max(60),
   /** Present only while unfunded: the spend that will fund it. */
   funding: z.object({ ref: z.string(), seedCents: Cents, expiresAt: z.number() }).nullable(),
+  /** Computed on the server from the books; older servers omit these. */
+  level: CompanyLevelSchema.default(1),
+  levelTitle: z.string().default("Garage"),
+  lifetimeRevenueCents: Cents.default(0),
+  postings: z.array(z.lazy(() => PostingSchema)).default([]),
+  /** Applicants to this company's postings; only the founder and hiring managers get them. */
+  applications: z.array(z.lazy(() => ApplicationSchema)).default([]),
 });
 export type Company = z.output<typeof CompanySchema>;
 
@@ -89,13 +101,15 @@ export const MyCompanySchema = z.object({
   company: CompanySchema.nullable(),
   invitations: z.array(ReceivedInvitationSchema),
   payouts: z.array(PendingPayoutSchema),
+  /** Postings you've interviewed for, and where each stands. */
+  applications: z.array(z.lazy(() => MyApplicationSchema)).default([]),
 });
 export type MyCompany = z.output<typeof MyCompanySchema>;
 
 export const BuyRoomRequestSchema = z.object({ room: RoomKindIdSchema });
 export const BuyServerRequestSchema = z.object({ server: ServerTierIdSchema });
 export const InviteRequestSchema = z.object({ username: z.string().trim().min(1).max(24), role: RoleSchema, payCents: Cents });
-export const SetMemberRequestSchema = z.object({ username: z.string(), role: RoleSchema, payCents: Cents });
+export const SetMemberRequestSchema = z.object({ username: z.string(), role: RoleSchema, payCents: Cents, canHire: z.boolean().optional() });
 
 /**
  * POST /api/company/workday body: tasks the member shipped today. Phase 1 trusts it within a cap
@@ -112,3 +126,94 @@ export const WorkDaySettlementSchema = z.object({
   isPayrollShort: z.boolean(),
 });
 export type WorkDaySettlement = z.output<typeof WorkDaySettlementSchema>;
+
+// ── Levels, hiring and the company leaderboard ─────────────────────
+
+export const COMPANIES_PATH = "/api/companies";
+export const TOP_COMPANIES_PATH = "/api/companies/top";
+export const POSTINGS_PATH = "/api/company/postings";
+
+const CareerLevelSchema = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3), z.literal(4)]);
+const Score = z.int().min(0).max(100);
+
+/** An open role: what it pays and the bar an applicant must clear. */
+export const PostingSchema = z.object({
+  id: z.string(),
+  companyId: z.string(),
+  role: RoleSchema,
+  payCents: Cents,
+  /** The lowest career level that may apply (0 = intern). */
+  minCareerLevel: CareerLevelSchema,
+  /** The interview score, 0…100, an applicant needs before they can be hired. */
+  minScore: Score,
+  isOpen: z.boolean(),
+  createdAt: z.number(),
+});
+export type Posting = z.output<typeof PostingSchema>;
+
+export const OpenPostingRequestSchema = PostingSchema.pick({ role: true, payCents: true, minCareerLevel: true, minScore: true });
+export type OpenPostingRequest = z.input<typeof OpenPostingRequestSchema>;
+
+/** A company as the leaderboard and search list it: public, so no funds or books. */
+export const CompanySummarySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  category: CategoryIdSchema,
+  level: CompanyLevelSchema,
+  levelTitle: z.string(),
+  founder: z.string(),
+  members: Count,
+  revenue7dCents: Cents,
+  lifetimeRevenueCents: Cents,
+  /** Open postings only. */
+  postings: z.array(PostingSchema).max(20),
+});
+export type CompanySummary = z.output<typeof CompanySummarySchema>;
+
+export const CompanyListSchema = z.object({ companies: z.array(CompanySummarySchema).max(50) });
+
+/** Someone who interviewed for a posting, as the founder or a hiring manager sees them. */
+export const ApplicationSchema = z.object({
+  id: z.string(),
+  postingId: z.string(),
+  username: z.string(),
+  careerTitle: z.string(),
+  score: Score,
+  /** Below the posting's bar is rejected at once; otherwise it waits for a hire or reject. */
+  status: z.enum(["pending", "hired", "rejected"]),
+  appliedAt: z.number(),
+});
+export type Application = z.output<typeof ApplicationSchema>;
+
+/** Your own application, as you see it. */
+export const MyApplicationSchema = ApplicationSchema.extend({ companyName: z.string(), role: RoleSchema, payCents: Cents });
+export type MyApplication = z.output<typeof MyApplicationSchema>;
+
+/** A bug fix question: the task with its bug line, right patch and explanation removed. */
+const CodeFixQuestionSchema = CodeFixTaskSchema.pick({ kind: true, id: true, title: true, ticket: true, file: true, failing: true, fixes: true });
+/** A review question: the PR with its verdict, flaw and explanation removed. */
+const ReviewQuestionSchema = PrReviewTaskSchema.pick({ kind: true, id: true, title: true, author: true, description: true, path: true, language: true, diff: true });
+
+/** POST /api/postings/:id/apply: the interview, answers withheld. Answer before `expiresAt`. */
+export const InterviewSchema = z.object({
+  id: z.string(),
+  postingId: z.string(),
+  questions: z.array(z.discriminatedUnion("kind", [CodeFixQuestionSchema, ReviewQuestionSchema])).min(1).max(5),
+  expiresAt: z.number(),
+});
+export type Interview = z.output<typeof InterviewSchema>;
+
+export const InterviewAnswerSchema = z.discriminatedUnion("kind", [
+  z.object({ taskId: z.string(), kind: z.literal("code-fix"), line: z.int().nonnegative(), fix: z.int().nonnegative() }),
+  z.object({ taskId: z.string(), kind: z.literal("pr-review"), verdict: z.enum(["approve", "request-changes"]), flaggedLine: z.int().nonnegative().nullable() }),
+]);
+
+/** POST /api/interviews/:id/answers. */
+export const InterviewAnswersSchema = z.object({ answers: z.array(InterviewAnswerSchema).max(5) });
+export type InterviewAnswers = z.input<typeof InterviewAnswersSchema>;
+
+export const InterviewResultSchema = z.object({
+  result: z.object({ correct: Count, total: Count, score: Score }),
+  application: MyApplicationSchema,
+});
+export type InterviewResult = z.output<typeof InterviewResultSchema>;

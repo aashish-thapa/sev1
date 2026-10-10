@@ -22,7 +22,7 @@ const TaskBase = z.object({
   explanation: z.object({ cause: z.string().min(10).max(220), why: z.string().min(10).max(420) }),
 });
 
-const CodeFixTask = TaskBase.extend({
+export const CodeFixTaskSchema = TaskBase.extend({
   kind: z.literal("code-fix"),
   /** The bug report, in the reporter's words. */
   ticket: z.string().min(20).max(400),
@@ -37,7 +37,7 @@ const CodeFixTask = TaskBase.extend({
 
 const DiffLine = z.object({ op: z.enum(["+", "-", " "]), text: CodeLine });
 
-const PrReviewTask = TaskBase.extend({
+export const PrReviewTaskSchema = TaskBase.extend({
   kind: z.literal("pr-review"),
   author: z.string().max(40),
   /** The PR description, as its author wrote it. */
@@ -50,7 +50,7 @@ const PrReviewTask = TaskBase.extend({
   flaw: z.int().nonnegative().nullable(),
 });
 
-export const TaskSchema = z.discriminatedUnion("kind", [CodeFixTask, PrReviewTask]).superRefine((task, ctx) => {
+export const TaskSchema = z.discriminatedUnion("kind", [CodeFixTaskSchema, PrReviewTaskSchema]).superRefine((task, ctx) => {
   if (task.kind === "code-fix") {
     if (task.bugLine >= task.file.lines.length) ctx.addIssue({ code: "custom", path: ["bugLine"], message: "bugLine is past the last line" });
     if (task.fixAnswer >= task.fixes.length) ctx.addIssue({ code: "custom", path: ["fixAnswer"], message: "fixAnswer is past the last fix" });

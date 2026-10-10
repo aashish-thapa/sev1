@@ -63,6 +63,7 @@ function initialState(): ClusterState {
 export const checkoutPoolLeak: Scenario = {
   id: "checkout-pool-leak",
   title: "Checkout is timing out",
+  tier: 3,
   severity: "SEV2",
   service: DEPLOYMENT,
   briefing:

@@ -64,6 +64,7 @@ const get: Subcommand = (args, context) => {
   if (POD_WORDS.includes(resource)) {
     const pods = allPods(cluster).filter(({ pod }) => !name || pod.name === name);
     if (name && pods.length === 0) return { output: err(`Error from server (NotFound): pods "${name}" not found`) };
+    if (pods.length === 0) return { output: out(`No resources found in ${NAMESPACE} namespace.`) };
     const rows = pods.map(({ pod }) => {
       const status = podStatus(pod);
       return [pod.name, status.ready, status.status, restartsLabel(pod, cluster), age(cluster.t - pod.startedAt)];
@@ -119,6 +120,10 @@ const describe: Subcommand = (args, context) => {
         `  ${deployment.name}:`,
         `    Image:          ${IMAGE_REGISTRY}/${deployment.name}:${revision.tag}`,
         `    State:          ${pod.phase === "CrashLoopBackOff" ? "Waiting" : "Running"}`,
+        ...(pod.phase === "CrashLoopBackOff" ? ["      Reason:       CrashLoopBackOff"] : []),
+        ...(pod.lastTermination
+          ? ["    Last State:     Terminated", `      Reason:       ${pod.lastTermination.reason}`, `      Exit Code:    ${pod.lastTermination.exitCode}`]
+          : []),
         `    Ready:          ${podStatus(pod).ready === "1/1" ? "True" : "False"}`,
         `    Restart Count:  ${pod.restarts}`,
         "    Limits:",

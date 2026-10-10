@@ -72,6 +72,7 @@ function initialState(): ClusterState {
 export const ordersIndexInvalid: Scenario = {
   id: "orders-index-invalid",
   title: "Checkout is crawling",
+  tier: 4,
   severity: "SEV2",
   service: DEPLOYMENT,
   briefing:

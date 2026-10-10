@@ -262,6 +262,7 @@ function objectives(state: ClusterState): readonly Objective[] {
 export const checkoutMeltdown: Scenario = {
   id: "checkout-meltdown",
   title: "Checkout meltdown",
+  tier: 5,
   severity: "SEV1",
   service: DEPLOYMENT,
   briefing:

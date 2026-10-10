@@ -14,6 +14,7 @@ import {
   TERMINATION_GRACE_SECONDS,
   type ClusterEvent,
   type ClusterState,
+  type CrashWhileServing,
   type Deployment,
   type HotIndex,
   type LogEntry,
@@ -49,12 +50,20 @@ export function step(state: ClusterState, random: Random): ClusterState {
       if (pod.phase === "CrashLoopBackOff") {
         return [left > 0 ? { ...pod, phaseLeft: left } : { ...pod, phase: "Starting", phaseLeft: POD_STARTUP_SECONDS }];
       }
+      if (pod.phase === "Running") {
+        const crash = crashDue(deployment, pod, t);
+        if (!crash) return [pod];
+        open -= deployment.poolSize;
+        journal.died(deployment, pod, crash);
+        const restarts = pod.restarts + 1;
+        return [{ ...pod, phase: "CrashLoopBackOff", phaseLeft: backOffSeconds(restarts), restarts, lastTermination: crash.termination }];
+      }
       if (pod.phase === "Starting") {
         if (left > 0) return [{ ...pod, phaseLeft: left }];
         if (open + deployment.poolSize > capacity) {
           journal.crash(deployment, pod, state.database);
           const restarts = pod.restarts + 1;
-          return [{ ...pod, phase: "CrashLoopBackOff", phaseLeft: Math.min(10 * 2 ** (restarts - 1), 300), restarts }];
+          return [{ ...pod, phase: "CrashLoopBackOff", phaseLeft: backOffSeconds(restarts), restarts, lastTermination: { reason: "Error", exitCode: 1 } }];
         }
         open += deployment.poolSize;
         journal.log(pod.name, "INFO", `Started ${applicationName(deployment)} in ${(13 + random() * 3).toFixed(3)} seconds (process running for ${(14 + random() * 3).toFixed(3)})`);
@@ -166,13 +175,18 @@ function reconcile(
 function routeTraffic(deployment: Deployment, load: Load, connectionHoldSeconds: number, t: number, random: Random, journal: Journal) {
   const { requestsPerSecond, checkoutShare, gatewayFailShare, leakPressure } = load;
   const serving = deployment.pods.filter(isServing);
-  const perPodRps = serving.length > 0 ? requestsPerSecond / serving.length : 0;
-  let failedRps = serving.length > 0 ? 0 : requestsPerSecond;
-  let checkoutFailedRps = serving.length > 0 ? 0 : requestsPerSecond * checkoutShare;
+  const offeredPerPod = serving.length > 0 ? requestsPerSecond / serving.length : 0;
+  // Past its capacity a pod sheds the overflow; with no capacity set, any pod copes with any load.
+  const perPodRps = Math.min(offeredPerPod, deployment.podCapacityRps ?? Infinity);
+  const shedRps = (offeredPerPod - perPodRps) * serving.length;
+  let failedRps = serving.length > 0 ? shedRps : requestsPerSecond;
+  let checkoutFailedRps = serving.length > 0 ? shedRps * checkoutShare : requestsPerSecond * checkoutShare;
   let gatewayCallsPerSecond = 0;
 
   if (serving.length === 0 && t % 4 === 0) {
     journal.log("edge-lb", "ERROR", `"POST /checkout HTTP/1.1" 503 UH 0 19 0 - "-" "checkout-web/4.2" upstream=${deployment.name}`);
+  } else if (shedRps > 0 && t % 4 === 0) {
+    journal.log("edge-lb", "ERROR", `"POST /checkout HTTP/1.1" 503 UO 0 81 0 - "-" "checkout-web/4.2" upstream=${deployment.name} (upstream overflow)`);
   }
 
   const pods = deployment.pods.map((pod, index): Pod => {
@@ -183,14 +197,20 @@ function routeTraffic(deployment: Deployment, load: Load, connectionHoldSeconds:
     const available = deployment.poolSize - leaked;
     const failFraction = !isPodServing ? 0 : available <= 0 ? 1 : Math.max(0, 1 - available / demand);
     failedRps += perPodRps * failFraction;
+    // A build that throws on checkout fails every checkout it reaches, before any gateway call.
+    const reachedCheckouts = isPodServing ? perPodRps * (1 - failFraction) * checkoutShare : 0;
+    const thrown = throwsOnCheckout(deployment, pod) ? reachedCheckouts : 0;
+    failedRps += thrown;
+    checkoutFailedRps += thrown;
     // Starved requests fail before checkout-api ever calls the gateway; the rest may time out there.
-    const gatewayCalls = isPodServing ? perPodRps * (1 - failFraction) * checkoutShare : 0;
+    const gatewayCalls = reachedCheckouts - thrown;
     const gatewayFailed = gatewayCalls * gatewayFailShare;
     failedRps += gatewayFailed;
     checkoutFailedRps += perPodRps * failFraction * checkoutShare + gatewayFailed;
     gatewayCallsPerSecond += gatewayCalls;
 
     for (const trait of revisionOf(deployment, pod.revision).traits) {
+      if (trait.kind !== "leaks-connection-on-dependency-timeout") continue;
       const reached = perPodRps * (1 - failFraction);
       const leakRate = trait.leaksPerSecondAtBaseline * (reached / trait.perPodBaselineRps) * leakPressure;
       if (isPodServing && leaked < deployment.poolSize && random() < leakRate) {
@@ -219,6 +239,30 @@ function routeTraffic(deployment: Deployment, load: Load, connectionHoldSeconds:
   });
 
   return { deployment: { ...deployment, pods }, failedRps, checkoutFailedRps, gatewayCallsPerSecond };
+}
+
+/** Kubelet's restart back-off: 10 s doubling per restart, capped at five minutes. */
+function backOffSeconds(restarts: number): number {
+  return Math.min(10 * 2 ** (restarts - 1), 300);
+}
+
+function throwsOnCheckout(deployment: Deployment, pod: Pod): boolean {
+  return revisionOf(deployment, pod.revision).traits.some((trait) => trait.kind === "crashes-while-serving" && trait.failsCheckouts);
+}
+
+/** The crash this running pod's build has coming now, if any. */
+function crashDue(deployment: Deployment, pod: Pod, t: number): CrashWhileServing | undefined {
+  const serving = t - pod.startedAt;
+  return revisionOf(deployment, pod.revision).traits.find(
+    (trait): trait is CrashWhileServing => trait.kind === "crashes-while-serving" && serving >= trait.afterSeconds + jitter(pod.name, trait.jitterSeconds),
+  );
+}
+
+/** A stable per-pod offset in [0, spread), so a pod's crash time doesn't change between ticks. */
+function jitter(name: string, spread: number): number {
+  let hash = 0;
+  for (const char of name) hash = Math.imul(hash ^ char.charCodeAt(0), 2654435761) >>> 0;
+  return spread > 0 ? hash % spread : 0;
 }
 
 function applicationName(deployment: Deployment): string {
@@ -287,6 +331,16 @@ class Journal {
     if (index.rebuild && index.rebuild.secondsLeft <= 1) {
       this.log(source, "INFO", `LOG:  index "${index.name}" rebuilt; statement: REINDEX INDEX ${index.rebuild.isLocking ? "" : "CONCURRENTLY "}${index.name}`);
     }
+  }
+
+  died(deployment: Deployment, pod: Pod, crash: CrashWhileServing) {
+    this.log(pod.name, crash.termination.reason === "OOMKilled" ? "WARN" : "FATAL", crash.lastWords);
+    this.event(
+      "Warning",
+      "BackOff",
+      `pod/${pod.name}`,
+      `Back-off restarting failed container ${deployment.name} in pod ${pod.name}${crash.termination.reason === "OOMKilled" ? " (OOMKilled)" : ""}`,
+    );
   }
 
   logs(): Record<string, readonly LogEntry[]> {

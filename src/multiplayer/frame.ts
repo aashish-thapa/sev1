@@ -14,12 +14,24 @@ export type ListDelta<T> = { readonly drop: number; readonly append: readonly T[
 
 const listDelta = <T extends z.ZodType>(item: T) => z.object({ drop: z.int().nonnegative(), append: z.array(item).readonly() });
 
-const TraitSchema = z.object({
-  kind: z.literal("leaks-connection-on-dependency-timeout"),
-  dependency: z.string(),
-  leaksPerSecondAtBaseline: z.number(),
-  perPodBaselineRps: z.number(),
-});
+const TerminationSchema = z.object({ reason: z.enum(["OOMKilled", "Error"]), exitCode: z.int() });
+
+const TraitSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("leaks-connection-on-dependency-timeout"),
+    dependency: z.string(),
+    leaksPerSecondAtBaseline: z.number(),
+    perPodBaselineRps: z.number(),
+  }),
+  z.object({
+    kind: z.literal("crashes-while-serving"),
+    termination: TerminationSchema,
+    afterSeconds: z.number(),
+    jitterSeconds: z.number(),
+    lastWords: z.string(),
+    failsCheckouts: z.boolean(),
+  }),
+]);
 
 const RevisionSchema = z.object({
   number: z.int(),
@@ -38,12 +50,14 @@ const PodFrameSchema = z.object({
   leaked: z.number(),
   restarts: z.int(),
   connectionHistory: listDelta(z.number()),
+  lastTermination: TerminationSchema.optional(),
 });
 
 const DeploymentFrameSchema = z.object({
   name: z.string(),
   replicas: z.int(),
   poolSize: z.int(),
+  podCapacityRps: z.number().optional(),
   revision: z.int(),
   generation: z.int(),
   /** Absent when unchanged since the previous frame. */

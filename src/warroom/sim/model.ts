@@ -1,12 +1,33 @@
 import type { Commerce } from "./commerce.ts";
 
 /** A defect a build carries. The engine applies its physics; rolling back removes it. */
-export type Trait = {
+export type Trait = ConnectionLeak | CrashWhileServing;
+
+export type ConnectionLeak = {
   readonly kind: "leaks-connection-on-dependency-timeout";
   readonly dependency: string;
   /** Expected leaked connections per second for a pod serving `perPodBaselineRps`. */
   readonly leaksPerSecondAtBaseline: number;
   readonly perPodBaselineRps: number;
+};
+
+/** Why the kubelet last saw a container die, as `kubectl describe pod` reports it. */
+export type Termination = { readonly reason: "OOMKilled" | "Error"; readonly exitCode: number };
+
+/**
+ * The build passes readiness, then dies after serving for a while: a memory leak hits its
+ * limit, or the first real request reaches a code path that throws.
+ */
+export type CrashWhileServing = {
+  readonly kind: "crashes-while-serving";
+  readonly termination: Termination;
+  /** Seconds of serving before the crash; each pod adds up to `jitterSeconds` so they don't die in lockstep. */
+  readonly afterSeconds: number;
+  readonly jitterSeconds: number;
+  /** The last line the process logs before it dies. */
+  readonly lastWords: string;
+  /** True when the defect sits on the checkout path, so every checkout the build serves fails too. */
+  readonly failsCheckouts: boolean;
 };
 
 export type Revision = {
@@ -29,12 +50,16 @@ export type Pod = {
   readonly leaked: number;
   readonly restarts: number;
   readonly connectionHistory: readonly number[];
+  /** Absent until the container has died at least once. */
+  readonly lastTermination?: Termination;
 };
 
 export type Deployment = {
   readonly name: string;
   readonly replicas: number;
   readonly poolSize: number;
+  /** Requests per second one pod can serve before it sheds the rest; absent means unlimited. */
+  readonly podCapacityRps?: number;
   readonly revision: number;
   /** Bumped by `rollout restart` so identical revisions still roll. */
   readonly generation: number;

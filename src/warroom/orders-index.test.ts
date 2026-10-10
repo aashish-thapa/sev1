@@ -118,9 +118,8 @@ describe("orders index left invalid by a migration", () => {
     expect(client).toEqual(server);
   });
 
-  it("is handed to solo SREs in turn with the pool leak", () => {
-    expect(soloScenarioFor("infrastructure", 0).id).not.toBe(soloScenarioFor("infrastructure", 1).id);
-    expect(soloScenarioFor("infrastructure", 1).id).toBe(scenario.id);
-    expect(soloScenarioFor("frontend", 1).id).toBe(soloScenarioFor("frontend", 0).id);
+  it("pages senior SREs first, and stays locked below senior", () => {
+    expect(soloScenarioFor("infrastructure", 0, 3).id).toBe(scenario.id);
+    expect([0, 1, 2, 3, 4, 5].map((rotation) => soloScenarioFor("infrastructure", rotation, 2).id)).not.toContain(scenario.id);
   });
 });

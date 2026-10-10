@@ -12,6 +12,7 @@ import {
   InviteRequestSchema,
   OFFERS_PATH,
   OfferRequestSchema,
+  ProposalRequestSchema,
   SetMemberRequestSchema,
   SettleRequestSchema,
   WORK_PATH,
@@ -23,6 +24,7 @@ import { CATEGORY_IDS, type CategoryId } from "../../src/domain/company/catalog.
 import type { CompanyDirectory } from "./directory.ts";
 import type { HiringService } from "./hiring.ts";
 import type { InvestingService } from "./investing.ts";
+import type { ProposalService } from "./proposals.ts";
 import type { WorkService } from "./work.ts";
 import type { CompanyOffice } from "./office.ts";
 
@@ -37,6 +39,8 @@ export const INTERVIEWS_PATH = "/api/interviews";
 export const APPLICATIONS_PATH = "/api/applications";
 /** An investor answers an offer from outside any company. */
 export const RECEIVED_OFFERS_PATH = "/api/offers";
+/** A player withdraws their own proposal from outside any company. */
+export const PROPOSALS_PATH = "/api/proposals";
 const ID = "([A-Za-z0-9-]{1,64})";
 const INVITATION_ACTION = new RegExp(`^${INVITATIONS_PATH}/${ID}/(accept|decline)$`);
 const POSTING_CLOSE = new RegExp(`^${POSTINGS_PATH}/${ID}/close$`);
@@ -46,6 +50,11 @@ const APPLICATION_DECISION = new RegExp(`^${APPLICATIONS_PATH}/${ID}/(hire|rejec
 const WORK_ANSWER = new RegExp(`^${WORK_PATH}/${ID}$`);
 const OFFER_CANCEL = new RegExp(`^${OFFERS_PATH}/${ID}/cancel$`);
 const OFFER_ANSWER = new RegExp(`^${RECEIVED_OFFERS_PATH}/${ID}/(accept|decline)$`);
+const PROPOSE = new RegExp(`^${COMPANIES_PATH}/${ID}/proposals$`);
+const PROPOSAL_DECISION = new RegExp(`^${COMPANY_PATH}/proposals/${ID}/(accept|decline)$`);
+const PROPOSAL_WITHDRAW = new RegExp(`^${PROPOSALS_PATH}/${ID}/withdraw$`);
+/** Usernames travel URL-encoded; the decoded name is matched against the staff list, never trusted further. */
+const MEMBER_FIRE = new RegExp(`^${COMPANY_PATH}/members/([^/]{1,96})/fire$`);
 /** Public lists change once a work day; a minute of caching spares the database on every page view. */
 const PUBLIC_CACHE = { "cache-control": "public, max-age=60" } as const;
 const CategorySchema = z.enum(CATEGORY_IDS);
@@ -84,6 +93,10 @@ const STATUS: Readonly<Record<CompanyProblem, number>> = {
   founder_control: 409,
   offer_not_found: 404,
   not_enough_money: 409,
+  already_proposed: 409,
+  proposal_not_found: 404,
+  cannot_fire_founder: 409,
+  founder_cannot_leave: 409,
 };
 
 const MESSAGE: Readonly<Record<CompanyProblem, string>> = {
@@ -119,6 +132,10 @@ const MESSAGE: Readonly<Record<CompanyProblem, string>> = {
   founder_control: "That would leave the founder under 51%, counting the offers already out.",
   offer_not_found: "That offer isn't open any more.",
   not_enough_money: "Your saved wallet doesn't hold that much.",
+  already_proposed: "You already have a proposal in with that company.",
+  proposal_not_found: "That proposal isn't pending any more.",
+  cannot_fire_founder: "The founder can't be fired.",
+  founder_cannot_leave: "A founder can't leave their own company.",
 };
 
 function respond<Value>(outcome: Outcome<Value>, status = 200): Response {
@@ -134,6 +151,7 @@ export async function handleCompany(
   office: CompanyOffice,
   work: WorkService,
   investing: InvestingService,
+  proposals: ProposalService,
 ): Promise<Response> {
   const url = new URL(request.url);
   const route = `${request.method} ${url.pathname}`;
@@ -169,6 +187,29 @@ export async function handleCompany(
       const [, id, answer] = answeringOffer;
       return answer === "accept" ? respond(await investing.accept(user, id)) : respond(await investing.decline(user, id));
     }
+    const proposing = PROPOSE.exec(url.pathname);
+    if (proposing) {
+      const body = await readBody(request, ProposalRequestSchema);
+      return body.ok ? respond(await proposals.propose(user, proposing[1], body.data, requestKey), 201) : body.response;
+    }
+    const decidingProposal = PROPOSAL_DECISION.exec(url.pathname);
+    if (decidingProposal) {
+      const [, id, answer] = decidingProposal;
+      return respond(answer === "accept" ? await proposals.accept(user, id) : await proposals.decline(user, id));
+    }
+    const withdrawing = PROPOSAL_WITHDRAW.exec(url.pathname);
+    if (withdrawing) return respond(await proposals.withdraw(user, withdrawing[1]));
+    const firing = MEMBER_FIRE.exec(url.pathname);
+    if (firing) {
+      let username: string;
+      try {
+        username = decodeURIComponent(firing[1]);
+      } catch (error) {
+        if (error instanceof URIError) return failure("invalid", "That username isn't valid.", 400);
+        throw error;
+      }
+      return respond(await companies.fire(user, username));
+    }
     const deciding = APPLICATION_DECISION.exec(url.pathname);
     if (deciding) return respond(deciding[2] === "hire" ? await hiring.hire(user, deciding[1]) : await hiring.reject(user, deciding[1]));
   }
@@ -198,6 +239,8 @@ export async function handleCompany(
       const body = await readBody(request, InviteRequestSchema);
       return body.ok ? respond(await companies.invite(user, body.data)) : body.response;
     }
+    case `POST ${COMPANY_PATH}/leave`:
+      return respond(await companies.leave(user));
     case `POST ${COMPANY_PATH}/members`: {
       const body = await readBody(request, SetMemberRequestSchema);
       return body.ok ? respond(await companies.setMember(user, body.data)) : body.response;

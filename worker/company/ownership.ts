@@ -15,14 +15,22 @@ import {
   type CapTable,
 } from "../../src/domain/company/investors.ts";
 import { companyLevel } from "../../src/domain/company/levels.ts";
-import type { CapTableWire, Holding, InvestmentOffer, PendingDividend, ReceivedOffer, TrackersWire } from "../../src/storage/company-protocol.ts";
+import type { CapTableWire, Holding, InvestmentOffer, InvestmentProposal, MyProposal, PendingDividend, ReceivedOffer, TrackersWire } from "../../src/storage/company-protocol.ts";
 import type { InvestorStore, OfferRow, ShareRow } from "./investor-store.ts";
+import type { ProposalRow, ProposalStore } from "./proposal-store.ts";
 import type { BookReason, CompanyView } from "./store.ts";
 
 /** The trackers' longest window, in work days. */
 const TRACKED_WORK_DAYS = 30;
 
 export type InvestorReads = Pick<InvestorStore, "shares" | "liveOffers" | "bookSince" | "receivedOffers" | "holdings" | "pendingDividends">;
+
+/** Pending proposals both ways; without it nobody has any. */
+export type ProposalReads = Pick<ProposalStore, "pendingFor" | "pendingBy">;
+
+export function proposalOf(row: ProposalRow): InvestmentProposal {
+  return { id: row.id, investor: row.investor, amountCents: row.amountCents, equityBps: row.equityBps, createdAt: row.createdAt };
+}
 
 /** The founder holds everything investors don't. */
 export function capTableOf(founder: string, shares: readonly ShareRow[]): CapTable {
@@ -38,16 +46,22 @@ export function offerOf(row: OfferRow): InvestmentOffer {
   return { id: row.id, investor: row.investor, amountCents: row.amountCents, equityBps: row.equityBps, createdAt: row.createdAt };
 }
 
-export type Ownership = { readonly capTable: CapTableWire | null; readonly investmentOffers: InvestmentOffer[]; readonly trackers: TrackersWire | null };
+export type Ownership = {
+  readonly capTable: CapTableWire | null;
+  readonly investmentOffers: InvestmentOffer[];
+  readonly investmentProposals: InvestmentProposal[];
+  readonly trackers: TrackersWire | null;
+};
 
-export const NO_OWNERSHIP: Ownership = { capTable: null, investmentOffers: [], trackers: null };
+export const NO_OWNERSHIP: Ownership = { capTable: null, investmentOffers: [], investmentProposals: [], trackers: null };
 
-/** What a member sees of ownership; offers out to investors only for the founder. */
-export async function ownershipOf(view: CompanyView, viewerId: string, investors: InvestorReads): Promise<Ownership> {
+/** What a member sees of ownership; offers out to investors and proposals from them only for the founder. */
+export async function ownershipOf(view: CompanyView, viewerId: string, investors: InvestorReads, proposals?: ProposalReads): Promise<Ownership> {
   const isFounder = view.company.founderId === viewerId;
-  const [shares, offers, lines] = await Promise.all([
+  const [shares, offers, proposed, lines] = await Promise.all([
     investors.shares(view.company.id),
     isFounder ? investors.liveOffers(view.company.id) : Promise.resolve([]),
+    isFounder && proposals ? proposals.pendingFor(view.company.id) : Promise.resolve([]),
     investors.bookSince(view.company.id, view.company.workDay - TRACKED_WORK_DAYS),
   ]);
   const table = capTableOf(founderOf(view), shares);
@@ -58,6 +72,7 @@ export async function ownershipOf(view: CompanyView, viewerId: string, investors
   return {
     capTable: { founder: table.founder, founderBps: table.founderBps, holders: table.holders.map((holder) => ({ ...holder })) },
     investmentOffers: offers.filter((offer) => offer.status === "open").map(offerOf),
+    investmentProposals: proposed.map(proposalOf),
     trackers: trackersWire(trackers(lines, table, owned, view.company.workDay)),
   };
 }
@@ -67,11 +82,21 @@ function trackersWire(tracked: ReturnType<typeof trackers>): TrackersWire {
   return { ...tracked, inventory: tracked.inventory.map((entry) => ({ ...entry })), last7: windowOf(tracked.last7), last30: windowOf(tracked.last30) };
 }
 
-export type MyInvesting = { readonly investmentOffers: ReceivedOffer[]; readonly holdings: Holding[]; readonly dividends: PendingDividend[] };
+export type MyInvesting = {
+  readonly investmentOffers: ReceivedOffer[];
+  readonly holdings: Holding[];
+  readonly dividends: PendingDividend[];
+  readonly proposals: MyProposal[];
+};
 
 /** A player's side of investing, member of the company or not: offers made to them, stakes, dividends to claim. */
-export async function myInvesting(userId: string, investors: InvestorReads): Promise<MyInvesting> {
-  const [received, holdings, dividends] = await Promise.all([investors.receivedOffers(userId), investors.holdings(userId), investors.pendingDividends(userId)]);
+export async function myInvesting(userId: string, investors: InvestorReads, proposals?: ProposalReads): Promise<MyInvesting> {
+  const [received, holdings, dividends, mine] = await Promise.all([
+    investors.receivedOffers(userId),
+    investors.holdings(userId),
+    investors.pendingDividends(userId),
+    proposals ? proposals.pendingBy(userId) : Promise.resolve([]),
+  ]);
   return {
     investmentOffers: received.map((row) => ({
       ...offerOf(row),
@@ -84,6 +109,7 @@ export async function myInvesting(userId: string, investors: InvestorReads): Pro
     })),
     holdings,
     dividends,
+    proposals: mine.map((row) => ({ ...proposalOf(row), companyId: row.companyId, companyName: row.companyName })),
   };
 }
 

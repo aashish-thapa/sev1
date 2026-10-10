@@ -275,6 +275,14 @@ export class D1CompanyStore implements CompanyStore, CompanyBank {
       .run();
   }
 
+  async removeMember(companyId: string, userId: string): Promise<boolean> {
+    const result = await this.db
+      .prepare("DELETE FROM company_members WHERE company_id = ?1 AND user_id = ?2 AND user_id <> (SELECT founder_id FROM companies WHERE id = ?1)")
+      .bind(companyId, userId)
+      .run();
+    return result.meta.changes === 1;
+  }
+
   async settle(day: SettledDay): Promise<boolean> {
     // Claim the day first, under a token only this request knows; every booking below checks the token,
     // so a second member settling at the same moment books nothing.

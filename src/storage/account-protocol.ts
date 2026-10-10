@@ -37,6 +37,11 @@ export const COMPANY_ERRORS = [
   "founder_control",
   "offer_not_found",
   "not_enough_money",
+  // Proposals and staffing.
+  "already_proposed",
+  "proposal_not_found",
+  "cannot_fire_founder",
+  "founder_cannot_leave",
 ] as const;
 
 export const API_ERRORS = [

@@ -8,6 +8,8 @@ import { AccountService } from "../api/accounts.ts";
 import type { AccountStore, LedgerRow, RankedAccount, SavedProgress, SaveMoves, Standing, User } from "../api/store.ts";
 import { ACCEPTED_OFFER_MS, InvestingService } from "./investing.ts";
 import { MemoryInvestorStore } from "./memory-investor-store.ts";
+import { MemoryProposalStore } from "./memory-proposal-store.ts";
+import { ProposalService } from "./proposals.ts";
 import { MemoryCompanyStore } from "./memory-store.ts";
 import { CompanyService } from "./service.ts";
 
@@ -74,7 +76,8 @@ function world() {
   });
   const accounts = new AccountService(accountStore, () => now, undefined, store, undefined, investors);
   const newId = () => `id-${(ids += 1)}`;
-  const companies = new CompanyService({ store, now: () => now, newId, isOverLimit: async () => false, investors });
+  const proposalStore = new MemoryProposalStore((companyId) => store.companies.get(companyId)?.name ?? "");
+  const companies = new CompanyService({ store, now: () => now, newId, isOverLimit: async () => false, investors, proposals: proposalStore });
   const investing = new InvestingService({
     investors,
     companies: store,
@@ -83,6 +86,16 @@ function world() {
     newId,
     isOverLimit: async () => false,
     balanceOf: async (userId) => wallets.get(userId)?.wallet.balanceCents ?? 0,
+  });
+  const proposals = new ProposalService({
+    proposals: proposalStore,
+    investors,
+    companies: store,
+    company: companies,
+    investing,
+    now: () => now,
+    newId,
+    isOverLimit: async () => false,
   });
   const user = (id: string, username: string): User => {
     store.addUser(id, username);
@@ -95,7 +108,7 @@ function world() {
     if (saved.ok) wallets.set(player.id, progress);
     return saved;
   };
-  return { store, investors, accounts, companies, investing, user, save, wallets, advance: (ms: number) => (now += ms), now: () => now };
+  return { store, investors, accounts, companies, investing, proposals, user, save, wallets, advance: (ms: number) => (now += ms), now: () => now };
 }
 
 type World = ReturnType<typeof world>;
@@ -310,5 +323,142 @@ describe("dividends", () => {
     const settled = await setup.companies.settle(founder);
     expect(settled.ok && settled.value.lines.some((line) => line.reason === "dividend")).toBe(false);
     expect(setup.store.dividendPayouts.size).toBe(0);
+  });
+});
+
+describe("proposals", () => {
+  it("lets anyone but the founder propose, on terms the founder could offer, one at a time", async () => {
+    const setup = world();
+    const founder = setup.user("u1", "maya");
+    const companyId = await foundedCompany(setup, founder);
+    const sam = await investorWith(setup, "u2", "sam", 0);
+    const propose = (player: User, amountCents: number, equityBps: number, key: string | null = null) =>
+      setup.proposals.propose(player, companyId, { amountCents, equityBps }, key);
+
+    expect(await propose(founder, 50_000, 1_000)).toEqual({ ok: false, problem: "self_offer" });
+    expect(await propose(sam, 49_999, 1_000)).toEqual({ ok: false, problem: "below_minimum_investment" });
+    expect(await propose(sam, 50_000, 4_901)).toEqual({ ok: false, problem: "too_much_equity" });
+    expect(await setup.proposals.propose(sam, "no-such-company", { amountCents: 50_000, equityBps: 1_000 }, null)).toEqual({ ok: false, problem: "not_active" });
+
+    const made = await propose(sam, 50_000, 1_000, "key-1");
+    expect(made.ok && made.value.proposals).toMatchObject([{ companyId, companyName: "Acme Ops", investor: "sam", amountCents: 50_000, equityBps: 1_000 }]);
+    // A retried request is the same proposal; a fresh one while it's pending is refused.
+    expect((await propose(sam, 50_000, 1_000, "key-1")).ok).toBe(true);
+    expect(await propose(sam, 60_000, 1_000, "key-2")).toEqual({ ok: false, problem: "already_proposed" });
+
+    const company = MyCompanySchema.parse(await setup.companies.mine(founder)).company;
+    expect(company?.investmentProposals).toMatchObject([{ investor: "sam", amountCents: 50_000, equityBps: 1_000 }]);
+  });
+
+  it("turns an accepted proposal into an offer the investor pays through the usual flow", async () => {
+    const setup = world();
+    const founder = setup.user("u1", "maya");
+    const companyId = await foundedCompany(setup, founder);
+    const sam = await investorWith(setup, "u2", "sam", 60_000);
+    const made = await setup.proposals.propose(sam, companyId, { amountCents: 50_000, equityBps: 1_000 }, null);
+    const proposalId = made.ok ? made.value.proposals[0].id : "";
+
+    const accepted = await setup.proposals.accept(founder, proposalId);
+    expect(accepted.ok && accepted.value.investmentProposals).toEqual([]);
+    expect(await setup.proposals.accept(founder, proposalId)).toEqual({ ok: false, problem: "proposal_not_found" });
+
+    const mine = MyCompanySchema.parse(await setup.companies.mine(sam));
+    expect(mine.proposals).toEqual([]);
+    expect(mine.investmentOffers).toMatchObject([{ companyId, amountCents: 50_000, equityBps: 1_000 }]);
+    expect((await investIn(setup, sam, mine.investmentOffers[0].id)).ok).toBe(true);
+    const company = MyCompanySchema.parse(await setup.companies.mine(founder)).company;
+    expect(company?.capTable?.holders).toEqual([{ username: "sam", bps: 1_000, investedCents: 50_000 }]);
+  });
+
+  it("re-checks founder control against the offers already out when accepting", async () => {
+    const setup = world();
+    const founder = setup.user("u1", "maya");
+    const companyId = await foundedCompany(setup, founder);
+    const sam = await investorWith(setup, "u2", "sam", 0);
+    await investorWith(setup, "u3", "ana", 0);
+    const made = await setup.proposals.propose(sam, companyId, { amountCents: 50_000, equityBps: 3_000 }, null);
+    await offerTo(setup, founder, "ana", 50_000, 3_000);
+    expect(await setup.proposals.accept(founder, made.ok ? made.value.proposals[0].id : "")).toEqual({ ok: false, problem: "founder_control" });
+  });
+
+  it("lets the founder decline and the proposer withdraw, while it's pending, and nobody else", async () => {
+    const setup = world();
+    const founder = setup.user("u1", "maya");
+    const companyId = await foundedCompany(setup, founder);
+    const sam = await investorWith(setup, "u2", "sam", 0);
+    const ana = await investorWith(setup, "u3", "ana", 0);
+    const proposalOf = async (player: User) => {
+      const made = await setup.proposals.propose(player, companyId, { amountCents: 50_000, equityBps: 1_000 }, null);
+      if (!made.ok) throw new Error(made.problem);
+      return made.value.proposals[0].id;
+    };
+
+    const fromSam = await proposalOf(sam);
+    expect(await setup.proposals.withdraw(ana, fromSam)).toEqual({ ok: false, problem: "proposal_not_found" });
+    expect(await setup.proposals.decline(sam, fromSam)).toEqual({ ok: false, problem: "not_in_company" });
+    const declined = await setup.proposals.decline(founder, fromSam);
+    expect(declined.ok && declined.value.investmentProposals).toEqual([]);
+    expect(await setup.proposals.withdraw(sam, fromSam)).toEqual({ ok: false, problem: "proposal_not_found" });
+
+    const fromAna = await proposalOf(ana);
+    const withdrawn = await setup.proposals.withdraw(ana, fromAna);
+    expect(withdrawn.ok && withdrawn.value.proposals).toEqual([]);
+    expect(await setup.proposals.accept(founder, fromAna)).toEqual({ ok: false, problem: "proposal_not_found" });
+    // Once answered, a new proposal may go in.
+    expect((await setup.proposals.propose(ana, companyId, { amountCents: 50_000, equityBps: 1_000 }, null)).ok).toBe(true);
+  });
+});
+
+describe("staffing", () => {
+  async function withMember(setup: World, founder: User, id: string, username: string) {
+    const member = await investorWith(setup, id, username, 0);
+    const invited = await setup.companies.invite(founder, { username, role: "frontend", payCents: 20_000 });
+    if (!invited.ok) throw new Error(invited.problem);
+    const invitation = invited.value.pendingInvitations.find((candidate) => candidate.username === username);
+    const joined = await setup.companies.accept(member, invitation?.id ?? "");
+    if (!joined.ok) throw new Error(joined.problem);
+    return member;
+  }
+
+  it("lets only the founder fire, never the founder, and frees the desk while booked pay and stakes stay", async () => {
+    const setup = world();
+    const founder = setup.user("u1", "maya");
+    await foundedCompany(setup, founder);
+    const sam = await withMember(setup, founder, "u2", "sam");
+    const ana = await withMember(setup, founder, "u3", "ana");
+    expect((await setup.companies.settle(founder)).ok).toBe(true);
+    const offer = await offerTo(setup, founder, "sam", 50_000, 1_000);
+    await setup.save(sam, richProgress(60_000));
+    expect((await investIn(setup, sam, offer.id)).ok).toBe(true);
+    const payoutsBefore = await setup.store.pendingPayouts(sam.id);
+    expect(payoutsBefore.length).toBeGreaterThan(0);
+
+    expect(await setup.companies.fire(ana, "sam")).toEqual({ ok: false, problem: "not_founder" });
+    expect(await setup.companies.fire(founder, "maya")).toEqual({ ok: false, problem: "cannot_fire_founder" });
+    expect(await setup.companies.fire(founder, "nobody")).toEqual({ ok: false, problem: "not_in_company" });
+
+    const fired = await setup.companies.fire(founder, "sam");
+    expect(fired.ok && fired.value.members.map((member) => member.username)).toEqual(["maya", "ana"]);
+    expect(fired.ok && fired.value.capTable?.holders).toEqual([{ username: "sam", bps: 1_000, investedCents: 50_000 }]);
+    const samNow = MyCompanySchema.parse(await setup.companies.mine(sam));
+    expect(samNow.company).toBeNull();
+    expect(samNow.payouts).toEqual(payoutsBefore);
+    expect(samNow.holdings).toHaveLength(1);
+  });
+
+  it("lets a member leave and found their own, but not the founder", async () => {
+    const setup = world();
+    const founder = setup.user("u1", "maya");
+    await foundedCompany(setup, founder);
+    const sam = await withMember(setup, founder, "u2", "sam");
+
+    expect(await setup.companies.leave(founder)).toEqual({ ok: false, problem: "founder_cannot_leave" });
+    const left = await setup.companies.leave(sam);
+    expect(left.ok && left.value.company).toBeNull();
+    expect(await setup.companies.leave(sam)).toEqual({ ok: false, problem: "not_in_company" });
+    const company = MyCompanySchema.parse(await setup.companies.mine(founder)).company;
+    expect(company?.members.map((member) => member.username)).toEqual(["maya"]);
+    // Out of a company, they're free to found one.
+    expect((await setup.companies.found(sam, { name: "Sam Co", category: "saas", role: "frontend", seedCents: FOUNDING_MINIMUM_CENTS })).ok).toBe(true);
   });
 });

@@ -158,6 +158,13 @@ export class MemoryCompanyStore implements CompanyStore, CompanyBank {
     if (index >= 0) this.members[index] = { ...this.members[index], role, payCents, canHire: canHire ?? this.members[index].canHire };
   }
 
+  async removeMember(companyId: string, userId: string): Promise<boolean> {
+    const index = this.members.findIndex((member) => member.companyId === companyId && member.userId === userId && !member.isFounder);
+    if (index < 0) return false;
+    this.members.splice(index, 1);
+    return true;
+  }
+
   /** Revenue lines, for the directory's ranking. */
   revenueLines(companyId: string): readonly BookLine[] {
     return this.ledger.filter((line) => line.companyId === companyId && line.reason === "revenue");

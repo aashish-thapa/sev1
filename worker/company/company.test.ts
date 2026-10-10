@@ -148,6 +148,8 @@ describe("staff", () => {
     expect(offer).toMatchObject({ companyName: "Acme Ops", from: "maya", role: "frontend", payCents: 20_000 });
     expect((await setup.companies.accept(sam, offer.id)).ok).toBe(true);
     expect(await setup.companies.invite(sam, { username: "lena", role: "data", payCents: 20_000 })).toEqual({ ok: false, problem: "not_founder" });
+    // Sam works here now: a new offer to him means nothing until he leaves.
+    expect(await setup.companies.invite(founder, { username: "sam", role: "data", payCents: 20_000 })).toEqual({ ok: false, problem: "already_in_company" });
 
     const [lenaOffer] = (await setup.companies.mine(lena)).invitations;
     expect((await setup.companies.decline(lena, lenaOffer.id)).ok).toBe(true);

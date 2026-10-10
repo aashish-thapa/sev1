@@ -9,7 +9,7 @@ import type { Role } from "../../src/domain/incident.ts";
 import type { Application, Company, FoundRequest, MyCompany, Posting, WorkDaySettlement } from "../../src/storage/company-protocol.ts";
 import type { ApplicationRow, HiringStore, PostingRow } from "./hiring-store.ts";
 import type { WorkStore } from "./work-store.ts";
-import { dividendsOn, myInvesting, NO_OWNERSHIP, ownershipOf, type InvestorReads, type Ownership } from "./ownership.ts";
+import { dividendsOn, myInvesting, NO_OWNERSHIP, ownershipOf, type InvestorReads, type Ownership, type ProposalReads } from "./ownership.ts";
 import type { CompanyStore, CompanyView } from "./store.ts";
 
 /** How long a founder has to put the seed in before the company is dropped. */
@@ -53,7 +53,11 @@ export type CompanyProblem =
   | "too_much_equity"
   | "founder_control"
   | "offer_not_found"
-  | "not_enough_money";
+  | "not_enough_money"
+  | "already_proposed"
+  | "proposal_not_found"
+  | "cannot_fire_founder"
+  | "founder_cannot_leave";
 
 export type Outcome<Value> = { readonly ok: true; readonly value: Value } | { readonly ok: false; readonly problem: CompanyProblem };
 
@@ -80,6 +84,8 @@ export type CompanyDeps = {
   readonly hiring?: Pick<HiringStore, "postingsOf" | "applicationsOf" | "myApplications">;
   /** Stakes, offers and dividends; without it a company has no investors. */
   readonly investors?: InvestorReads;
+  /** Players' proposals to invest; without it there are none. */
+  readonly proposals?: ProposalReads;
 };
 
 const fail = (problem: CompanyProblem) => ({ ok: false as const, problem });
@@ -163,7 +169,7 @@ export class CompanyService {
       store.receivedInvitations(caller.id),
       store.pendingPayouts(caller.id),
       this.deps.hiring?.myApplications(caller.id) ?? [],
-      this.deps.investors ? myInvesting(caller.id, this.deps.investors) : { investmentOffers: [], holdings: [], dividends: [] },
+      this.deps.investors ? myInvesting(caller.id, this.deps.investors, this.deps.proposals) : { investmentOffers: [], holdings: [], dividends: [], proposals: [] },
     ]);
     return { company: view ? await this.present(view, caller.id) : null, invitations, payouts, applications, ...investing };
   }
@@ -217,6 +223,8 @@ export class CompanyService {
     const invitee = await this.deps.store.findUser(request.username.trim());
     if (!invitee) return fail("unknown_user");
     if (invitee.id === caller.id) return fail("self_invite");
+    // One company per player: someone already employed has to leave before an offer can mean anything.
+    if (await this.deps.store.companyOf(invitee.id)) return fail("already_in_company");
     const problem = checkOffer(bookOf(view), request.role, request.payCents, view.pendingInvitations.length);
     if (problem) return fail(problem);
     const sent = await this.deps.store.invite({ id: this.deps.newId(), companyId: view.company.id, userId: invitee.id, role: request.role, payCents: request.payCents, at: this.deps.now() });
@@ -236,6 +244,28 @@ export class CompanyService {
     if (problem) return fail(problem);
     await this.deps.store.setMember(view.company.id, member.userId, request.role, request.payCents, member.isFounder ? undefined : request.canHire);
     return this.reloaded(view.company.id, caller.id);
+  }
+
+  /** The founder lets a member go: their desk frees up; pay already booked for them stays theirs to claim. */
+  async fire(caller: Caller, username: string): Promise<Outcome<Company>> {
+    const founded = await this.foundersCompany(caller);
+    if (!founded.ok) return founded;
+    const view = founded.value;
+    const member = view.members.find((candidate) => candidate.username === username);
+    if (!member) return fail("not_in_company");
+    if (member.isFounder) return fail("cannot_fire_founder");
+    await this.deps.store.removeMember(view.company.id, member.userId);
+    return this.reloaded(view.company.id, caller.id);
+  }
+
+  /** A member walks out, free to found or join another company; the founder can't (there's no handover yet). */
+  async leave(caller: Caller): Promise<Outcome<MyCompany>> {
+    if (await this.deps.isOverLimit(`company:${caller.id}`)) return fail("rate_limited");
+    const view = await this.companyFor(caller.id);
+    if (!view) return fail("not_in_company");
+    if (view.company.founderId === caller.id) return fail("founder_cannot_leave");
+    await this.deps.store.removeMember(view.company.id, caller.id);
+    return ok(await this.mine(caller));
   }
 
   async accept(caller: Caller, invitationId: string): Promise<Outcome<Company>> {
@@ -355,7 +385,7 @@ export class CompanyService {
   /** The company as `viewerId` may see it: postings and applicants only for the founder and hiring managers. */
   async present(view: CompanyView, viewerId: string): Promise<Company> {
     const { hiring, investors } = this.deps;
-    const ownership = investors && view.company.state === "active" ? await ownershipOf(view, viewerId, investors) : NO_OWNERSHIP;
+    const ownership = investors && view.company.state === "active" ? await ownershipOf(view, viewerId, investors, this.deps.proposals) : NO_OWNERSHIP;
     if (!hiring || !canHire(view, viewerId)) return companyOf(view, [], [], ownership);
     const [postings, applications] = await Promise.all([hiring.postingsOf(view.company.id), hiring.applicationsOf(view.company.id)]);
     return companyOf(view, postings, applications, ownership);

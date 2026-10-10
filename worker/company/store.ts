@@ -100,6 +100,11 @@ export interface CompanyStore {
   decline(invitationId: string): Promise<void>;
   /** `canHire` undefined leaves the member's hiring permission as it is. */
   setMember(companyId: string, userId: string, role: Role, payCents: number, canHire?: boolean): Promise<void>;
+  /**
+   * Takes a member off the staff (fired or leaving), freeing their desk. Never the founder; false when they
+   * weren't a member. Booked payouts and any stake they hold are untouched.
+   */
+  removeMember(companyId: string, userId: string): Promise<boolean>;
   /** False when another settlement got there first. */
   settle(day: SettledDay): Promise<boolean>;
 }

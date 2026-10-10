@@ -5,7 +5,7 @@
  */
 import { checkInvestmentOffer } from "../../src/domain/company/investors.ts";
 import type { AcceptOfferResponse, Company, OfferRequest } from "../../src/storage/company-protocol.ts";
-import type { CompanyStore } from "./store.ts";
+import type { CompanyStore, CompanyView } from "./store.ts";
 import type { InvestorStore, OfferRow } from "./investor-store.ts";
 import { capTableOf, founderOf } from "./ownership.ts";
 import type { Caller, CompanyProblem, CompanyService, Outcome } from "./service.ts";
@@ -48,10 +48,23 @@ export class InvestingService {
     const view = founded.value;
     const investor = await this.deps.companies.findUser(request.investor.trim());
     if (!investor) return fail("unknown_user");
+    const made = await this.offerTo(view, investor, { amountCents: request.amountCents, equityBps: request.equityBps }, requestKey);
+    return made.ok ? this.deps.company.reloaded(view.company.id, caller.id) : made;
+  }
+
+  /**
+   * Offers `investor` a stake in the founder's company, checked against every offer still in play so the
+   * founder keeps control. Shared by a founder's own offer and an accepted proposal.
+   */
+  async offerTo(
+    view: CompanyView,
+    investor: { readonly id: string; readonly username: string },
+    terms: { readonly amountCents: number; readonly equityBps: number },
+    requestKey: string | null,
+  ): Promise<Outcome<{ offerId: string }>> {
     const { investors } = this.deps;
     const [shares, live] = await Promise.all([investors.shares(view.company.id), investors.liveOffers(view.company.id)]);
-    const terms = { investor: investor.username, amountCents: request.amountCents, equityBps: request.equityBps };
-    const problem = checkInvestmentOffer(capTableOf(founderOf(view), shares), terms, live);
+    const problem = checkInvestmentOffer(capTableOf(founderOf(view), shares), { investor: investor.username, ...terms }, live);
     if (problem) return fail(problem);
     const id = this.deps.newId();
     await investors.createOffer(
@@ -60,8 +73,8 @@ export class InvestingService {
         companyId: view.company.id,
         investorId: investor.id,
         investor: investor.username,
-        amountCents: request.amountCents,
-        equityBps: request.equityBps,
+        amountCents: terms.amountCents,
+        equityBps: terms.equityBps,
         status: "open",
         investRef: investRefOf(id),
         expiresAt: null,
@@ -69,7 +82,7 @@ export class InvestingService {
       },
       requestKey,
     );
-    return this.deps.company.reloaded(view.company.id, caller.id);
+    return ok({ offerId: id });
   }
 
   async cancel(caller: Caller, offerId: string): Promise<Outcome<Company>> {

@@ -11,7 +11,9 @@ import { DIRECTORY_NAME } from "./directory-object.ts";
 import type { Env } from "./env.ts";
 import { routeRoomSocket } from "./rooms.ts";
 import { D1CompanyStore } from "./company/d1-store.ts";
-import { APPLICATIONS_PATH, APPLY_PATH, handleCompany, handleDirectory, INTERVIEWS_PATH, INVITATIONS_PATH, RECEIVED_OFFERS_PATH } from "./company/routes.ts";
+import { APPLICATIONS_PATH, APPLY_PATH, handleCompany, handleDirectory, INTERVIEWS_PATH, INVITATIONS_PATH, PROPOSALS_PATH, RECEIVED_OFFERS_PATH } from "./company/routes.ts";
+import { D1ProposalStore } from "./company/proposal-d1-store.ts";
+import { ProposalService } from "./company/proposals.ts";
 import { D1InvestorStore } from "./company/investor-d1-store.ts";
 import { InvestingService } from "./company/investing.ts";
 import { CompanyDirectory } from "./company/directory.ts";
@@ -103,8 +105,9 @@ export default {
       const accounts = new AccountService(accountStore, Date.now, (id) => findScenario(id)?.tier, companyStore, grantStore, investorStore);
       const entitlements = new D1EntitlementStore(env.DB);
       if (pathname === COMPANIES_PATH || pathname === TOP_COMPANIES_PATH) return handleDirectory(request, new CompanyDirectory(new D1CompanyDirectory(env.DB)));
-      if (pathname === COMPANY_PATH || [COMPANY_PATH, INVITATIONS_PATH, APPLY_PATH, INTERVIEWS_PATH, APPLICATIONS_PATH, RECEIVED_OFFERS_PATH].some((prefix) => pathname.startsWith(`${prefix}/`))) {
+      if (pathname === COMPANY_PATH || [COMPANY_PATH, COMPANIES_PATH, INVITATIONS_PATH, APPLY_PATH, INTERVIEWS_PATH, APPLICATIONS_PATH, RECEIVED_OFFERS_PATH, PROPOSALS_PATH].some((prefix) => pathname.startsWith(`${prefix}/`))) {
         const hiringStore = new D1HiringStore(env.DB);
+        const proposalStore = new D1ProposalStore(env.DB);
         const workStore = new D1WorkStore(env.DB);
         const companies = new CompanyService({
           store: companyStore,
@@ -115,6 +118,7 @@ export default {
           work: workStore,
           pantryOf: async (userId, day) => pantryCostOn((await savedProgressOf(accountStore, userId)).pantry, day),
           investors: investorStore,
+          proposals: proposalStore,
         });
         const hiring = new HiringService({
           store: hiringStore,
@@ -143,7 +147,17 @@ export default {
           isOverLimit: isOverLimit(COMPANY_WRITES_PER_WINDOW),
           balanceOf: async (userId) => (await savedProgressOf(accountStore, userId)).wallet.balanceCents,
         });
-        return handleCompany(request, accounts, companies, hiring, officeFor(env), work, investing);
+        const proposals = new ProposalService({
+          proposals: proposalStore,
+          investors: investorStore,
+          companies: companyStore,
+          company: companies,
+          investing,
+          now: Date.now,
+          newId: () => crypto.randomUUID(),
+          isOverLimit: isOverLimit(COMPANY_WRITES_PER_WINDOW),
+        });
+        return handleCompany(request, accounts, companies, hiring, officeFor(env), work, investing, proposals);
       }
       if (pathname.startsWith(ADMIN_PREFIX)) {
         const store = new D1AccountStore(env.DB);

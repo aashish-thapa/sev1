@@ -27,7 +27,9 @@ So "resolved" needs a per-scenario signal, and Security and Data need new simula
 
 - `Scenario` gains `readonly alertMetric?: { readonly label: string; readonly rate: (state: ClusterState) => number }`: the number the incident pages on when that isn't checkout 5xx.
 - `src/warroom/incident.ts`: `alertRate(scenario, cluster) = scenario.alertMetric?.rate(cluster) ?? cluster.errorRate`, used by `advance`'s reopen check and by `declareResolved(incident, scenario)` (signature change). Notices carry `rate` and `label` instead of `errorRate`.
-- Update every caller and every hard-coded "5xx" wording: `server/room.ts`, `src/warroom/ui/useIncident.ts`, `server/notices.ts`, `IncidentHud.tsx` (HUD label), `WarRoomView.tsx` ("The faulty build was still running" becomes scenario-neutral), and the seven test files that call `declareResolved(incident)`.
+- Update every caller and every hard-coded "5xx" wording: `server/room.ts`, `src/warroom/ui/useIncident.ts`, `server/notices.ts`, `IncidentHud.tsx` (SLA clock, tone and the "checkout 5xx" label), `WarRoomView.tsx` ("The faulty build was still running" becomes scenario-neutral), and the seven test files that call `declareResolved(incident)`.
+- Everything that shows how bad things are reads `alertRate` too, or a scenario paging on customer loss looks healthy while the pager screams: `health.ts` `edgeHealth` (map and floor edge light) and `mood.ts` `panicOf` (office panic and soundscape).
+- The thresholds (`RESOLVABLE_ERROR_RATE` 0.01, `REOPEN_ERROR_RATE` 0.05) apply unchanged to whichever metric a scenario names; each metric is a 0–1 share whose healthy baseline is 0.
 - New pure helper `customerLossRate(commerce, t)` in `commerce-step.ts`: the share of organic checkout customers who ended the last second without an order (blocked, gave up, failed client-side, declined). It reads existing state only.
 - Per scenario, not global: a global `max(errorRate, customer loss)` gate would make the meltdown's blunt `waf block --top 500` path undeclarable, which today is allowed and penalised in the debrief (`meltdown.test.ts:121-137`). Existing scenarios keep their behaviour.
 
@@ -41,7 +43,7 @@ Make the meltdown's private `commerce()` (`checkout-meltdown.ts:45`) a reusable 
 
 ### F-D. Scenario-supplied evidence and suggestions
 
-- `Scenario.evidence?: readonly { tool: "siem" | "rum" | "warehouse" | "releases" | "models"; name: string; description: string; run: (state: ClusterState) => readonly string[] }[]`. Tools read it through `ShellContext.scenario` and list it beside their built-ins (`siem search`, `rum <name>`, `warehouse run`, …). It lives on the scenario, not in state, so it costs nothing on the wire. The tools' meltdown-specific branches (`siem show` detail, `SEARCHES`, `rum errors`, `warehouse` saved queries) move into the meltdown's `evidence`.
+- `Scenario.evidence?: readonly { tool: "siem" | "rum" | "warehouse" | "releases" | "models"; name: string; description: string; run: (state: ClusterState) => readonly string[] }[]`. Tools read it through `ShellContext.scenario` and list it beside their built-ins (`siem search`, `rum <name>`, `warehouse run`, …). It lives on the scenario, not in state, so it costs nothing on the wire. Additive only: the tools' existing meltdown-specific content stays where it is on this branch, and new scenarios add theirs through `evidence`.
 - `Scenario.suggestions?: Partial<Record<Role, readonly string[]>>`. `suggestionsFor` (`laptop-identity.ts`) returns `scenario.suggestions?.[role]` with today's chips as the meltdown's entry, and a neutral default for other scenarios; update `LiveIncident.tsx` and its test.
 
 ### F-E. Test harness
@@ -56,9 +58,17 @@ A storm loses every organic checkout while the HUD shows only partial 5xx, so a 
 
 Each scenario's no-action run must get worse over ten simulated minutes: its alert metric rises, or its debrief points fall as lost checkouts, orphans or fraud accumulate. Levers: attack growth (Security), phased-rollout adoption (Mobile), feature staleness and fraud captures (Data), lost checkouts (all).
 
+### F-H. Seams, so roles don't collide
+
+Foundation also lands the empty slots every role fills, so role work touches only its own files:
+- Optional types in `commerce.ts`: `Commerce.attack?`, `Commerce.fraud?`, `ClientBuild.defects?`, `WafRule.attackShare?`, and the update-wall config (remote-config key naming the minimum supported version).
+- `commerceDemand` composed from four pure hooks, each in its own file and neutral when its slot is absent: `clientDefects()` (rejected share and client-side loss), `attackLoad()` (attack rps and attack share blocked), `updateWall()` (customers below the minimum version), `fraudDeclines()` (declined share). Foundation ships them as neutral stubs with tests that the meltdown is unchanged.
+- `settleCommerce` calls optional `stepAttack` and `stepFraud`, also neutral stubs.
+- `rolloutLabel`/`stepRollout` dispatch on rollout kind, so a new kind is a new branch in one place.
+
 ### Wire format
 
-All new state lives inside `Commerce` (`frame.ts` sends it whole as `z.custom<Commerce>`), so `frame.ts` needs no change. No new `Trait` kinds and no new `ClusterState`/`Database` fields: those are strict or field-listed in `frame.ts` and would be dropped or rejected in rooms. Every new scenario gets a frame round-trip test (pattern: `orders-index.test.ts:104-117`).
+All new state lives inside `Commerce` (`frame.ts` sends it whole as `z.custom<Commerce>`), so `frame.ts` needs no change. No new `Trait` kinds and no new `ClusterState`/`Database` fields: those are strict or field-listed in `frame.ts` and would be dropped or rejected in rooms. Commerce state must be JSON-safe (no `Infinity`, `NaN`, `Map`, `Set`, `Date`; `undefined` fields vanish), every per-second history stays capped (as `orphanHistory` is at `SERIES_LENGTH`), and attack sources are generated from a seed and a rank (as `topTalker` is), never stored as a list of thousands of IPs. Every new scenario gets a frame round-trip test (pattern: `orders-index.test.ts:104-117`).
 
 ## Frontend ladder
 
@@ -71,17 +81,17 @@ New physics:
 | 1 | `web-auto-retry-storm` | The Pay button won't stop | `checkout.auto_retry` on during a gateway slowdown; `flags set checkout.auto_retry off`. Root cause: `unsafeRetryShare < 0.001`. | Flipping `home.sale_banner` does nothing. | none |
 | 2 | `address-autocomplete-500s` | Checkout broke after lunch | Three flags changed in the hour; `checkout.address_autocomplete` makes 60% of web checkouts 500. `rum errors` + `flags list` timing; turn it off. | Turning off the other flags changes nothing. | P1 |
 | 3 | `dead-kill-switch` | The kill switch nobody tested | `checkout.v2_wallet_autofill` 500s 25% of web checkouts; turn it off. | `flags set checkout.payment_element_v2 off` puts everyone on the decommissioned v1 tokenizer: every web checkout 500s. | P1 |
-| 4 | `stale-service-worker` | The rollback that didn't reach the browser | 70% of sessions still run the precached old build with `fixed immediate` retry; `flags set web.sw_kill_switch on`. Root cause: web adoption ≥ 0.99. | `flags set checkout.auto_retry off` does nothing: a fixed policy ignores flags. | P2 |
+| 4 | `stale-service-worker` | The rollback that didn't reach the browser | 70% of sessions still run the precached old build with `fixed immediate` retry; `flags set web.sw_kill_switch on`. Root cause: web adoption ≥ 0.99, reached within ~180 s of the flag (adoption ≥ 0.0017/s once on). | `flags set checkout.auto_retry off` does nothing: a fixed policy ignores flags. | P2 |
 
 ## Mobile ladder
 
-New physics: P1 with a remote-config trigger; an **update wall** (segments below remote-config `min_supported_version` can't check out and count as lost); client-side defects; a per-build checkout-failure column in `releases status`. M3 and M4 use F-A with `customerLossRate`.
+Remote-config changes propagate over 120 s (`clients.ts`), so every remote-config fix is the first command of its worked solution. New physics: P1 with a remote-config trigger; an **update wall** (segments below remote-config `min_supported_version` can't check out and count as lost); client-side defects; a per-build checkout-failure column in `releases status`. M3 and M4 use F-A with `customerLossRate`.
 
 | Tier | id | Title | Cause and fix | Backfire / trap | Physics |
 |---|---|---|---|---|---|
-| 1 | `ios-retry-config` | The app keeps retrying | iOS 7.3.0 retry policy `immediate`; `remote-config set checkout_retry_policy backoff`. Keep the `set` at step ≤ 3 of the solution: the storm drains ~190 s after the change and the solutions test has a 5 s margin. | `releases halt ios 7.3.0` leaves it flat. | none |
+| 1 | `ios-retry-config` | The app keeps retrying | iOS 7.3.0 retry policy `immediate`; `remote-config set checkout_retry_policy backoff`. Tune the storm (iOS share, gateway deficit) so it drains within ~150 s of the change; `solutions.test.ts` settles 180 s after the last step and 120 s of that is remote-config propagation. | `releases halt ios 7.3.0` leaves it flat. | none |
 | 2 | `android-staged-rollout-500s` | Android 7.3.0 breaks checkout | Growing Android staged rollout; `android_checkout_v2_enabled=true` 500s 80% of its checkouts. Set it false, then halt the release (objective). | Halting alone leaves errors flat above 0. A healthy iOS phased rollout is a distractor. | P1 (remote-config) |
-| 3 | `forced-update-wall` | Force-update to a build that isn't out | iOS 7.3.0 500s half its checkouts while `checkout_address_v2_enabled`; turn it off. The fix build 7.3.1 is still in review. | `remote-config set min_supported_version 7.3.1` walls off 36% of customers: 5xx falls, customer loss rises, resolve refused. | update wall, F-A |
+| 3 | `forced-update-wall` | Force-update to a build that isn't out | iOS 7.3.0 500s half its checkouts while `checkout_address_v2_enabled`; turn it off. The fix build 7.3.1 is still in review. `alertMetric` is `max(errorRate, customerLossRate)`. | `remote-config set min_supported_version 7.3.1` walls off 36% of customers: 5xx falls, customer loss rises, resolve refused. | update wall, F-A |
 | 4 | `pinned-cert-rotation` | The apps can't reach the API | Infra rotated the API intermediate; all app builds pin the old key, so every mobile checkout fails client-side (~0% 5xx). `remote-config set api_pin_set <old>,<new>`. | Halting, feature flips and rollback do nothing. `api_pinning_mode report-only` restores checkout but fails the "pinning enforced" objective. | client defects, F-A |
 
 ## Security ladder
@@ -91,11 +101,11 @@ New physics **P3, attack traffic** (all tiers): `Commerce.attack?: { label; path
 | Tier | id | Title | Cause and fix | Backfire / trap |
 |---|---|---|---|---|
 | 1 | `bot-flood-single-ip` | One client is eating checkout | One hosting IP at ~9,000 req/min, growing; `waf block <ip>`. Objective: no customers blocked. | `waf block --top 500` also blocks 39% of customers. |
-| 2 | `credential-stuffing-hosting` | Login storm from the cloud | ~120 hosting IPs across two ASNs; `waf ratelimit 20/1m` (0% of customers) or block the ranges, then resolve the alert true-positive. | A false-positive disposition closes the alert while the attack continues; resolve stays refused. |
+| 2 | `credential-stuffing-hosting` | Login storm from the cloud | ~120 hosting IPs across two ASNs at ~200 rps in total, hitting the session endpoint checkout-api also serves (the briefing says so); `waf ratelimit 20/1m` (0% of customers) or block the ranges, then resolve the alert true-positive. | A false-positive disposition closes the alert while the attack continues; resolve stays refused. |
 | 3 | `card-testing-soar` | SOAR wants to block 500 IPs | ~4,000 IPs in one hosting /16 at ~3/min each; `waf top --by asn`, block the /16, resolve true-positive `--contained-by`. | Top-500 block, a plain true-positive, or waiting past the auto-contain timer blocks 35–39% of customers and barely touches the bots. |
 | 4 | `residential-proxy-stuffing` | Bots that look like customers | ~40,000 residential IPs at ~0.5/min sharing one JA4; `waf block --ja4 <fp>`. | Rate limits miss the bots or hit customers; CIDR and top-N blocks mostly hit customers. |
 
-Search content (auth summary, card velocity, TLS fingerprints) comes through F-D evidence.
+Search content (auth summary, card velocity, TLS fingerprints) comes through F-D evidence. Every tier's attack exceeds the cluster's spare capacity (3 pods × 130 rps against 300 organic, so more than ~90 rps), or it never shows as 5xx. If JA4 proves heavy, tier 4 may instead block a "residential proxy" network class by ASN in `edge.ts`.
 
 ## Data & ML ladder
 
@@ -103,14 +113,16 @@ D1 uses existing physics plus F-A. D2–D4 add **P4, fraud scoring** inside `Com
 
 | Tier | id | Title | Cause and fix | Backfire / trap |
 |---|---|---|---|---|
-| 1 | `refund-double-charges` | Refund last night's double charges | A storm before the page left orphaned captures (ended more than 45 s before the page so the warehouse sees them). `alertMetric` is pending refunds / visible orphans. `warehouse run`, `reconcile preview`, `reconcile submit`. Objective: submitted before the settlement cut-off. | Declaring before submitting is refused. |
+| 1 | `refund-double-charges` | Refund last night's double charges | A storm before the page left orphaned captures (ended more than 45 s before the page so the warehouse sees them). The gateway stays slightly degraded, so new orphans trickle in and pending refunds keep rising if nobody acts. `alertMetric` is pending refunds / visible orphans. `warehouse run`, `reconcile preview`, `reconcile submit`. Objective: submitted before the settlement cut-off. | Declaring before submitting is refused. |
 | 2 | `fraud-model-regression` | Good customers declined | fraud-scorer v13 declines 14% of good customers (v12: 0.4%); `models rollback fraud-scorer`. | A small real rise in fraud in comms is a distractor. |
-| 3 | `fraud-threshold-fail-open` | Fail open, let the fraud in | Threshold moved 0.85 → 0.35 during an active card-testing ring; `models threshold fraud-scorer 0.85`. Objective: fraudulent captures below a bound. | `models mode … fail-open` floods the gateway (5xx for everyone) and fraud captures pile up; rollback does nothing. |
+| 3 | `fraud-threshold-fail-open` | The threshold nobody tuned | A score at or above the threshold is declined. Someone moved it 0.85 → 0.35, so many good customers are declined, during an active card-testing ring; `models threshold fraud-scorer 0.85`. Objective: fraudulent captures below a bound. | `models mode … fail-open` floods the gateway (5xx for everyone) and fraud captures pile up; rollback does nothing. |
 | 4 | `stale-fraud-features` | Every model declines them | `customer_orders_90d` is 30 h stale after a DAG failed on a renamed column; `pipelines logs`, `pipelines run features_customer_daily` (~60 s refresh). | Rollback does nothing (every version uses the feature); fail-open backfires as in tier 3. |
 
 ## Content rules
 
 Every scenario has a briefing, role briefing, comms timeline, 2–4 hints (vaguest first, never the command), a worked `solution` for its role, a postmortem question with one defensible answer, and `releasedAt` left unset. Log lines from real software (TrustKit, Chrome, Postgres, Airflow, …) are verbatim and checked against source or docs; fictional services may use their own wording. Each scenario has a `teamPlaybook` only if it pages more than one role (none of these do).
+
+In a room, other roles can help: an infra seat can absorb a Security flood with `kubectl scale`. That's acceptable teamwork, not a bug.
 
 ## Testing (per scenario, in a `<role>-ladder.test.ts` per role)
 
@@ -123,9 +135,13 @@ Every scenario has a briefing, role briefing, comms timeline, 2–4 hints (vague
 
 ## Order and parallelism
 
-1. Foundation (F-A … F-F) on top of Part 1.
-2. Frontend and Security in parallel: P1/P2 and P3 add their own types and touch `commerceDemand` in separate helpers.
-3. Mobile after Frontend (it extends P1 and shares `releases.ts`).
-4. Data after Foundation; merges into `commerce-step.ts` last.
+Two drops on this branch:
+- **Drop 1, tiers 1–2 for every role** (8 scenarios). This unlocks Intern to Engineer for all roles and retires the interim rule. It needs server-side P1 only, P3 with IP/CIDR/rate-limit blocks and attack load, and fraud as `versions` plus `falseDeclineShare`.
+- **Drop 2, tiers 3–4** (8 scenarios): service-worker rollout, JA4, update wall, client-side defects, threshold/mode/features, `pipelines`.
 
-The orchestrator merges in that order and resolves textual conflicts in `commerce.ts` and `commerce-step.ts`.
+Sequence:
+1. Foundation (F-A … F-H) on top of Part 1.
+2. Then, in parallel worktrees: Frontend, Security and Data (each fills only its own hook file, its tools and its scenarios).
+3. Mobile after Frontend (it shares `clients.ts` and `releases.ts`).
+
+Remaining shared files are `scenarios/index.ts` (one line per scenario) and `ladder.test.ts`; the orchestrator resolves those at merge.

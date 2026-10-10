@@ -101,7 +101,7 @@ export function LiveIncident({ scenario, role, isPaged, onPage, onClosed, onLeav
           <div className="warroom__left">
             <p className="warroom__hint">This device can’t draw the 3D office, so you get the map.</p>
             <ServiceMap cluster={cluster} scenario={watched} selected={selected} onSelect={setSelected} />
-            {selected && <InspectPanel node={selected} cluster={cluster} scenario={scenario} onSuggest={setDraft} onClose={() => setSelected(null)} />}
+            {selected && <InspectPanel node={selected} cluster={cluster} scenario={watched} onSuggest={setDraft} onClose={() => setSelected(null)} />}
             <Comms comms={comms} scenario={scenario} />
           </div>
           <Terminal {...terminalProps} />

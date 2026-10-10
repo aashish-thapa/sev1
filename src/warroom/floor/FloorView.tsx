@@ -2,6 +2,7 @@ import { PerformanceMonitor } from "@react-three/drei";
 import { Canvas, useFrame, type ThreeEvent } from "@react-three/fiber";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type RefObject } from "react";
 import { edgeHealth, sameNode, type NodeId } from "../health.ts";
+import { alertRate } from "../incident.ts";
 import type { CommsMessage, Scenario } from "../scenario.ts";
 import { openConnections } from "../sim/engine.ts";
 import type { ClusterState } from "../sim/model.ts";
@@ -312,7 +313,7 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
   const poolSize = cluster.deployments[0]?.poolSize ?? 1;
   const loadOf = (rack: Rack): number => {
     if (rack.kind === "database") return openConnections(cluster.deployments) / capacity;
-    if (rack.kind === "network") return Math.max(0.15, cluster.errorRate);
+    if (rack.kind === "network") return Math.max(0.15, alertRate(scenario, cluster));
     if (rack.node?.kind === "pod") {
       const name = rack.node.name;
       const pod = cluster.deployments.flatMap((deployment) => deployment.pods).find((candidate) => candidate.name === name);

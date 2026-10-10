@@ -3,6 +3,7 @@ import { DurableObject } from "cloudflare:workers";
 import { encodeServerMessage, ROOM_CODE_QUERY } from "../src/multiplayer/protocol.ts";
 import { publicListing, type RoomListing } from "../server/listing.ts";
 import { DEFAULT_ROOM_TIMING, Room, type Connection } from "../server/room.ts";
+import { officePaging } from "../server/paging.ts";
 import { findScenario } from "../server/scenarios.ts";
 import { openSession, type RoomDirectory } from "../server/session.ts";
 import { IDENTITY_TAGS_HEADER, OFFICE_SCENARIO_HEADER } from "./rooms.ts";
@@ -78,7 +79,8 @@ export class RoomObject extends DurableObject<Env> {
         const scenario = officeScenario && candidate === code && this.room === null ? findScenario(officeScenario) : undefined;
         if (!scenario) return undefined;
         this.listing = { visibility: "private", openedAt: Date.now() };
-        this.room = new Room(code, scenario, DEFAULT_ROOM_TIMING, workerLogger, (room) => this.occupancyChanged(room));
+        // An office is calm when members walk in; the pager goes off a few minutes later.
+        this.room = new Room(code, scenario, DEFAULT_ROOM_TIMING, workerLogger, (room) => this.occupancyChanged(room), officePaging(Math.random));
         workerLogger("info", "office_opened", { room: code, scenario: scenario.id });
         return this.room;
       },

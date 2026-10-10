@@ -9,8 +9,12 @@ import { TeamApp } from "./TeamApp.tsx";
 import { WorkApp } from "./WorkApp.tsx";
 
 /** The company's tools on your laptop while you're in its office; none anywhere else. */
-export function useCompanyLaptopApps(api: CompanyApi, username: string | null, isInOffice: boolean): readonly LaptopApp[] {
+export function useCompanyLaptopApps(api: CompanyApi, username: string | null, isInOffice: boolean, onCompany?: (company: Company) => void): readonly LaptopApp[] {
   const [company, setCompany] = useState<Company | null>(null);
+  // The office floor draws from the same books (its board, its racks), so it hears every refetch too.
+  useEffect(() => {
+    if (company) onCompany?.(company);
+  }, [company, onCompany]);
 
   const refresh = useCallback(() => {
     void api.mine().then((mine) => setCompany(mine.ok ? mine.value.company : null));

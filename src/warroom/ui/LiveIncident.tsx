@@ -172,6 +172,7 @@ function Immersive({ scenario, incident, comms, hud, selected, onSelect, termina
     () => (isLaptopOpen ? closeLaptop() : openLaptop(isPaged ? "terminal" : quietTab)),
     [closeLaptop, isLaptopOpen, isPaged, openLaptop, quietTab],
   );
+  const openApp = useCallback((appId: string) => openLaptop(`app:${appId}`), [openLaptop]);
   const inspect = useCallback(
     (node: NodeId) => {
       onSelect(node);
@@ -242,6 +243,7 @@ function Immersive({ scenario, incident, comms, hud, selected, onSelect, termina
           isPaged={isPaged}
           onPresence={team?.onPresence}
           onToggleLaptop={toggleLaptop}
+          onOpenApp={openApp}
         />
       </Suspense>
       {hud}

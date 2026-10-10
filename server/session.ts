@@ -84,6 +84,8 @@ export function openSession({ connection, rooms, findScenario, logger, now = Dat
         return inRoom((room, playerId) => room.presence(playerId, { x: message.x, z: message.z, yaw: message.yaw, stance: message.stance, isOnLaptop: message.isOnLaptop, holding: message.holding }));
       case "command":
         return inRoom((room, playerId) => room.command(playerId, message.line));
+      case "page":
+        return inRoom((room, playerId) => room.page(playerId));
       case "declare":
         return inRoom((room, playerId) => room.declare(playerId));
       case "chat":

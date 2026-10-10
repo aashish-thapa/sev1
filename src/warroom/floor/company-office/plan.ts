@@ -3,9 +3,10 @@
  * (the one nearest your usual desk first) with a one-rack closet beside it; a server room opens the
  * data centre and racks its servers along the back wall. Pure: the floor draws whatever this says.
  */
-import { roomKindById, type RoomKindId, type ServerTierId } from "../../../domain/company/catalog.ts";
+import { categoryById, roomKindById, type RoomKindId, type ServerTierId } from "../../../domain/company/catalog.ts";
+import { capacityRps } from "../../../domain/company/rules.ts";
 import type { Company } from "../../../storage/company-protocol.ts";
-import { CLUSTERS, DATACENTRE_DOOR, DESKS, desksOf, officeObstacles, PLAYER_DESK, type Desk, type DeskCluster } from "../office.ts";
+import { CLUSTERS, DATACENTRE_DOOR, DATACENTRE_FRONT, DESKS, desksOf, officeObstacles, PLAYER_DESK, type Desk, type DeskCluster } from "../office.ts";
 import type { Footprint } from "../layout.ts";
 
 export type OfficeRack = {
@@ -28,6 +29,11 @@ export type OfficePlan = {
   readonly isDataCentreOpen: boolean;
   /** The company's own racks: bay closets first, then the server room's. */
   readonly racks: readonly OfficeRack[];
+  /**
+   * By the first bay: the company's board on the data centre's glass across the corridor, over the aisle to its
+   * right (clear of the bay's closet), and the punch clock in the aisle to its left. Null in the shared office.
+   */
+  readonly fixtures: { readonly board: Footprint; readonly punchClock: Footprint } | null;
 };
 
 /** The whole building, as job mode and ordinary team rooms use it. */
@@ -38,9 +44,10 @@ export const FULL_OFFICE: OfficePlan = {
   memberDesks: new Map(),
   isDataCentreOpen: true,
   racks: [],
+  fixtures: null,
 };
 
-export type CompanyLayout = Pick<Company, "rooms" | "servers" | "members">;
+export type CompanyLayout = Pick<Company, "name" | "category" | "fundsCents" | "rooms" | "servers" | "members">;
 
 const RACK = { width: 0.8, depth: 1.1 } as const;
 /** Desks per cluster: a bay's four seats fill exactly one. */
@@ -49,6 +56,7 @@ const SEATS_PER_CLUSTER = 4;
 const SERVER_ROW = { x: -9.5, z: -13.6, pitch: 1.05 } as const;
 /** Closets sit by the aisle in front of a cluster: toward the corridor for the front row, the window for the back. */
 const CLOSET_Z = { front: 4.95, back: 14.4 } as const;
+const FIXTURE = { aisleOffsetX: 2.5, board: { width: 1.7, depth: 0.08 }, punchClockZ: CLOSET_Z.front + 0.4, punchClock: { width: 0.35, depth: 0.35 } } as const;
 
 const homeCluster = CLUSTERS.find((cluster) => desksOf(cluster).some((desk) => desk.id === PLAYER_DESK.id)) ?? CLUSTERS[0];
 
@@ -93,7 +101,22 @@ export function officePlan(company: CompanyLayout | null): OfficePlan {
   const ordered = [...company.members].sort((a, b) => Number(b.isFounder) - Number(a.isFounder) || a.joinedAt - b.joinedAt);
   const memberDesks = new Map(ordered.flatMap((member, index) => (desks[index] ? [[member.username, desks[index]] as const] : [])));
 
-  return { hasColleagues: false, clusters, desks, memberDesks, isDataCentreOpen: hallCount > 0, racks };
+  const first = clusters[0] ?? homeCluster;
+  const fixtures = {
+    board: { x: first.x + FIXTURE.aisleOffsetX, z: DATACENTRE_FRONT.z + FIXTURE.board.depth / 2, ...FIXTURE.board },
+    punchClock: { x: first.x - FIXTURE.aisleOffsetX, z: FIXTURE.punchClockZ, ...FIXTURE.punchClock },
+  };
+
+  return { hasColleagues: false, clusters, desks, memberDesks, isDataCentreOpen: hallCount > 0, racks, fixtures };
+}
+
+/** What the company's board shows: who it is, what's in the bank, and how much of today's traffic its servers can take. */
+export type BoardFigures = { readonly name: string; readonly fundsCents: number; readonly trafficPercent: number };
+
+export function boardFigures(company: CompanyLayout): BoardFigures {
+  const { demandRps } = categoryById(company.category);
+  const served = demandRps === 0 ? 1 : Math.min(1, capacityRps(company.servers) / demandRps);
+  return { name: company.name, fundsCents: company.fundsCents, trafficPercent: Math.round(served * 100) };
 }
 
 /** Your desk in this office: the one assigned to you, or the first desk when you aren't on the books. */
@@ -108,5 +131,7 @@ export function planObstacles(plan: OfficePlan): Footprint[] {
   const door: Footprint[] = plan.isDataCentreOpen
     ? []
     : [{ x: (DATACENTRE_DOOR.fromX + DATACENTRE_DOOR.toX) / 2, z: DATACENTRE_DOOR.z, width: DATACENTRE_DOOR.toX - DATACENTRE_DOOR.fromX, depth: 0.2 }];
-  return [...officeObstacles(plan.clusters), ...plan.racks.map((rack) => rack.footprint), ...door];
+  // The board hangs on the wall; only the punch clock's post stands in the way.
+  const punchClock = plan.fixtures ? [plan.fixtures.punchClock] : [];
+  return [...officeObstacles(plan.clusters), ...plan.racks.map((rack) => rack.footprint), ...door, ...punchClock];
 }

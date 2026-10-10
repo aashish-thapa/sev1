@@ -88,8 +88,9 @@ export function TeamIncident({ room, scenario, role, overlay, onUseScreen, onClo
       <LiveIncident
         scenario={scenario}
         role={role}
-        isPaged
-        onPage={() => {}}
+        // A company office is calm until its pager goes off; "Page me" asks the room to start now.
+        isPaged={room.phase === "incident"}
+        onPage={room.page}
         onClosed={onClosed}
         onLeave={onLeave}
         onUseScreen={onUseScreen}

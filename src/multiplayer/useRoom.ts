@@ -5,7 +5,7 @@ import type { CommsMessage } from "../warroom/scenario.ts";
 import { promptFor } from "../warroom/shell/prompt.ts";
 import type { TerminalLine } from "../warroom/ui/useIncident.ts";
 import { RoomClient, seatOf, type Engineer, type RoomEvents, type RoomStatus, type Seat, type SocketConstructor } from "./client.ts";
-import type { Player, Position, Resume, RoomVisibility, ServerMessageOf, Signal } from "./protocol.ts";
+import type { Player, Position, Resume, RoomPhase, RoomVisibility, ServerMessageOf, Signal } from "./protocol.ts";
 
 export type RoomInfo = {
   readonly code: string;
@@ -20,6 +20,8 @@ export type RoomView = {
   readonly room: RoomInfo | null;
   readonly players: readonly Player[];
   readonly incident: Incident | null;
+  /** "quiet" in a company office until the pager goes off; ordinary rooms are an incident from the start. */
+  readonly phase: RoomPhase;
   readonly terminal: readonly TerminalLine[];
   /** This player's own commands, for ↑/↓ and tab completion. */
   readonly history: readonly string[];
@@ -39,6 +41,7 @@ const INITIAL_VIEW: RoomView = {
   room: null,
   players: [],
   incident: null,
+  phase: "incident",
   terminal: [],
   history: [],
   comms: [],
@@ -71,6 +74,7 @@ export function useRoom(options: { url: string; WebSocket?: SocketConstructor })
       forward("comms"),
       forward("error"),
       forward("closed"),
+      forward("phase"),
     ];
     return () => {
       for (const off of unsubscribe) off();
@@ -89,6 +93,7 @@ export function useRoom(options: { url: string; WebSocket?: SocketConstructor })
   const leave = useCallback(() => client.leave(), [client]);
   const run = useCallback((line: string) => client.run(line), [client]);
   const declare = useCallback(() => client.declare(), [client]);
+  const page = useCallback(() => client.page(), [client]);
   const chat = useCallback((text: string) => client.chat(text), [client]);
   const sendPresence = useCallback((position: Position) => client.presence(position), [client]);
   const sendSignal = useCallback((to: string, signal: Signal) => client.signal(to, signal), [client]);
@@ -98,7 +103,7 @@ export function useRoom(options: { url: string; WebSocket?: SocketConstructor })
   );
   const announceMic = useCallback((isMicOn: boolean) => client.voice(isMicOn), [client]);
 
-  return { ...view, create, join, leave, run, declare, chat, sendPresence, sendSignal, onSignal, announceMic };
+  return { ...view, create, join, leave, run, declare, page, chat, sendPresence, sendSignal, onSignal, announceMic };
 }
 
 function reduce(view: RoomView, { type, event }: Event): RoomView {
@@ -114,8 +119,12 @@ function reduce(view: RoomView, { type, event }: Event): RoomView {
         comms: event.comms,
         history: event.history,
         terminal: event.isResumed ? view.terminal : [],
+        phase: event.phase,
         error: null,
       };
+    case "phase":
+      // A new incident (or a quiet office) starts every laptop clean; chat history stays.
+      return { ...view, phase: event.phase, terminal: [], activity: [], debrief: null };
     case "incident":
       return { ...view, incident: event };
     case "players":

@@ -82,6 +82,14 @@ export const SignalSchema = z.discriminatedUnion("kind", [
 ]);
 export type Signal = z.output<typeof SignalSchema>;
 
+/**
+ * A company office starts "quiet": the floor is calm and nothing is paging until the pager goes off.
+ * Every other room is an incident from the start, which is also what older servers mean by saying nothing.
+ */
+export const ROOM_PHASES = ["quiet", "incident"] as const;
+export type RoomPhase = (typeof ROOM_PHASES)[number];
+const RoomPhaseSchema = z.enum(ROOM_PHASES);
+
 /** Public rooms are listed for anyone to join; private ones only open to people given the code. */
 export const ROOM_VISIBILITIES = ["public", "private"] as const;
 export type RoomVisibility = (typeof ROOM_VISIBILITIES)[number];
@@ -108,6 +116,8 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("presence"), ...PositionSchema.shape }),
   z.strictObject({ type: z.literal("command"), line: z.string().max(MAX_COMMAND_LENGTH) }),
   z.strictObject({ type: z.literal("declare") }),
+  /** A quiet office's "Page me": the incident starts now rather than when the pager would have gone off. */
+  z.strictObject({ type: z.literal("page") }),
   z.strictObject({ type: z.literal("chat"), text: z.string().trim().min(1).max(MAX_CHAT_LENGTH) }),
   /** Sent by a client that can do voice: it joins the room's calls, and says whether its mic is open. */
   z.strictObject({ type: z.literal("voice"), isMicOn: z.boolean() }),
@@ -178,7 +188,10 @@ export const ServerMessageSchema = z.discriminatedUnion("type", [
     comms: z.array(CommsMessageSchema),
     /** This player's own shell history, so ↑ and `history` survive a reconnect. */
     history: z.array(z.string()),
+    phase: RoomPhaseSchema.default("incident"),
   }),
+  /** The room went quiet, or the pager went off; a full `state` frame follows with the incident to show. */
+  z.object({ type: z.literal("phase"), phase: RoomPhaseSchema }),
   z.object({ type: z.literal("players"), players: z.array(PlayerSchema) }),
   z.object({ type: z.literal("presence"), playerId: PlayerIdSchema, position: PositionSchema }),
   z.object({ type: z.literal("state"), frame: IncidentFrameSchema }),

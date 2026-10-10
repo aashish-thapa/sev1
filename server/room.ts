@@ -7,6 +7,7 @@ import {
   type Player,
   type Position,
   type Resume,
+  type RoomPhase,
   type ServerMessage,
   type Signal,
 } from "../src/multiplayer/protocol.ts";
@@ -15,6 +16,7 @@ import type { CommsMessage, Scenario } from "../src/warroom/scenario.ts";
 import { runLine } from "../src/warroom/shell/shell.ts";
 import type { Logger } from "./log.ts";
 import { chatComms, declaredComms, joinedComms, leftComms, noticeComms } from "./notices.ts";
+import type { Paging } from "./paging.ts";
 import { isSameSecret, newSecret } from "./secrets.ts";
 import { startTicker, type StopTicker } from "./ticker.ts";
 
@@ -76,19 +78,27 @@ export class Room {
   private comms: readonly CommsMessage[];
   private readonly seats = new Map<string, Seat>();
   private stopTicker: StopTicker | null = null;
+  /** Quiet rooms show a calm floor and run no clock until the pager goes off. */
+  private phase: RoomPhase;
+  /** Null for an ordinary war room, which is live from the start. */
+  private readonly paging: Paging | null;
+  private pagerTimer: ReturnType<typeof setTimeout> | null = null;
+  private resetTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly timing: RoomTiming;
   private readonly logger: Logger;
   /** Called when who's connected changes, or the incident closes: what hosts track for expiry and listing. */
   private readonly onOccupancyChange: (room: Room) => void;
 
-  constructor(code: string, scenario: Scenario, timing: RoomTiming, logger: Logger, onOccupancyChange: (room: Room) => void) {
+  constructor(code: string, scenario: Scenario, timing: RoomTiming, logger: Logger, onOccupancyChange: (room: Room) => void, paging: Paging | null = null) {
     this.code = code;
     this.scenario = scenario;
     this.timing = timing;
     this.logger = logger;
     this.onOccupancyChange = onOccupancyChange;
+    this.paging = paging;
+    this.phase = paging ? "quiet" : "incident";
     this.incident = openIncident(scenario);
-    this.comms = scenario.comms.filter((message) => message.at <= this.incident.cluster.t);
+    this.comms = this.phase === "incident" ? this.openingComms() : [];
   }
 
   /** The first engineer to take a seat; null until someone has. */
@@ -119,6 +129,7 @@ export class Room {
       players: this.players(),
       comms: [...this.comms],
       history: [...seat.history],
+      phase: this.phase,
     });
     this.send(seat, { type: "state", frame: encodeFrame(null, this.incident) });
     if (this.incident.phase.name === "closed") this.send(seat, this.closedMessage());
@@ -162,6 +173,10 @@ export class Room {
   command(playerId: string, line: string) {
     const seat = this.seats.get(playerId);
     if (!seat) return;
+    if (this.phase === "quiet") {
+      this.send(seat, { type: "error", code: "incident_not_live", message: "Nothing's paging yet." });
+      return;
+    }
     if (this.incident.phase.name !== "live") {
       this.send(seat, { type: "error", code: "incident_not_live", message: "The shell is read-only once the incident is resolved." });
       return;
@@ -188,10 +203,15 @@ export class Room {
     }
   }
 
+  /** A member presses "Page me" in a quiet office: the incident starts now. */
+  page(playerId: string) {
+    if (this.seats.has(playerId) && this.phase === "quiet") this.goLive();
+  }
+
   declare(playerId: string) {
     const seat = this.seats.get(playerId);
     if (!seat) return;
-    if (this.incident.phase.name !== "live") {
+    if (this.phase === "quiet" || this.incident.phase.name !== "live") {
       this.send(seat, { type: "error", code: "incident_not_live", message: "The incident is already marked resolved." });
       return;
     }
@@ -229,6 +249,10 @@ export class Room {
   dispose() {
     this.stopTicker?.();
     this.stopTicker = null;
+    if (this.pagerTimer) clearTimeout(this.pagerTimer);
+    if (this.resetTimer) clearTimeout(this.resetTimer);
+    this.pagerTimer = null;
+    this.resetTimer = null;
     for (const seat of this.seats.values()) if (seat.expiry) clearTimeout(seat.expiry);
   }
 
@@ -245,7 +269,39 @@ export class Room {
       this.syncTicker();
       // A closed room leaves the public list, so its host hears about it like a join or leave.
       this.onOccupancyChange(this);
+      if (this.paging) this.resetTimer = setTimeout(() => this.goQuiet(), this.paging.resetAfterCloseMs);
     }
+  }
+
+  /** The pager goes off: a fresh incident opens and everyone's floor turns live. */
+  private goLive() {
+    if (this.pagerTimer) clearTimeout(this.pagerTimer);
+    this.pagerTimer = null;
+    this.phase = "incident";
+    this.replaceIncident(openIncident(this.scenario));
+    for (const message of this.openingComms()) this.post(message);
+    this.logger("info", "office_paged", { room: this.code });
+    this.syncTicker();
+  }
+
+  /** Back to a calm office after an incident closes; the pager is armed again. */
+  private goQuiet() {
+    this.resetTimer = null;
+    this.phase = "quiet";
+    this.replaceIncident(openIncident(this.scenario));
+    this.syncTicker();
+    this.syncPager();
+  }
+
+  /** A new incident isn't a delta of the last one: tell everyone the phase, then send it whole. */
+  private replaceIncident(next: Incident) {
+    this.incident = next;
+    this.broadcast({ type: "phase", phase: this.phase });
+    this.broadcast({ type: "state", frame: encodeFrame(null, next) });
+  }
+
+  private openingComms(): CommsMessage[] {
+    return this.scenario.comms.filter((message) => message.at <= this.incident.cluster.t);
   }
 
   /** Every change goes through here, so the frame each client applies is always relative to the last one sent. */
@@ -324,12 +380,24 @@ export class Room {
 
   private occupancyChanged() {
     this.syncTicker();
+    this.syncPager();
     this.onOccupancyChange(this);
   }
 
-  /** The clock runs only while someone is watching and the incident is still open. */
+  /** A quiet office's pager counts down only while someone is there to hear it; one timer, no ticking. */
+  private syncPager() {
+    const shouldArm = this.paging !== null && this.phase === "quiet" && this.connectedCount > 0;
+    if (shouldArm && !this.pagerTimer && this.paging) {
+      this.pagerTimer = setTimeout(() => this.goLive(), this.paging.quietMs());
+    } else if (!shouldArm && this.pagerTimer) {
+      clearTimeout(this.pagerTimer);
+      this.pagerTimer = null;
+    }
+  }
+
+  /** The clock runs only while someone is watching and a live incident is still open. */
   private syncTicker() {
-    const shouldRun = this.connectedCount > 0 && this.incident.phase.name !== "closed";
+    const shouldRun = this.connectedCount > 0 && this.phase === "incident" && this.incident.phase.name !== "closed";
     if (shouldRun && !this.stopTicker) {
       this.stopTicker = startTicker(
         () => (this.incident.phase.name === "monitoring" ? this.timing.monitoringTickMs : this.timing.tickMs),

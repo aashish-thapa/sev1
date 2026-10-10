@@ -14,8 +14,9 @@ import { Office } from "./Office.tsx";
 import type { Role } from "../../domain/incident.ts";
 import { BUILDING, DATACENTRE_ORIGIN, PEOPLE, screenFootprint, spawnFor, WALL_SCREENS, type Desk, type Person, type WallScreen } from "./office.ts";
 import { CompanyFixtures } from "./company-office/CompanyFixtures.tsx";
+import { useLaptopApps } from "../ui/laptop-apps.ts";
 import { CompanyOfficeContext, OfficePlanContext, type CompanyOfficeVisit } from "./company-office/context.ts";
-import { myDeskIn, officePlan, planObstacles } from "./company-office/plan.ts";
+import { boardFigures, myDeskIn, officePlan, planObstacles } from "./company-office/plan.ts";
 import { ROOM_KIND_IDS, SERVER_TIER_IDS, type RoomKindId, type ServerTierId } from "../../domain/company/catalog.ts";
 import { whereabouts, type Whereabouts } from "./whereabouts.ts";
 import { useCareer } from "../../app/career-context.ts";
@@ -67,6 +68,8 @@ type Props = {
   /** Player pressed E at a wall screen. */
   onUseScreen: (screen: WallScreen) => void;
   onToggleLaptop: () => void;
+  /** Opens the laptop on one of the place's own apps (see LaptopAppsContext), by its id. */
+  onOpenApp?: (appId: string) => void;
   /** Fired when the player's zone or nearness to the racks changes — drives the soundscape. */
   onWhereabouts?: (where: Whereabouts) => void;
   /** Fired once per stride while walking. */
@@ -83,6 +86,8 @@ type Props = {
 };
 
 const NO_COLLEAGUES: readonly Person[] = [];
+/** The company laptop app where clocking out (the work-day summary) lives. */
+const OFFICE_APP_ID = "office";
 
 const STRIDE_METRES = 0.72;
 
@@ -124,7 +129,7 @@ function devCompanyOverride(): CompanyOfficeVisit | null {
   const [roomList = "", serverList = ""] = spec.split(":");
   const rooms = roomList.split(",").filter((id): id is RoomKindId => (ROOM_KIND_IDS as readonly string[]).includes(id));
   const servers = serverList.split(",").filter((id): id is ServerTierId => (SERVER_TIER_IDS as readonly string[]).includes(id));
-  return { company: { rooms, servers, members: [{ username: "you", role: "infrastructure", payCents: 12_000, isFounder: true, joinedAt: 0, canHire: true }] }, me: "you" };
+  return { company: { name: "Dev Co", category: "ecommerce", fundsCents: 1_234_500, rooms, servers, members: [{ username: "you", role: "infrastructure", payCents: 12_000, isFounder: true, joinedAt: 0, canHire: true }] }, me: "you" };
 }
 
 type Controls = {
@@ -136,13 +141,15 @@ type Controls = {
 };
 
 /** Walkable server hall. Each rack is a live object in the same simulation as the terminal. */
-export default function FloorView({ cluster, scenario, role, selected, comms, isLaptopOpen, isOverlayOpen, panic, laptopScreenRef, onInspect, onUseScreen, onToggleLaptop, onWhereabouts, onStep, teammates = [], onPresence, selfAvatarSeed, isPaged = false }: Props) {
+export default function FloorView({ cluster, scenario, role, selected, comms, isLaptopOpen, isOverlayOpen, panic, laptopScreenRef, onInspect, onUseScreen, onToggleLaptop, onOpenApp, onWhereabouts, onStep, teammates = [], onPresence, selfAvatarSeed, isPaged = false }: Props) {
   const wrapper = useRef<HTMLDivElement>(null);
   // A company's own office (only the rooms it bought, only its members), or the whole building.
   const [devOffice] = useState(devCompanyOverride);
   const office = useContext(CompanyOfficeContext) ?? devOffice;
   const company = office?.company ?? null;
   const plan = useMemo(() => officePlan(company), [company]);
+  const board = useMemo(() => (company ? boardFigures(company) : null), [company]);
+  const hasOfficeApp = useLaptopApps().some((app) => app.id === OFFICE_APP_ID);
   const myDesk = useMemo(() => myDeskIn(plan, office?.me ?? null), [office?.me, plan]);
   const free = useMemo(() => freeDesks(plan.desks, plan.hasColleagues), [plan]);
   const walls = useMemo(() => planObstacles(plan), [plan]);
@@ -207,8 +214,12 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
       ...(plan.hasColleagues ? smallTalk.usables : []),
       ...noteWall.usables,
       ...(plan.hasColleagues ? standup.usables : []),
+      // Clocking out is done at the office: the punch clock opens the laptop on the company's office app.
+      ...(plan.fixtures && hasOfficeApp && onOpenApp
+        ? [{ key: "punch-clock", footprint: plan.fixtures.punchClock, verb: "Clock out", label: "", use: () => onOpenApp(OFFICE_APP_ID) }]
+        : []),
     ],
-    [hands.usables, inspect, noteWall.usables, onUseScreen, plan.hasColleagues, racks, seating.usables, smallTalk.usables, standup.usables],
+    [hands.usables, hasOfficeApp, inspect, noteWall.usables, onOpenApp, onUseScreen, plan.fixtures, plan.hasColleagues, racks, seating.usables, smallTalk.usables, standup.usables],
   );
   // Sitting, the only thing to do with E is get up again.
   const focused = seating.standUsable ?? usables.find((usable) => usable.key === focusedKey) ?? null;
@@ -381,7 +392,7 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
         <PerformanceMonitor onDecline={stepDown} onFallback={stepDown} />
         <OfficePlanContext value={plan}>
         <Office panic={panic} reduceMotion={reduceMotion} hasShadows={settings.hasShadows} />
-        <CompanyFixtures />
+        <CompanyFixtures board={board} />
         <People
           comms={comms}
           now={cluster.t}

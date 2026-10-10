@@ -94,7 +94,8 @@ export function App({ shareUrl, proSale, adminApi, companyApi, ...services }: Pr
     [companyOffice, isInRoom, room.room?.code, username],
   );
 
-  const companyApps = useCompanyLaptopApps(companyApi, username, officeVisit !== null);
+  const refreshOffice = useCallback((company: Company) => setCompanyOffice((office) => (office && office.company.id === company.id ? { ...office, company } : office)), []);
+  const companyApps = useCompanyLaptopApps(companyApi, username, officeVisit !== null, refreshOffice);
 
   const leaveOffice = () => {
     if (isInRoom) room.leave();

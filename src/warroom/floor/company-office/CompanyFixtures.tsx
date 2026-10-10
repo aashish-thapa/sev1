@@ -1,8 +1,11 @@
+import { useEffect, useMemo } from "react";
 import type { ServerTierId } from "../../../domain/company/catalog.ts";
+import type { Footprint } from "../layout.ts";
 import { BUILDING, DATACENTRE_FRONT } from "../office.ts";
 import { tokenColor } from "../tokens.ts";
 import { useOfficePlan } from "./context.ts";
-import type { OfficeRack } from "./plan.ts";
+import { boardTexture } from "./board-texture.ts";
+import type { BoardFigures, OfficeRack } from "./plan.ts";
 
 const RACK_HEIGHT = 2.1;
 const POST = 0.04;
@@ -10,8 +13,11 @@ const POST = 0.04;
 const UNIT_HEIGHT: Readonly<Record<ServerTierId, number>> = { small: 0.09, medium: 0.18, large: 0.36 };
 const UNIT_Y = 1.05;
 
-/** What a company owns that the shared office doesn't: its racks, and a data centre shut until it buys a server room. */
-export function CompanyFixtures() {
+/**
+ * What a company owns that the shared office doesn't: its racks, a data centre shut until it buys a server room,
+ * and by the first bay its board (`board`, when the company's figures are known) and the punch clock.
+ */
+export function CompanyFixtures({ board }: { board: BoardFigures | null }) {
   const plan = useOfficePlan();
   if (plan.hasColleagues) return null;
   return (
@@ -20,7 +26,63 @@ export function CompanyFixtures() {
         <OpenRack key={rack.key} rack={rack} />
       ))}
       {!plan.isDataCentreOpen && <ShutDataCentre />}
+      {plan.fixtures && board && <Board footprint={plan.fixtures.board} figures={board} />}
+      {plan.fixtures && <PunchClock footprint={plan.fixtures.punchClock} />}
     </>
+  );
+}
+
+const BOARD = { width: 1.6, height: 0.9, centreY: 1.85, bezel: 0.05 } as const;
+
+/** A screen on the wall facing the bay: the company at a glance, redrawn whenever its books are refetched. */
+function Board({ footprint, figures }: { footprint: Footprint; figures: BoardFigures }) {
+  const texture = useMemo(() => boardTexture(figures), [figures]);
+  useEffect(() => () => texture.dispose(), [texture]);
+  return (
+    <group position={[footprint.x, 0, footprint.z]}>
+      <mesh position={[0, BOARD.centreY, 0]} castShadow>
+        <boxGeometry args={[BOARD.width + BOARD.bezel * 2, BOARD.height + BOARD.bezel * 2, 0.05]} />
+        <meshStandardMaterial color={tokenColor("--color-world-plastic")} roughness={0.4} />
+      </mesh>
+      <mesh position={[0, BOARD.centreY, 0.027]}>
+        <planeGeometry args={[BOARD.width, BOARD.height]} />
+        <meshBasicMaterial map={texture} toneMapped={false} />
+      </mesh>
+    </group>
+  );
+}
+
+/** A time clock on a post: a dial and a card slot, nothing written on it. Press E at it to clock out. */
+function PunchClock({ footprint }: { footprint: Footprint }) {
+  const body = tokenColor("--color-world-aluminium");
+  return (
+    <group position={[footprint.x, 0, footprint.z]}>
+      <mesh position={[0, 0.55, 0]} castShadow>
+        <cylinderGeometry args={[0.03, 0.03, 1.1, 12]} />
+        <meshStandardMaterial color={tokenColor("--color-world-metal")} roughness={0.4} metalness={0.7} />
+      </mesh>
+      <mesh position={[0, 0.015, 0]} receiveShadow>
+        <cylinderGeometry args={[0.16, 0.16, 0.03, 20]} />
+        <meshStandardMaterial color={tokenColor("--color-world-metal")} roughness={0.4} metalness={0.7} />
+      </mesh>
+      <mesh position={[0, 1.28, 0]} castShadow>
+        <boxGeometry args={[0.3, 0.38, 0.16]} />
+        <meshStandardMaterial color={body} roughness={0.35} metalness={0.5} />
+      </mesh>
+      <mesh position={[0, 1.34, 0.081]}>
+        <circleGeometry args={[0.1, 32]} />
+        <meshStandardMaterial color={tokenColor("--color-paper")} roughness={0.6} />
+      </mesh>
+      <mesh position={[0, 1.34, 0.083]} rotation={[0, 0, -0.9]}>
+        <planeGeometry args={[0.008, 0.08]} />
+        <meshBasicMaterial color={tokenColor("--color-ink")} />
+      </mesh>
+      {/* The card slot, lit red: the one thing to do here. */}
+      <mesh position={[0, 1.165, 0.081]}>
+        <planeGeometry args={[0.16, 0.018]} />
+        <meshStandardMaterial color={tokenColor("--color-critical")} emissive={tokenColor("--color-critical")} emissiveIntensity={0.8} toneMapped={false} />
+      </mesh>
+    </group>
   );
 }
 

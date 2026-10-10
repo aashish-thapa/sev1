@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { CLUSTERS, DESKS, PLAYER_DESK } from "../office.ts";
-import { FULL_OFFICE, myDeskIn, officePlan, planObstacles, type CompanyLayout } from "./plan.ts";
+import { boardFigures, FULL_OFFICE, myDeskIn, officePlan, planObstacles, type CompanyLayout } from "./plan.ts";
 
 const member = (username: string, joinedAt: number, isFounder = false) => ({ username, role: "infrastructure" as const, payCents: 12_000, isFounder, joinedAt, canHire: isFounder });
 
-const startup = (rooms: CompanyLayout["rooms"], servers: CompanyLayout["servers"], members = [member("ana", 1, true)]): CompanyLayout => ({ rooms, servers, members });
+const startup = (rooms: CompanyLayout["rooms"], servers: CompanyLayout["servers"], members = [member("ana", 1, true)]): CompanyLayout => ({ name: "Acme", category: "ecommerce", fundsCents: 0, rooms, servers, members });
 
 describe("officePlan", () => {
   it("is the whole building outside a company", () => {
@@ -58,5 +58,24 @@ describe("officePlan", () => {
     expect(blocks(small, empty.x, empty.z)).toBe(false);
     expect(blocks(small, 8, 1)).toBe(true);
     expect(blocks(open, 8, 1)).toBe(false);
+  });
+
+  it("hangs the board facing the first bay and stands the punch clock clear of its desks and closet, only in a company's office", () => {
+    const plan = officePlan(startup(["bay"], ["small"]));
+    const fixtures = plan.fixtures;
+    if (!fixtures) throw new Error("a company office has its fixtures");
+    const overlaps = (a: { x: number; z: number; width: number; depth: number }, b: typeof a) =>
+      Math.abs(a.x - b.x) < (a.width + b.width) / 2 && Math.abs(a.z - b.z) < (a.depth + b.depth) / 2;
+    const others = planObstacles({ ...plan, fixtures: null });
+    expect(others.some((box) => overlaps(box, fixtures.punchClock))).toBe(false);
+    expect(planObstacles(plan)).toContainEqual(fixtures.punchClock);
+    expect(plan.racks.some((rack) => Math.abs(rack.footprint.x - fixtures.board.x) < fixtures.board.width / 2)).toBe(false);
+    expect(FULL_OFFICE.fixtures).toBeNull();
+  });
+
+  it("shows how much of today's traffic the servers can take, capped at all of it", () => {
+    expect(boardFigures(startup(["bay"], ["small"]))).toEqual({ name: "Acme", fundsCents: 0, trafficPercent: 33 });
+    expect(boardFigures(startup(["bay"], [])).trafficPercent).toBe(0);
+    expect(boardFigures(startup(["bay"], ["large"])).trafficPercent).toBe(100);
   });
 });

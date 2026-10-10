@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useWallet } from "../../app/wallet-context.ts";
 import { INCIDENT_MIN_POINTS } from "../../domain/economy.ts";
 import { hasBoughtSolution, type SpendOutcome } from "../../domain/purchases.ts";
@@ -8,6 +8,7 @@ import { debrief, type Debrief, type Incident } from "../incident.ts";
 import type { Role } from "../../domain/incident.ts";
 import { ROLE_INFO } from "../../domain/roles.ts";
 import type { Scenario } from "../scenario.ts";
+import { CompanyOfficeContext } from "../floor/company-office/context.ts";
 import type { WallScreen } from "../floor/office.ts";
 import type { useRoom } from "../../multiplayer/useRoom.ts";
 import { SoloIncident } from "./LiveIncident.tsx";
@@ -47,6 +48,8 @@ const AUTO_PAGE_MS = { min: 60_000, spread: 60_000 } as const;
 /** The office: quiet until the pager goes off, then the live incident, postmortem and debrief. */
 export function WarRoomView({ scenario, role, onFinish, onBuySolution, hints, onLeave, onUseScreen, onPaged, overlay, room }: Props) {
   const wallet = useWallet();
+  // A company office goes quiet again after each incident, so its debrief leads back to the office, not out of the room.
+  const isOffice = useContext(CompanyOfficeContext) !== null;
   const [stage, setStage] = useState<Stage>(() => ({ name: "office", isPaged: false, run: 0, visit: { startedAt: Date.now(), paidFromSeq: wallet.nextSeq } }));
   const onClosed = useCallback((incident: Incident) => setStage((current) => ({ name: "postmortem", incident, picked: null, visit: current.visit })), []);
   const isQuiet = stage.name === "office" && !stage.isPaged;
@@ -170,9 +173,11 @@ export function WarRoomView({ scenario, role, onFinish, onBuySolution, hints, on
         <button
           type="button"
           className="button button--primary"
-          onClick={() => (room ? onLeave() : setStage({ name: "office", isPaged: false, run: Date.now(), visit: { startedAt: Date.now(), paidFromSeq: wallet.nextSeq } }))}
+          // The office goes quiet a few seconds after an incident closes; until then there's nothing calm to go back to.
+          disabled={isOffice && room?.phase !== "quiet"}
+          onClick={() => (room && !isOffice ? onLeave() : setStage({ name: "office", isPaged: false, run: Date.now(), visit: { startedAt: Date.now(), paidFromSeq: wallet.nextSeq } }))}
         >
-          {room ? "Leave the room" : "Back to the office"}
+          {room && !isOffice ? "Leave the room" : "Back to the office"}
         </button>
         <button type="button" className="button button--ghost" onClick={onLeave}>
           Leave for today

@@ -47,6 +47,7 @@ export type RoomEvents = {
   readonly error: ServerMessageOf<"error">;
   readonly closed: ServerMessageOf<"closed">;
   readonly signal: ServerMessageOf<"signal">;
+  readonly phase: ServerMessageOf<"phase">;
 };
 
 export type RoomClientOptions = {
@@ -95,6 +96,7 @@ export class RoomClient {
     error: new Set(),
     closed: new Set(),
     signal: new Set(),
+    phase: new Set(),
   };
   /** Null until voice starts; resent on every new seat, since the server forgets it with the old one. */
   private voiceHeld: boolean | null = null;
@@ -154,6 +156,11 @@ export class RoomClient {
 
   declare() {
     this.send({ type: "declare" });
+  }
+
+  /** In a quiet office: page the room now instead of waiting for the pager. */
+  page() {
+    this.send({ type: "page" });
   }
 
   chat(text: string) {

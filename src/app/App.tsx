@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useContext, useEffect, useMemo } from "react";
 import { careerLevel } from "../domain/career.ts";
 import { warRoomPlays } from "../domain/progress.ts";
 import { Briefing } from "../ui/Briefing.tsx";
@@ -21,6 +21,8 @@ import { CareerContext } from "./career-context.ts";
 import { useActivityClock } from "./useActivityClock.ts";
 import { useShiftGame, type GameServices } from "./useShiftGame.ts";
 import { WalletContext } from "./wallet-context.ts";
+import { AccountContext } from "./useAccount.ts";
+import { useClaimGrants } from "./useClaimGrants.ts";
 import { WellbeingContext } from "./wellbeing-context.ts";
 
 /** Rooms share the app's origin (the dev server proxies /rooms to the room server). */
@@ -38,6 +40,7 @@ type Props = GameServices & {
 
 export function App({ shareUrl, proSale, adminApi, companyApi, tasks, ...services }: Props) {
   const game = useShiftGame(services);
+  useClaimGrants(useContext(AccountContext)?.pendingGrants, game.progress.wallet, game.claimGrant);
   const room = useRoom({ url: roomUrl() });
   const role = game.progress.role ?? "infrastructure";
   const isInRoom = room.room !== null && room.status !== "left" && room.status !== "failed";

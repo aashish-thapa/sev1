@@ -1,5 +1,5 @@
-import { createContext, useCallback, useEffect, useState, useSyncExternalStore } from "react";
-import type { Account, Entitlements } from "../storage/account-protocol.ts";
+import { createContext, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import type { Account, Entitlements, PendingGrant } from "../storage/account-protocol.ts";
 import type { AccountApi, AccountProblem, Outcome, SignedIn } from "../storage/account-api.ts";
 import type { ProgressStore } from "../storage/progress-store.ts";
 import type { ProgressSync, SyncStatus } from "../storage/syncing-progress-store.ts";
@@ -11,12 +11,16 @@ export type AccountSession = {
   readonly account: Account | null;
   /** What the account has paid for, from the server; null for guests. */
   readonly entitlements: Entitlements | null;
+  /** Money an admin granted, waiting to be claimed into the wallet; empty for guests. */
+  readonly pendingGrants: readonly PendingGrant[];
   readonly sync: SyncStatus;
   readonly problem: AccountProblem | null;
   readonly isBusy: boolean;
   signUp(username: string, password: string): Promise<void>;
   signIn(username: string, password: string): Promise<void>;
   signOut(): Promise<void>;
+  /** Asks the server again who's signed in, what they're entitled to and what's waiting for them. */
+  refresh(): Promise<void>;
 };
 
 /** Null outside the app shell (tests, stories): account UI then renders nothing. */
@@ -26,11 +30,12 @@ type State = {
   readonly status: AccountStatus;
   readonly account: Account | null;
   readonly entitlements: Entitlements | null;
+  readonly pendingGrants: readonly PendingGrant[];
   readonly problem: AccountProblem | null;
   readonly isBusy: boolean;
 };
 
-const SIGNED_OUT: State = { status: "anonymous", account: null, entitlements: null, problem: null, isBusy: false };
+const SIGNED_OUT: State = { status: "anonymous", account: null, entitlements: null, pendingGrants: [], problem: null, isBusy: false };
 
 /** Who's signed in, and the bridge between signing in and syncing progress. */
 export function useAccount(api: AccountApi, store: ProgressStore, sync: ProgressSync): AccountSession {
@@ -51,7 +56,7 @@ export function useAccount(api: AccountApi, store: ProgressStore, sync: Progress
       }
       const saved = await api.loadProgress();
       if (!isCurrent) return;
-      setState({ status: "signed-in", account: me.value.account, entitlements: me.value.entitlements, problem: null, isBusy: false });
+      setState({ status: "signed-in", account: me.value.account, entitlements: me.value.entitlements, pendingGrants: me.value.pendingGrants, problem: null, isBusy: false });
       if (saved.ok) await sync.signedIn(saved.value);
     };
     // restore() reports every outcome through state; there's no caller to hand a rejection to.
@@ -69,11 +74,14 @@ export function useAccount(api: AccountApi, store: ProgressStore, sync: Progress
         setState((current) => ({ ...current, isBusy: false, problem: outcome.problem }));
         return;
       }
-      setState({ status: "signed-in", account: outcome.value.account, entitlements: null, problem: null, isBusy: false });
+      setState({ status: "signed-in", account: outcome.value.account, entitlements: null, pendingGrants: [], problem: null, isBusy: false });
       await sync.signedIn(outcome.value.progress);
-      // Sign-in doesn't carry entitlements; ask once, so a returning Pro player has their perks straight away.
+      // Sign-in doesn't carry entitlements or grants; ask once, so a returning player has both straight away.
       const me = await api.me();
-      if (me.ok && me.value) setState((current) => ({ ...current, entitlements: me.value?.entitlements ?? null }));
+      if (me.ok && me.value) {
+        const { entitlements, pendingGrants } = me.value;
+        setState((current) => ({ ...current, entitlements, pendingGrants }));
+      }
     },
     [api, sync],
   );
@@ -91,5 +99,22 @@ export function useAccount(api: AccountApi, store: ProgressStore, sync: Progress
     setState(SIGNED_OUT);
   }, [api, sync]);
 
-  return { ...state, sync: snapshot.status, signUp, signIn, signOut };
+  const refresh = useCallback(async () => {
+    const me = await api.me();
+    if (me.ok && me.value) {
+      const { account, entitlements, pendingGrants } = me.value;
+      setState((current) => ({ ...current, account, entitlements, pendingGrants }));
+    }
+  }, [api]);
+
+  // A save that claimed grants clears them on the server; once it lands, ask again so the list empties.
+  const previousSync = useRef(snapshot.status);
+  const hasPendingGrants = state.pendingGrants.length > 0;
+  useEffect(() => {
+    const wasSaving = previousSync.current === "saving";
+    previousSync.current = snapshot.status;
+    if (wasSaving && snapshot.status === "saved" && hasPendingGrants) void refresh();
+  }, [hasPendingGrants, refresh, snapshot.status]);
+
+  return { ...state, sync: snapshot.status, signUp, signIn, signOut, refresh };
 }

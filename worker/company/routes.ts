@@ -1,4 +1,3 @@
-import { z } from "zod";
 import {
   BuyRoomRequestSchema,
   BuyServerRequestSchema,
@@ -9,14 +8,12 @@ import {
   SettleRequestSchema,
 } from "../../src/storage/company-protocol.ts";
 import type { AccountService } from "../api/accounts.ts";
-import { failure, isSameOrigin, json, readBody, sessionTokenOf } from "../api/http.ts";
+import { failure, idempotencyKeyOf, isSameOrigin, json, readBody, sessionTokenOf } from "../api/http.ts";
 import type { CompanyProblem, CompanyService, Outcome } from "./service.ts";
 
 export const INVITATIONS_PATH = "/api/invitations";
 const INVITATION_ACTION = /^\/api\/invitations\/([A-Za-z0-9-]{1,64})\/(accept|decline)$/;
 /** A client retrying a purchase sends the same key, so the second attempt books nothing new. */
-const IDEMPOTENCY_HEADER = "idempotency-key";
-const IdempotencyKeySchema = z.string().regex(/^[A-Za-z0-9_-]{8,64}$/);
 
 
 const STATUS: Readonly<Record<CompanyProblem, number>> = {
@@ -66,8 +63,7 @@ export async function handleCompany(request: Request, accounts: Pick<AccountServ
   if (request.method !== "GET" && !isSameOrigin(request)) return failure("forbidden", "Cross-site requests are not allowed.", 403);
   const user = await accounts.userFor(sessionTokenOf(request));
   if (!user) return failure("signed_out", "Sign in to run a company.", 401);
-  const key = IdempotencyKeySchema.safeParse(request.headers.get(IDEMPOTENCY_HEADER));
-  const requestKey = key.success ? key.data : null;
+  const requestKey = idempotencyKeyOf(request);
 
   const invitationAction = request.method === "POST" ? INVITATION_ACTION.exec(url.pathname) : null;
   if (invitationAction) {

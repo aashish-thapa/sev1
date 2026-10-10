@@ -1,11 +1,10 @@
 /** In-memory company books with the same conditional writes as D1, for tests. */
-import type { CompanyClaims } from "../../src/domain/audit.ts";
 import { roomKindById, type RoomKindId, type ServerTierId } from "../../src/domain/company/catalog.ts";
 import { FOUNDING_PURCHASES } from "../../src/domain/company/rules.ts";
 import { payRef } from "../../src/domain/economy.ts";
 import type { Role } from "../../src/domain/incident.ts";
 import type { PendingPayout, ReceivedInvitation } from "../../src/storage/company-protocol.ts";
-import type { CompanyBank, CompanyMoves } from "../api/store.ts";
+import type { CompanyBank, CompanyPromises, SaveMoves } from "../api/store.ts";
 import type { BookLine, BookReason, CompanyRow, CompanyStore, CompanyView, InvitationRow, MemberRow, Purchase, SettledDay } from "./store.ts";
 
 type Line = BookLine & { readonly companyId: string; readonly ref: string };
@@ -25,7 +24,7 @@ export class MemoryCompanyStore implements CompanyStore, CompanyBank {
   }
 
   /** What D1 does with a save's company moves (see companyMoveStatements). */
-  applyMoves(userId: string, moves: CompanyMoves, at: number): void {
+  applyMoves(userId: string, moves: SaveMoves, at: number): void {
     for (const ref of moves.fundingRefs) {
       const company = [...this.companies.values()].find((candidate) => candidate.fundingRef === ref);
       // Like D1: the audit already found the intent live, so the save that debits the wallet always activates it.
@@ -44,7 +43,7 @@ export class MemoryCompanyStore implements CompanyStore, CompanyBank {
     }
   }
 
-  async claimsFor(userId: string, now: number): Promise<CompanyClaims> {
+  async claimsFor(userId: string, now: number): Promise<CompanyPromises> {
     return {
       fundings: new Map(
         [...this.companies.values()].filter((company) => company.founderId === userId && company.state === "unfunded" && company.fundingExpiresAt > now).map((company) => [company.fundingRef, company.fundingCents]),

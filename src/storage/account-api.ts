@@ -11,13 +11,14 @@ import {
   type Account,
   type ApiError,
   type Entitlements,
+  type PendingGrant,
   type SyncedProgress,
 } from "./account-protocol.ts";
 
 /** Why a call didn't succeed: an answer from the server, or no answer at all. */
 export type AccountProblem = { readonly error: ApiError | "offline"; readonly message: string };
 /** The signed-in account and its entitlements, as /api/me reports them. */
-export type Me = { readonly account: Account; readonly entitlements: Entitlements };
+export type Me = { readonly account: Account; readonly entitlements: Entitlements; readonly pendingGrants: readonly PendingGrant[] };
 
 export type Outcome<Value> = { readonly ok: true; readonly value: Value } | { readonly ok: false; readonly problem: AccountProblem };
 export type SignedIn = { readonly account: Account; readonly progress: SyncedProgress | null };
@@ -47,8 +48,8 @@ export class HttpAccountApi implements AccountApi {
   async me() {
     const result = await this.call("GET", "/me", MeResponseSchema);
     if (!result.ok) return result;
-    const { account, entitlements } = result.value;
-    return { ok: true as const, value: account ? { account, entitlements: entitlements ?? NO_ENTITLEMENTS } : null };
+    const { account, entitlements, pendingGrants } = result.value;
+    return { ok: true as const, value: account ? { account, entitlements: entitlements ?? NO_ENTITLEMENTS, pendingGrants } : null };
   }
 
   signUp(username: string, password: string, progress: Progress) {

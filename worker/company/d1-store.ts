@@ -1,10 +1,9 @@
-import type { CompanyClaims } from "../../src/domain/audit.ts";
 import { payRef } from "../../src/domain/economy.ts";
 import { roomKindById, type CategoryId, type RoomKindId, type ServerTierId } from "../../src/domain/company/catalog.ts";
 import { FOUNDING_PURCHASES } from "../../src/domain/company/rules.ts";
 import type { Role } from "../../src/domain/incident.ts";
 import type { PendingPayout, ReceivedInvitation } from "../../src/storage/company-protocol.ts";
-import type { CompanyBank, CompanyMoves } from "../api/store.ts";
+import type { CompanyBank, CompanyPromises, SaveMoves } from "../api/store.ts";
 import type { BookLine, BookReason, CompanyRow, CompanyState, CompanyStore, CompanyView, InvitationRow, MemberRow, Purchase, SettledDay } from "./store.ts";
 
 /** The first bay is bought from the seed the moment the company is funded; its ref makes that happen once. */
@@ -43,7 +42,7 @@ const toCompany = (row: CompanyRecord): CompanyRow => ({
  * for (and buys its first bay), a payroll claim marks its payout paid. Every write is conditional, so a
  * replayed or forged move changes nothing.
  */
-export function companyMoveStatements(db: D1Database, userId: string, moves: CompanyMoves, at: number): D1PreparedStatement[] {
+export function companyMoveStatements(db: D1Database, userId: string, moves: SaveMoves, at: number): D1PreparedStatement[] {
   const funding = moves.fundingRefs.flatMap((ref) => [
     db
       // No expiry check here: the audit already found the intent live, and this write rides in the same batch as the
@@ -85,7 +84,7 @@ export class D1CompanyStore implements CompanyStore, CompanyBank {
     this.db = db;
   }
 
-  async claimsFor(userId: string, now: number): Promise<CompanyClaims> {
+  async claimsFor(userId: string, now: number): Promise<CompanyPromises> {
     const [fundings, payouts] = await this.db.batch([
       this.db.prepare("SELECT funding_ref, funding_cents FROM companies WHERE founder_id = ? AND state = 'unfunded' AND funding_expires_at > ?").bind(userId, now),
       this.db.prepare("SELECT id, amount_cents FROM company_payouts WHERE user_id = ? AND claimed_at IS NULL").bind(userId),

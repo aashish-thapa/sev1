@@ -60,8 +60,16 @@ export const PRO_PLANS = ["pro-monthly", "pro-yearly"] as const;
 export type ProPlan = (typeof PRO_PLANS)[number];
 export const CheckoutRequestSchema = z.object({ plan: z.enum(PRO_PLANS) });
 
-/** `entitlements` is null for guests. */
-export const MeResponseSchema = z.object({ account: AccountSchema.nullable(), entitlements: EntitlementsSchema.nullable().default(null) });
+/** Money an admin granted this player, waiting for their game to claim it into the wallet. */
+export const PendingGrantSchema = z.object({ id: z.string().min(1), amountCents: z.int().positive(), note: z.string(), grantedAt: z.number() });
+export type PendingGrant = z.output<typeof PendingGrantSchema>;
+
+/** `entitlements` is null for guests; `pendingGrants` is empty for them and on older servers. */
+export const MeResponseSchema = z.object({
+  account: AccountSchema.nullable(),
+  entitlements: EntitlementsSchema.nullable().default(null),
+  pendingGrants: z.array(PendingGrantSchema).default([]),
+});
 export const SaveResponseSchema = z.object({ updatedAt: z.int().nonnegative() });
 /** A refused save carries what the server kept, so the client can adopt it. */
 export const RejectedSaveSchema = z.object({ error: z.literal("rejected"), current: SyncedProgressSchema.nullable() });

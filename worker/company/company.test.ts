@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { isPlausibleProgress, NO_COMPANY_CLAIMS } from "../../src/domain/audit.ts";
+import { isPlausibleProgress, NO_PROMISED_MONEY } from "../../src/domain/audit.ts";
 import { FOUNDING_MINIMUM_CENTS } from "../../src/domain/company/rules.ts";
 import { payRef } from "../../src/domain/economy.ts";
 import { earn, emptyProgress, type Progress } from "../../src/domain/progress.ts";
 import { earnPayroll, fundCompany } from "../../src/domain/purchases.ts";
 import { MyCompanySchema } from "../../src/storage/company-protocol.ts";
 import { AccountService } from "../api/accounts.ts";
-import type { AccountStore, CompanyMoves, LedgerRow, RankedAccount, SavedProgress, Standing, User } from "../api/store.ts";
+import type { AccountStore, SaveMoves, LedgerRow, RankedAccount, SavedProgress, Standing, User } from "../api/store.ts";
 import { MemoryCompanyStore } from "./memory-store.ts";
 import { CompanyService, FUNDING_WINDOW_MS } from "./service.ts";
 
@@ -44,7 +44,7 @@ class MemoryAccounts implements AccountStore {
   async loadProgress(userId: string) {
     return this.saved.get(userId) ?? null;
   }
-  async saveProgress(userId: string, progress: SavedProgress, _standing: Standing, _credits: readonly LedgerRow[], moves?: CompanyMoves) {
+  async saveProgress(userId: string, progress: SavedProgress, _standing: Standing, _credits: readonly LedgerRow[], moves?: SaveMoves) {
     this.saved.set(userId, progress);
     if (moves) this.companies.applyMoves(userId, moves, progress.updatedAt);
   }
@@ -185,8 +185,8 @@ describe("work days and payroll", () => {
   it("refuses payroll the server never booked, or for the wrong amount", () => {
     const start = richProgress(1);
     const forged = { ...start, wallet: earnPayroll(start.wallet, { id: "made-up", amountCents: 50_000, workDay: 1 }, START) };
-    expect(isPlausibleProgress(start, forged, 60, undefined, NO_COMPANY_CLAIMS)).toBe(false);
-    const claims = { fundings: new Map<string, number>(), payouts: new Map([[payRef.payroll("made-up"), 40_000]]) };
+    expect(isPlausibleProgress(start, forged, 60, undefined, NO_PROMISED_MONEY)).toBe(false);
+    const claims = { ...NO_PROMISED_MONEY, payouts: new Map([[payRef.payroll("made-up"), 40_000]]) };
     expect(isPlausibleProgress(start, forged, 60, undefined, claims)).toBe(false);
     expect(isPlausibleProgress(start, forged, 60, undefined, { ...claims, payouts: new Map([[payRef.payroll("made-up"), 50_000]]) })).toBe(true);
   });

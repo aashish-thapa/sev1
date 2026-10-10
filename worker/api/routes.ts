@@ -38,8 +38,9 @@ export async function handleApi(request: Request, accounts: AccountService, enti
     }
     case "GET /api/me": {
       const user = await accounts.userFor(sessionTokenOf(request));
-      if (!user) return json({ account: null, entitlements: null });
-      return json({ account: accountOf(user), entitlements: (await entitlementsOf(user.id)) ?? NO_ENTITLEMENTS });
+      if (!user) return json({ account: null, entitlements: null, pendingGrants: [] });
+      const [entitlements, pendingGrants] = await Promise.all([entitlementsOf(user.id), accounts.pendingGrants(user)]);
+      return json({ account: accountOf(user), entitlements: entitlements ?? NO_ENTITLEMENTS, pendingGrants });
     }
     case "GET /api/progress": {
       const user = await accounts.userFor(sessionTokenOf(request));

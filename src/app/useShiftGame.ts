@@ -4,8 +4,9 @@ import type { LocalDate } from "../domain/calendar.ts";
 import { careerLevel } from "../domain/career.ts";
 import { ROLE_IDS, ROLES, roleOf, type IncidentCard, type Role } from "../domain/incident.ts";
 import { payRef } from "../domain/economy.ts";
-import { earnPayroll, fundCompany as fundCompanyFrom, hasBoughtSolution, spend, type SolutionTier, type SpendOutcome } from "../domain/purchases.ts";
+import { earnGrant, earnPayroll, fundCompany as fundCompanyFrom, hasBoughtSolution, spend, type SolutionTier, type SpendOutcome } from "../domain/purchases.ts";
 import type { PendingPayout } from "../storage/company-protocol.ts";
+import type { PendingGrant } from "../storage/account-protocol.ts";
 import { hasEarned } from "../domain/achievements.ts";
 import {
   chooseRole,
@@ -85,6 +86,8 @@ export type ShiftGame = {
   fundCompany(fundingRef: string, cents: number): boolean;
   /** Earns a payout the company booked, once; an already-claimed payout changes nothing. */
   claimPayout(payout: PendingPayout): void;
+  /** Earns money an admin granted into the wallet, once per grant; the next save claims it on the server. */
+  claimGrant(grant: PendingGrant): void;
   /** Allowance hints opened today (Pro's daily free hints). */
   readonly hintsUsedToday: number;
   /** Records one allowance hint opened today. */
@@ -209,6 +212,13 @@ export function useShiftGame({ library, store, today: clock, now = Date.now }: G
     },
     [commit, now, progress],
   );
+  const claimGrant = useCallback(
+    (grant: PendingGrant) => {
+      const wallet = earnGrant(progress.wallet, grant, now());
+      if (wallet !== progress.wallet) commit({ ...progress, wallet });
+    },
+    [commit, now, progress],
+  );
   const takeFromPantryNow = useCallback((id: ConsumableId) => commit(takeFromPantry(progress, id, today)), [commit, progress, today]);
   const consumeNow = useCallback((kind: Refuel, portion: number) => commit(consume(progress, kind, portion)), [commit, progress]);
   const paySalary = useCallback(
@@ -252,6 +262,7 @@ export function useShiftGame({ library, store, today: clock, now = Date.now }: G
     buySolution,
     fundCompany,
     claimPayout,
+    claimGrant,
     paySalary,
     takeFromPantry: takeFromPantryNow,
     consume: consumeNow,

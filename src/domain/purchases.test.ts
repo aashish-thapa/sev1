@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { isPlausibleProgress } from "./audit.ts";
 import { INCIDENT_CENTS_PER_POINT, payRef } from "./economy.ts";
 import { earn, emptyProgress, type Progress } from "./progress.ts";
-import { hasBoughtSolution, purchaseRef, solutionPriceCents, spend, type SolutionPurchase } from "./purchases.ts";
+import { earnGrant, hasBoughtSolution, purchaseRef, solutionPriceCents, spend, type SolutionPurchase } from "./purchases.ts";
 
 const AT = Date.UTC(2026, 9, 10, 12);
 const tierOf = (id: string) => (id === "scaled-to-zero" ? 1 : id === "checkout-meltdown" ? 5 : undefined);
@@ -90,5 +90,15 @@ describe("company money in the wallet", () => {
     const once = earnPayroll(richPlayer(0).wallet, payout, AT);
     expect(once.earnedCents.payroll).toBe(12_000);
     expect(earnPayroll(once, payout, AT)).toBe(once);
+  });
+});
+
+describe("earnGrant", () => {
+  it("credits a grant once, booked under its own reason with its note", () => {
+    const once = earnGrant(emptyProgress().wallet, { id: "g1", amountCents: 50_000, note: "for testing" }, AT);
+    expect(once.balanceCents).toBe(50_000);
+    expect(once.earnedCents.grant).toBe(50_000);
+    expect(once.ledger.at(-1)).toMatchObject({ reason: "grant", ref: "grant:g1", note: "Grant · for testing" });
+    expect(earnGrant(once, { id: "g1", amountCents: 50_000, note: "for testing" }, AT)).toBe(once);
   });
 });

@@ -36,7 +36,9 @@ export type Payment =
   | { readonly kind: "card"; readonly ref: string; readonly difficulty: 1 | 2 | 3; readonly mode: "rated" | "practice"; readonly title: string }
   | { readonly kind: "incident"; readonly ref: string; readonly points: number; readonly title: string; readonly isTeam: boolean }
   /** A company paying you for a work day: the server booked it, the save claims it once (ref `payroll:<payoutId>`). */
-  | { readonly kind: "payroll"; readonly ref: string; readonly amountCents: number; readonly workDay: number };
+  | { readonly kind: "payroll"; readonly ref: string; readonly amountCents: number; readonly workDay: number }
+  /** Money an admin granted (test money): the server issued it, the save claims it once (ref `grant:<grantId>`). */
+  | { readonly kind: "grant"; readonly ref: string; readonly amountCents: number; readonly note: string };
 
 /** Stable identities for earnings (all times epoch milliseconds). */
 export const payRef = {
@@ -48,9 +50,11 @@ export const payRef = {
   incident: (scenarioId: string, runStartedAt: number) => `incident:${scenarioId}:${runStartedAt}`,
   /** One payout the company booked for you. */
   payroll: (payoutId: string) => `payroll:${payoutId}`,
+  /** One grant an admin issued to you. */
+  grant: (grantId: string) => `grant:${grantId}`,
 } as const;
 
-const REASONS = ["salary", "card", "incident", "payroll"] as const satisfies readonly Payment["kind"][];
+const REASONS = ["salary", "card", "incident", "payroll", "grant"] as const satisfies readonly Payment["kind"][];
 export type PayReason = (typeof REASONS)[number];
 /** What money can be spent on; purchases are negative ledger lines (see purchases.ts). */
 export const SPEND_REASONS = ["solution", "company"] as const;
@@ -73,7 +77,7 @@ const LedgerEntrySchema = z.object({
 });
 
 // Payroll and company spending came with startup mode; older saves start them at zero.
-const PerReason = z.object({ salary: Cents, card: Cents, incident: Cents, payroll: Cents.default(0) });
+const PerReason = z.object({ salary: Cents, card: Cents, incident: Cents, payroll: Cents.default(0), grant: Cents.default(0) });
 const PerSpend = z.object({ solution: Cents, company: Cents.default(0) });
 
 export const WalletSchema = z.object({
@@ -97,8 +101,8 @@ export type Wallet = z.output<typeof WalletSchema>;
 export function emptyWallet(): Wallet {
   return {
     balanceCents: 0,
-    earnedCents: { salary: 0, card: 0, incident: 0, payroll: 0 },
-    paidUnits: { salary: 0, card: 0, incident: 0, payroll: 0 },
+    earnedCents: { salary: 0, card: 0, incident: 0, payroll: 0, grant: 0 },
+    paidUnits: { salary: 0, card: 0, incident: 0, payroll: 0, grant: 0 },
     spentCents: { solution: 0, company: 0 },
     boughtUnits: { solution: 0, company: 0 },
     nextSeq: 0,
@@ -118,6 +122,7 @@ export function amountOf(payment: Payment): number {
     case "incident":
       return payment.points >= INCIDENT_MIN_POINTS ? Math.round(payment.points) * INCIDENT_CENTS_PER_POINT : 0;
     case "payroll":
+    case "grant":
       return Math.max(0, Math.floor(payment.amountCents));
   }
 }
@@ -136,6 +141,8 @@ function noteOf(payment: Payment): string {
       return `${payment.isTeam ? "Team incident" : "Incident"} resolved · ${payment.title}`.slice(0, 120);
     case "payroll":
       return `Company pay · work day ${payment.workDay}`;
+    case "grant":
+      return (payment.note ? `Grant · ${payment.note}` : "Grant from the team").slice(0, 120);
   }
 }
 

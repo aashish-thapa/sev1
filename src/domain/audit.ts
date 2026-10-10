@@ -25,7 +25,10 @@ const TIME_SLACK = 1.25;
 const EVENT_ALLOWANCE = 2;
 const MAX_INCIDENT_CENTS = 100 * INCIDENT_CENTS_PER_POINT;
 const MAX_CARD_CENTS = Math.max(...Object.values(CARD_BONUS_CENTS));
-const EARN_REASONS = ["salary", "card", "incident", "payroll"] as const satisfies readonly PayReason[];
+const EARN_REASONS = ["salary", "card", "incident", "payroll", "grant"] as const satisfies readonly PayReason[];
+/** Earnings the server issues and the save only claims: each new line must be one the server promised. */
+const SERVER_ISSUED = ["payroll", "grant"] as const satisfies readonly PayReason[];
+type ServerIssued = (typeof SERVER_ISSUED)[number];
 
 /** Looks up the tier of a scenario by id; the Worker answers from the scenario registry. */
 export type TierOf = (scenarioId: string) => SolutionTier | undefined;
@@ -34,16 +37,17 @@ export type TierOf = (scenarioId: string) => SolutionTier | undefined;
 const NO_TIERS: TierOf = () => undefined;
 
 /**
- * Money the server has promised to move for this player, by wallet ref: company fundings it is
- * waiting for (the exact seed each) and payroll it booked and not yet paid. Loaded before the audit,
- * so the audit itself stays pure.
+ * Money the server has promised to move for this player, by wallet ref and exact amount: company
+ * fundings it is waiting for, payroll it booked, and admin grants it issued — none yet claimed.
+ * Loaded before the audit, so the audit itself stays pure.
  */
-export type CompanyClaims = {
+export type PromisedMoney = {
   readonly fundings: ReadonlyMap<string, number>;
   readonly payouts: ReadonlyMap<string, number>;
+  readonly grants: ReadonlyMap<string, number>;
 };
 
-export const NO_COMPANY_CLAIMS: CompanyClaims = { fundings: new Map(), payouts: new Map() };
+export const NO_PROMISED_MONEY: PromisedMoney = { fundings: new Map(), payouts: new Map(), grants: new Map() };
 
 /** Does the server stand behind this new ledger line (a purchase it can price, or pay it booked)? */
 type Vouch = (entry: LedgerEntry) => boolean;
@@ -88,10 +92,12 @@ export function isPlausibleWallet(
   const fresh = freshLines(previous, next);
   const purchases = fresh.filter((entry) => (SPEND_REASONS as readonly string[]).includes(entry.reason));
   if (purchases.some((entry) => entry.amountCents >= 0 || !isAllowedSpend(entry))) return false;
-  // Payroll comes only from payouts the server booked, and each new cent of it must be one of those lines.
-  const payroll = fresh.filter((entry) => entry.reason === "payroll");
-  if (payroll.some((entry) => entry.amountCents <= 0 || !isBookedPay(entry))) return false;
-  if (delta("payroll", "earnedCents") !== payroll.reduce((sum, entry) => sum + entry.amountCents, 0)) return false;
+  // Payroll and grants come only from money the server issued, and each new cent of them must be one of those lines.
+  for (const reason of SERVER_ISSUED) {
+    const issued = fresh.filter((entry) => entry.reason === reason);
+    if (issued.some((entry) => entry.amountCents <= 0 || !isBookedPay(entry))) return false;
+    if (delta(reason, "earnedCents") !== issued.reduce((sum, entry) => sum + entry.amountCents, 0)) return false;
+  }
   const companySpend = purchases.filter((entry) => entry.reason === "company").reduce((sum, entry) => sum - entry.amountCents, 0);
   if (next.spentCents.company - previous.spentCents.company !== companySpend) return false;
 
@@ -107,7 +113,7 @@ export function isPlausibleProgress(
   next: Progress,
   elapsedSeconds: number,
   tierOf: TierOf = NO_TIERS,
-  company: CompanyClaims = NO_COMPANY_CLAIMS,
+  promised: PromisedMoney = NO_PROMISED_MONEY,
 ): boolean {
   // Career level reads correctCards and passed War Rooms, so each may only grow by work that was also paid for.
   const newCorrect = next.correctCards - previous.correctCards;
@@ -116,13 +122,14 @@ export function isPlausibleProgress(
   const lowestLevel = careerLevel(previous).level;
   const isAllowedSpend: Vouch = (entry) => {
     // A company seed must be exactly what the server is waiting for, under the ref it issued.
-    if (entry.reason === "company") return company.fundings.get(entry.ref) === -entry.amountCents;
+    if (entry.reason === "company") return promised.fundings.get(entry.ref) === -entry.amountCents;
     const scenarioId = scenarioOfPurchase(entry.ref);
     const tier = scenarioId === null ? undefined : tierOf(scenarioId);
     // Price rises with level, so charging at the level the buyer started this sync from is the floor.
     return tier !== undefined && -entry.amountCents >= solutionPriceCents(tier, lowestLevel);
   };
-  const isBookedPay: Vouch = (entry) => company.payouts.get(entry.ref) === entry.amountCents;
+  const issuedBy: Readonly<Record<ServerIssued, ReadonlyMap<string, number>>> = { payroll: promised.payouts, grant: promised.grants };
+  const isBookedPay: Vouch = (entry) => (SERVER_ISSUED as readonly string[]).includes(entry.reason) && issuedBy[entry.reason as ServerIssued].get(entry.ref) === entry.amountCents;
   return (
     newCorrect >= 0 &&
     newCorrect <= newPaidCards &&

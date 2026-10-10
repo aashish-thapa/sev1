@@ -58,6 +58,11 @@ export function earnPayroll(wallet: Wallet, payout: { readonly id: string; reado
   return pay(wallet, { kind: "payroll", ref: payRef.payroll(payout.id), amountCents: payout.amountCents, workDay: payout.workDay }, at);
 }
 
+/** Money an admin granted, earned into the wallet once under `grant:<id>`. */
+export function earnGrant(wallet: Wallet, grant: { readonly id: string; readonly amountCents: number; readonly note: string }, at: number): Wallet {
+  return pay(wallet, { kind: "grant", ref: payRef.grant(grant.id), amountCents: grant.amountCents, note: grant.note }, at);
+}
+
 type Charge = { readonly reason: SpendReason; readonly ref: string; readonly cents: number; readonly note: string };
 
 function charge(wallet: Wallet, { reason, ref, cents, note }: Charge, at: number): SpendOutcome {

@@ -163,7 +163,10 @@ export function isPlausibleWallet(previous: Wallet, next: Wallet, elapsedSeconds
 
 /** The server-side gate for a synced save: is the wallet growth honest? */
 export function isPlausibleProgress(previous: Progress, next: Progress, elapsedSeconds: number): boolean {
-  return isPlausibleWallet(previous.wallet, next.wallet, elapsedSeconds);
+  // Career level reads correctCards, so it may only grow by answers that were also paid for.
+  const newCorrect = next.correctCards - previous.correctCards;
+  const newPaidCards = next.wallet.paidUnits.card - previous.wallet.paidUnits.card;
+  return newCorrect >= 0 && newCorrect <= newPaidCards && isPlausibleWallet(previous.wallet, next.wallet, elapsedSeconds);
 }
 
 /** New ledger lines must account for the balance change exactly — unless the cap pushed some out. */

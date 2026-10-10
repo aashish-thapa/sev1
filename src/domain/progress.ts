@@ -30,7 +30,7 @@ const WarRoomRecordSchema = z.object({
   plays: z.int().positive(),
 });
 
-export const ProgressSchema = z.object({
+const ProgressFieldsSchema = z.object({
   version: z.literal(1),
   ratings: z.partialRecord(z.enum(TOPICS), z.number()),
   seenIds: z.array(z.string()),
@@ -43,7 +43,21 @@ export const ProgressSchema = z.object({
   role: z.enum(ROLE_IDS as [Role, ...Role[]]).nullable().default(null),
   // Saves from before job-mode pay start with an empty wallet.
   wallet: WalletSchema.default(emptyWallet),
+  /** Lifetime correct rated answers; `history` is capped, so career experience can't come from it. */
+  correctCards: z.int().nonnegative(),
 });
+
+/** Saves from before `correctCards` existed: count what history and today's shift still remember. */
+function backfillCorrectCards(raw: unknown): unknown {
+  if (typeof raw !== "object" || raw === null || "correctCards" in raw) return raw;
+  const save = raw as { history?: unknown; activeShift?: unknown };
+  const fromHistory = Array.isArray(save.history) ? save.history.reduce((sum: number, day: { correct?: unknown }) => sum + (typeof day?.correct === "number" ? day.correct : 0), 0) : 0;
+  const attempts = (save.activeShift as { attempts?: unknown } | null | undefined)?.attempts;
+  const fromToday = Array.isArray(attempts) ? attempts.filter((attempt: { isCorrect?: unknown }) => attempt?.isCorrect === true).length : 0;
+  return { ...raw, correctCards: fromHistory + fromToday };
+}
+
+export const ProgressSchema = z.preprocess(backfillCorrectCards, ProgressFieldsSchema);
 
 export type Attempt = z.infer<typeof AttemptSchema>;
 export type ActiveShift = z.output<typeof ActiveShiftSchema>;
@@ -61,6 +75,7 @@ export function emptyProgress(): Progress {
     warRoom: {},
     role: null,
     wallet: emptyWallet(),
+    correctCards: 0,
   };
 }
 
@@ -114,6 +129,7 @@ export function recordAttempt(progress: Progress, attempt: Attempt): Progress {
     ratings: rateAttempt(progress.ratings, attempt, attempt.isCorrect),
     seenIds: progress.seenIds.includes(attempt.incidentId) ? progress.seenIds : [...progress.seenIds, attempt.incidentId],
     activeShift: { ...active, attempts },
+    correctCards: progress.correctCards + (attempt.isCorrect ? 1 : 0),
   };
   return attempts.length === active.incidentIds.length ? closeShift(rated, active.day, attempts) : rated;
 }

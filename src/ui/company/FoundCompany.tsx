@@ -5,6 +5,7 @@ import { formatCents } from "../../domain/economy.ts";
 import { ROLE_IDS, type Role } from "../../domain/incident.ts";
 import { ROLE_INFO } from "../../domain/roles.ts";
 import type { CompanyApi } from "../../storage/company-api.ts";
+import { companyErrorText } from "./errors.ts";
 
 type Props = {
   api: CompanyApi;
@@ -36,7 +37,7 @@ export function FoundCompany({ api, walletCents, defaultRole, onFounded }: Props
     setProblem(null);
     const founded = await api.found({ name: name.trim(), category, role, seedCents });
     setBusy(false);
-    if (!founded.ok) return setProblem(founded.message || "The company couldn’t be created.");
+    if (!founded.ok) return setProblem(companyErrorText(founded.error, founded.message));
     setProblem(onFounded(founded.value.fundingRef, founded.value.seedCents));
   };
 
@@ -44,8 +45,9 @@ export function FoundCompany({ api, walletCents, defaultRole, onFounded }: Props
     <form className="company__panel found" onSubmit={(event) => void submit(event)}>
       <h1 className="home__title company__title">Start a company</h1>
       <p className="company__lede">
-        Put in money you’ve earned, buy a room, and hire other players into real roles. It needs at least {formatCents(FOUNDING_MINIMUM_CENTS)}: your first bay (
-        {formatCents(roomKindById("bay").costCents)}) and {FOUNDING_RUNWAY_DAYS} work days of pay. You have <strong>{formatCents(walletCents)}</strong>.
+        Put in money you’ve earned and hire other players into real roles. It needs at least {formatCents(FOUNDING_MINIMUM_CENTS)}: your first bay (
+        {formatCents(roomKindById("bay").costCents)}, bought from the seed) and {FOUNDING_RUNWAY_DAYS} work days of pay. A starter server comes free, so day one can
+        earn. You have <strong>{formatCents(walletCents)}</strong>.
       </p>
 
       <label className="home__name">

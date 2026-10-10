@@ -11,6 +11,10 @@ import { AccountPanel } from "./AccountPanel.tsx";
 import { BadgeMark } from "./Badges.tsx";
 import { TagMarks } from "./TagMark.tsx";
 import { AdminDashboard } from "./admin/AdminDashboard.tsx";
+import { CompanyPage } from "./company/CompanyPage.tsx";
+import type { CompanyApi } from "../storage/company-api.ts";
+import type { PendingPayout } from "../storage/company-protocol.ts";
+import type { Task } from "../domain/work/task.ts";
 import { isAdmin } from "../domain/tags.ts";
 import type { AdminApi } from "../storage/admin-api.ts";
 import { LeaderboardPanel } from "./LeaderboardPanel.tsx";
@@ -26,6 +30,14 @@ type Props = {
   fetchLeaderboard: FetchLeaderboard;
   proSale: ProSale;
   adminApi: AdminApi;
+  company: {
+    api: CompanyApi;
+    tasks: readonly Task[];
+    today: string;
+    walletCents: number;
+    fundCompany: (fundingRef: string, cents: number) => boolean;
+    claimPayout: (payout: PendingPayout) => void;
+  };
   rooms: {
     status: string;
     error: string | null;
@@ -40,8 +52,9 @@ const ACCOUNT_PANEL_ID = "account-panel";
 /** The profile and the admin dashboard live at their own hashes, so Back returns to the lobby and pages can be linked. */
 const PROFILE_HASH = "#profile";
 const ADMIN_HASH = "#admin";
+const COMPANY_HASH = "#company";
 
-type LobbyView = "home" | "profile" | "admin";
+type LobbyView = "home" | "profile" | "admin" | "company";
 
 function useLobbyView(): LobbyView {
   const [hash, setHash] = useState(() => window.location.hash);
@@ -50,7 +63,7 @@ function useLobbyView(): LobbyView {
     window.addEventListener("hashchange", follow);
     return () => window.removeEventListener("hashchange", follow);
   }, []);
-  return hash === PROFILE_HASH ? "profile" : hash === ADMIN_HASH ? "admin" : "home";
+  return hash === PROFILE_HASH ? "profile" : hash === ADMIN_HASH ? "admin" : hash === COMPANY_HASH ? "company" : "home";
 }
 
 /** What sev1 looks like, in the order a shift goes. */
@@ -61,7 +74,7 @@ const SCREENS = [
 ] as const;
 
 /** The lobby: what the game is, who you are in it, the three ways to start, and the board. Your profile opens in its place. */
-export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, fetchLeaderboard, rooms, proSale, adminApi }: Props) {
+export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, fetchLeaderboard, rooms, proSale, adminApi, company }: Props) {
   const session = useContext(AccountContext);
   const role = roles.chosen ?? "infrastructure";
   // Until the player types, rooms use their account name, which may arrive after the first render.
@@ -87,6 +100,9 @@ export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, fetch
         </a>
         <div className="home__bar-end">
           <WalletChip />
+          <a className="button button--ghost home__account-toggle" href={COMPANY_HASH} aria-current={view === "company" ? "page" : undefined}>
+            Company
+          </a>
           {canAdmin && (
             <a className="button button--ghost home__account-toggle" href={ADMIN_HASH} aria-current={view === "admin" ? "page" : undefined}>
               Dashboard
@@ -128,7 +144,20 @@ export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, fetch
         </p>
       )}
 
-      {view === "admin" ? (
+      {view === "company" ? (
+        <CompanyPage
+          api={company.api}
+          isSignedIn={isSignedIn}
+          username={session?.account?.username ?? null}
+          walletCents={company.walletCents}
+          defaultRole={role}
+          fundCompany={company.fundCompany}
+          claimPayout={company.claimPayout}
+          onSignUp={() => setAccountOpen(true)}
+          tasks={company.tasks}
+          day={company.today}
+        />
+      ) : view === "admin" ? (
         canAdmin ? <AdminDashboard api={adminApi} /> : <p className="admin__note">The dashboard is for admins.</p>
       ) : isProfileOpen ? (
         <Profile progress={progress} onFeatureBadge={onFeatureBadge} proSale={proSale} />

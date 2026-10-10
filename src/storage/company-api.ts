@@ -39,11 +39,12 @@ export class HttpCompanyApi implements CompanyApi {
   found(request: FoundRequest) {
     return call(COMPANY_PATH, "POST", request, FoundResponseSchema);
   }
+  // Each purchase gets a fresh key, so the server books a retried request once.
   buyRoom(request: z.input<typeof BuyRoomRequestSchema>) {
-    return call(`${COMPANY_PATH}/rooms`, "POST", request, Anything);
+    return call(`${COMPANY_PATH}/rooms`, "POST", request, Anything, undefined, crypto.randomUUID());
   }
   buyServer(request: z.input<typeof BuyServerRequestSchema>) {
-    return call(`${COMPANY_PATH}/servers`, "POST", request, Anything);
+    return call(`${COMPANY_PATH}/servers`, "POST", request, Anything, undefined, crypto.randomUUID());
   }
   invite(request: z.input<typeof InviteRequestSchema>) {
     return call(`${COMPANY_PATH}/invitations`, "POST", request, Anything);
@@ -59,13 +60,24 @@ export class HttpCompanyApi implements CompanyApi {
   }
 }
 
-async function call<T extends z.ZodType>(path: string, method: "GET" | "POST", body: unknown, schema: T, signal?: AbortSignal): Promise<CompanyOutcome<z.output<T>>> {
+async function call<T extends z.ZodType>(
+  path: string,
+  method: "GET" | "POST",
+  body: unknown,
+  schema: T,
+  signal?: AbortSignal,
+  idempotencyKey?: string,
+): Promise<CompanyOutcome<z.output<T>>> {
   try {
     const response = await fetch(path, {
       method,
       signal,
       credentials: "same-origin",
-      headers: { accept: "application/json", ...(body === undefined ? {} : { "content-type": "application/json" }) },
+      headers: {
+        accept: "application/json",
+        ...(body === undefined ? {} : { "content-type": "application/json" }),
+        ...(idempotencyKey ? { "idempotency-key": idempotencyKey } : {}),
+      },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const json: unknown = await response.json().catch(() => null);

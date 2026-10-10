@@ -5,6 +5,7 @@ import { formatCents } from "../../domain/economy.ts";
 import type { CompanyApi, CompanyOutcome } from "../../storage/company-api.ts";
 import type { MyCompany, PendingPayout } from "../../storage/company-protocol.ts";
 import type { Task } from "../../domain/work/task.ts";
+import { companyErrorText } from "./errors.ts";
 import { FoundCompany } from "./FoundCompany.tsx";
 import { Headquarters } from "./Headquarters.tsx";
 import { Invitations } from "./Invitations.tsx";
@@ -74,7 +75,7 @@ export function CompanyPage(props: CompanyPageProps) {
     );
   }
   if (!mine) return <p className="admin__note">Loading your company…</p>;
-  if (!mine.ok) return <p className="admin__note">{mine.message || "Couldn’t reach the company server."}</p>;
+  if (!mine.ok) return <p className="admin__note">{companyErrorText(mine.error, mine.message)}</p>;
 
   const { company, invitations } = mine.value;
   return (

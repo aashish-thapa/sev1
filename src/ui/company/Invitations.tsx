@@ -3,6 +3,7 @@ import { categoryById } from "../../domain/company/catalog.ts";
 import { formatCents } from "../../domain/economy.ts";
 import { ROLE_INFO } from "../../domain/roles.ts";
 import type { CompanyApi } from "../../storage/company-api.ts";
+import { companyErrorText } from "./errors.ts";
 import type { ReceivedInvitation } from "../../storage/company-protocol.ts";
 
 type Props = {
@@ -23,7 +24,7 @@ export function Invitations({ api, invitations, hasCompany, onAnswered }: Props)
     setProblem(null);
     const outcome = await api.respond(id, choice);
     setBusy(null);
-    if (!outcome.ok) setProblem(outcome.message || "That didn’t go through.");
+    if (!outcome.ok) setProblem(companyErrorText(outcome.error, outcome.message));
     onAnswered();
   };
 

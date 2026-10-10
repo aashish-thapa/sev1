@@ -5,6 +5,7 @@ import { formatCents } from "../../domain/economy.ts";
 import { ROLE_IDS, type Role } from "../../domain/incident.ts";
 import { ROLE_INFO } from "../../domain/roles.ts";
 import type { CompanyApi, CompanyOutcome } from "../../storage/company-api.ts";
+import { companyErrorText } from "./errors.ts";
 import type { Company, WorkDaySettlement } from "../../storage/company-protocol.ts";
 import type { Task } from "../../domain/work/task.ts";
 import { useWorkLog } from "../work/useWorkLog.ts";
@@ -59,7 +60,7 @@ export function Headquarters({ api, company, username, onChanged, tasks, day }: 
     setNotice(null);
     const outcome = await work();
     setBusy(false);
-    setNotice(outcome.ok ? done(outcome.value) : outcome.message || "That didn’t go through.");
+    setNotice(outcome.ok ? done(outcome.value) : companyErrorText(outcome.error, outcome.message));
     if (outcome.ok) onChanged();
   };
 
@@ -81,7 +82,7 @@ export function Headquarters({ api, company, username, onChanged, tasks, day }: 
         <Tile label="Funds" value={formatCents(company.fundsCents)} />
         <Tile label="Desks" value={`${company.members.length} of ${seats(company.rooms)}`} />
         <Tile label="Racks" value={`${company.servers.length} of ${racks(company.rooms)}`} />
-        <Tile label="Capacity" value={`${capacityRps(company.servers)} / ${category.demandRps} rps`} />
+        <Tile label="Capacity, requests/s" value={`${capacityRps(company.servers)} of ${category.demandRps}`} />
         <Tile label="Payroll a day" value={formatCents(company.members.reduce((sum, member) => sum + member.payCents, 0))} />
         <Tile label="Up to a day" value={formatCents(category.baseRevenueCents)} />
       </dl>

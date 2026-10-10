@@ -5,6 +5,8 @@ import { Briefing } from "../ui/Briefing.tsx";
 import { OfficeErrorBoundary } from "../ui/OfficeErrorBoundary.tsx";
 import type { ProSale } from "../ui/ProPanel.tsx";
 import type { AdminApi } from "../storage/admin-api.ts";
+import type { CompanyApi } from "../storage/company-api.ts";
+import type { Task } from "../domain/work/task.ts";
 import { DiscussionOverlay } from "../ui/DiscussionOverlay.tsx";
 import { findScenario, soloScenarioFor, TEAM_SCENARIO } from "../warroom/scenarios/index.ts";
 import { preloadFloor } from "../warroom/ui/floorLoader.ts";
@@ -26,9 +28,15 @@ function roomUrl(): string {
   return `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/rooms`;
 }
 
-type Props = GameServices & { readonly shareUrl: string; readonly proSale: ProSale; readonly adminApi: AdminApi };
+type Props = GameServices & {
+  readonly shareUrl: string;
+  readonly proSale: ProSale;
+  readonly adminApi: AdminApi;
+  readonly companyApi: CompanyApi;
+  readonly tasks: readonly Task[];
+};
 
-export function App({ shareUrl, proSale, adminApi, ...services }: Props) {
+export function App({ shareUrl, proSale, adminApi, companyApi, tasks, ...services }: Props) {
   const game = useShiftGame(services);
   const room = useRoom({ url: roomUrl() });
   const role = game.progress.role ?? "infrastructure";
@@ -97,6 +105,14 @@ export function App({ shareUrl, proSale, adminApi, ...services }: Props) {
           onFeatureBadge={game.featureBadge}
           proSale={proSale}
           adminApi={adminApi}
+          company={{
+            api: companyApi,
+            tasks,
+            today: game.today,
+            walletCents: game.progress.wallet.balanceCents,
+            fundCompany: game.fundCompany,
+            claimPayout: game.claimPayout,
+          }}
           fetchLeaderboard={fetchLeaderboard}
           rooms={{
             status: room.status,

@@ -53,7 +53,7 @@ export function InterviewView({ interview, heading, isSubmitting, onSubmit, onLe
           {isSubmitting ? "Sending…" : answered < interview.questions.length ? `Send ${answered} of ${interview.questions.length} answers` : "Send answers"}
         </button>
         <button type="button" className="button button--quiet" onClick={onLeave}>
-          Leave. You can come back to it before the time runs out.
+          Leave for now
         </button>
       </div>
     </section>

@@ -30,25 +30,38 @@
   font-size: var(--text-sm);
 }
 
-.home__user {
-  color: var(--color-ink-2);
-}
-
-.home__link {
-  display: inline-flex;
-  align-items: center;
+.home__account-toggle {
   min-height: 44px;
-  color: var(--color-ink);
-  font-weight: 600;
-  text-decoration: underline;
-  text-decoration-color: var(--color-rule-strong);
-  text-underline-offset: 0.25em;
-  white-space: nowrap;
+  padding-inline: var(--space-md);
+  font-size: var(--text-sm);
 }
 
-.home__link:focus-visible {
+.home__account-toggle:focus-visible,
+.home__guest-action:focus-visible {
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
+}
+
+.home__account-toggle[aria-expanded="true"] {
+  border-color: var(--color-accent);
+}
+
+/* Opens under the bar, in the guest notice's place. */
+.home__account-panel {
+  margin-top: calc(-1 * var(--space-xl));
+  padding: var(--space-md) var(--space-lg);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  background: var(--color-paper-2);
+}
+
+.home__account-panel .account {
+  padding-block: 0;
+  border-top: 0;
+}
+
+.home__account-panel .account__status:empty {
+  display: none;
 }
 
 /* ── Guest notice: the one thing a new player must not miss ── */
@@ -400,10 +413,6 @@
   object-position: top;
 }
 
-.home__account .account {
-  max-width: 36rem;
-}
-
 .home__foot {
   padding-top: var(--space-md);
   border-top: 1px solid var(--color-rule-2);
@@ -432,10 +441,6 @@
   .role-picker__option:hover,
   .mode__choice-option:hover {
     border-color: var(--color-ink-2);
-  }
-
-  .home__link:hover {
-    text-decoration-color: var(--color-ink);
   }
 }
 

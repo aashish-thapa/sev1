@@ -24,7 +24,7 @@ type Props = {
 };
 
 const NAME_LIMIT = 24;
-const ACCOUNT_ID = "account";
+const ACCOUNT_PANEL_ID = "account-panel";
 
 /** What sev1 looks like, in the order a shift goes. */
 const SCREENS = [
@@ -40,6 +40,11 @@ export function Briefing({ progress, roles, onEnterOffice, rooms }: Props) {
   // Until the player types, rooms use their account name, which may arrive after the first render.
   const [typedName, setTypedName] = useState<string | null>(null);
   const name = typedName ?? session?.account?.username ?? "";
+  const isSignedIn = session?.status === "signed-in";
+  // The panel stays open only while the account is as it was when opened, so a successful sign-in folds it away.
+  const [openedAs, setOpenedAs] = useState<string | null>(null);
+  const isAccountOpen = openedAs !== null && openedAs === session?.status;
+  const setAccountOpen = (isOpen: boolean) => setOpenedAs(isOpen ? (session?.status ?? null) : null);
 
   return (
     <main className="home">
@@ -47,24 +52,34 @@ export function Briefing({ progress, roles, onEnterOffice, rooms }: Props) {
         <p className="wordmark">sev1</p>
         <div className="home__bar-end">
           <WalletChip />
-          {session?.status === "signed-in" ? (
-            <span className="home__user">{session.account?.username}</span>
-          ) : (
-            <a className="home__link" href={`#${ACCOUNT_ID}`}>
-              Log in
-            </a>
+          {session && session.status !== "checking" && (
+            <button
+              type="button"
+              className="button button--ghost home__account-toggle"
+              aria-expanded={isAccountOpen}
+              aria-controls={ACCOUNT_PANEL_ID}
+              onClick={() => setAccountOpen(!isAccountOpen)}
+            >
+              {isSignedIn ? session.account?.username : "Log in / Sign up"}
+            </button>
           )}
         </div>
       </header>
 
-      {session?.status === "anonymous" && (
+      {isAccountOpen && (
+        <div id={ACCOUNT_PANEL_ID} className="home__account-panel">
+          <AccountPanel />
+        </div>
+      )}
+
+      {session?.status === "anonymous" && !isAccountOpen && (
         <p className="home__guest" role="note">
           <span>
             You’re playing as a guest. Your money, level and progress are kept in this browser only, and they’re gone if you clear it or switch device.
           </span>
-          <a className="button button--ghost home__guest-action" href={`#${ACCOUNT_ID}`}>
+          <button type="button" className="button button--ghost home__guest-action" aria-controls={ACCOUNT_PANEL_ID} onClick={() => setAccountOpen(true)}>
             Sign up to keep them
-          </a>
+          </button>
         </p>
       )}
 
@@ -127,10 +142,6 @@ export function Briefing({ progress, roles, onEnterOffice, rooms }: Props) {
           ))}
         </ol>
       </section>
-
-      <div id={ACCOUNT_ID} className="home__account">
-        <AccountPanel />
-      </div>
 
       <footer className="home__foot">
         <p>Sound on recommended. Works on desktop and on phones held sideways.</p>

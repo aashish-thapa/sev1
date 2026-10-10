@@ -8,14 +8,15 @@ import { crashOnCheckout } from "./crash-on-checkout.ts";
 import { oomAfterDeploy } from "./oom-after-deploy.ts";
 import { ordersIndexInvalid } from "./orders-index-invalid.ts";
 import { scaledToZero } from "./scaled-to-zero.ts";
+import { webAutoRetryStorm } from "./web-auto-retry-storm.ts";
 
 /** Every live incident the game ships; the app and the room server read this one list. */
-export const SCENARIOS: readonly Scenario[] = [scaledToZero, crashOnCheckout, oomAfterDeploy, checkoutPoolLeak, ordersIndexInvalid, checkoutMeltdown];
+export const SCENARIOS: readonly Scenario[] = [scaledToZero, crashOnCheckout, oomAfterDeploy, checkoutPoolLeak, ordersIndexInvalid, checkoutMeltdown, webAutoRetryStorm];
 
 /** Each role's own War Rooms, easiest first. A role's ladder grows as its incidents are written. */
 const LADDERS: Readonly<Record<Role, readonly Scenario[]>> = {
   infrastructure: [scaledToZero, crashOnCheckout, oomAfterDeploy, checkoutPoolLeak, ordersIndexInvalid],
-  frontend: [],
+  frontend: [webAutoRetryStorm],
   mobile: [],
   security: [],
   data: [],

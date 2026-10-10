@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { advance, openIncident, type Incident } from "./incident.ts";
+import { applyFrame, encodeFrame, IncidentFrameSchema } from "../multiplayer/frame.ts";
+import { advance, debrief, declareResolved, openIncident, type Incident } from "./incident.ts";
 import type { Scenario } from "./scenario.ts";
 import { checkoutCluster } from "./scenarios/checkout-cluster.ts";
 import { checkoutCommerce, NO_RETRY, SHOP_FLAGS, WEB_USER_AGENT } from "./scenarios/checkout-commerce.ts";
 import { scaledToZero } from "./scenarios/scaled-to-zero.ts";
+import { webAutoRetryStorm } from "./scenarios/web-auto-retry-storm.ts";
 import { runLine } from "./shell/shell.ts";
+import { unsafeRetryShare } from "./sim/clients.ts";
 import { findPlatform } from "./sim/commerce.ts";
 import { rolloutLabel } from "./sim/rollout.ts";
 
@@ -17,6 +20,48 @@ function play(scenario: Scenario, seconds: number, incident: Incident): Incident
 function shell(scenario: Scenario, incident: Incident, line: string) {
   const result = runLine(line, { cluster: incident.cluster, scenario, history: [], role: "frontend" });
   return { text: result.output.map((output) => output.text).join("\n"), incident: result.cluster ? { ...incident, cluster: result.cluster } : incident };
+}
+
+/** Runs a frontend command on `incident`, failing the test if the tool turns it down. */
+function act(scenario: Scenario, incident: Incident, line: string): Incident {
+  const result = runLine(line, { cluster: incident.cluster, scenario, history: [], role: "frontend" });
+  if (!result.cluster) throw new Error(`${line} changed nothing:\n${result.output.map((output) => output.text).join("\n")}`);
+  return { ...incident, cluster: result.cluster };
+}
+
+/** Plays the worked solution the way solutions.test.ts does: first move at 20 s, 8 s apart, then settles, declares and monitors. */
+function workedSolution(scenario: Scenario) {
+  let incident = play(scenario, 20, openIncident(scenario));
+  for (const step of scenario.solution.frontend ?? []) {
+    incident = shell(scenario, incident, step.command).incident;
+    incident = play(scenario, 8, incident);
+  }
+  const settled = play(scenario, 180, incident);
+  const declared = declareResolved(settled, scenario);
+  expect(declared.notice).toBeUndefined();
+  const closed = play(scenario, 700, declared.incident);
+  expect(closed.phase.name).toBe("closed");
+  return debrief(closed, scenario, true);
+}
+
+/** Debrief points if the incident were closed now: what doing nothing costs. */
+function pointsAt(scenario: Scenario, incident: Incident): number {
+  return debrief(incident, scenario, true).points;
+}
+
+/** Streams an incident to a client frame by frame, applying `moves` (second → command) on the server. */
+function roundTrips(scenario: Scenario, moves: Readonly<Record<number, string>>): void {
+  const relay = (previous: Incident | null, next: Incident) => applyFrame(previous, IncidentFrameSchema.parse(JSON.parse(JSON.stringify(encodeFrame(previous, next)))));
+  let server = openIncident(scenario);
+  let client = relay(null, server);
+  for (let second = 0; second < 120; second += 1) {
+    let next = advance(server, scenario).incident;
+    const move = moves[second];
+    if (move) next = act(scenario, next, move);
+    client = relay(client, next);
+    server = next;
+  }
+  expect(client).toEqual(server);
 }
 
 function webAdoption(incident: Incident): number {
@@ -66,5 +111,47 @@ describe("service-worker rollout", () => {
     const session = shell(scenario, opened, "rum session").text;
     expect(session).toContain("release 2026.10.09-2 (70% of web sessions)");
     expect(session).toContain("(ServiceWorker)");
+  });
+});
+
+describe("tier 1: web-auto-retry-storm", () => {
+  const scenario = webAutoRetryStorm;
+  const retriesOff = 'flags set checkout.auto_retry off --note "retry storm"';
+
+  it("opens mid retry storm, four requests per Pay tap, and only loses more checkouts if nobody acts", () => {
+    const opened = openIncident(scenario);
+    expect(opened.cluster.errorRate).toBeGreaterThan(0.4);
+    expect(shell(scenario, opened, "rum overview").text).toMatch(/2026\.10\.09-2\s+100%\s+[\d,]+\s+[\d,]+\s+4\.00/);
+    const tenMinutes = play(scenario, 600, opened);
+    expect(tenMinutes.cluster.errorRate).toBeGreaterThan(0.4);
+    expect(pointsAt(scenario, tenMinutes)).toBeLessThan(pointsAt(scenario, opened) - 40);
+  });
+
+  it("closes at S or A with the worked solution", () => {
+    expect(["S", "A"]).toContain(workedSolution(scenario).grade);
+  });
+
+  it("drains within three minutes of the retries going off", () => {
+    let incident = act(scenario, play(scenario, 30, openIncident(scenario)), retriesOff);
+    incident = play(scenario, 180, incident);
+    expect(incident.cluster.errorRate).toBe(0);
+    expect(scenario.isRootCauseFixed(incident.cluster)).toBe(true);
+  });
+
+  it("doesn't recover when the sale banner goes off: the storm sustains itself", () => {
+    let incident = act(scenario, play(scenario, 30, openIncident(scenario)), "flags set home.sale_banner off");
+    incident = play(scenario, 300, incident);
+    expect(incident.cluster.errorRate).toBeGreaterThan(0.4);
+    expect(incident.cluster.commerce && unsafeRetryShare(incident.cluster.commerce, incident.cluster.t)).toBeCloseTo(0.52, 6);
+    expect(declareResolved(incident, scenario).notice?.kind).toBe("refused");
+  });
+
+  it("is deterministic", () => {
+    const run = () => play(scenario, 200, act(scenario, play(scenario, 30, openIncident(scenario)), retriesOff));
+    expect(run()).toEqual(run());
+  });
+
+  it("round-trips through multiplayer frames", () => {
+    roundTrips(scenario, { 20: retriesOff });
   });
 });

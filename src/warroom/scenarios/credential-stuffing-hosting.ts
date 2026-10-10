@@ -65,7 +65,7 @@ export const credentialStuffingHosting: Scenario = {
   severity: "SEV2",
   service: CHECKOUT,
   briefing:
-    "Sign-ins have tripled and checkout is failing. POST /session, the sign-in endpoint, is served by checkout-api: the same three pods that take payments. A login storm fills them, and checkouts are shed with it. The SIEM has a credential-stuffing alert open.",
+    "Sign-ins are running at twenty times normal and checkout is failing. POST /session, the sign-in endpoint, is served by checkout-api: the same three pods that take payments. A login storm fills them, and checkouts are shed with it. The SIEM has a credential-stuffing alert open.",
   roles: ["security"],
   roleBriefings: {
     security:

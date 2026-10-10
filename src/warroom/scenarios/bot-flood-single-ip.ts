@@ -98,7 +98,7 @@ export const botFloodSingleIp: Scenario = {
     {
       at: 80,
       from: "Lena Park · Senior SOC analyst (your mentor)",
-      text: "One address at thousands a minute from a hosting provider isn't a shopper. Block that one address with waf block and its IP. Not a top-N list: the busiest customer addresses are phone carriers, one IP in front of thousands of people.",
+      text: "One address at thousands a minute from a hosting provider isn't a shopper. Block that one address, not a top-N list: the busiest customer addresses are phone carriers, one IP in front of thousands of people.",
     },
     { at: 150, from: "Maya Okonkwo · Support", text: "A few customers say the Pay button errors once and works on the second try." },
     { at: 240, from: "Elena Ruiz · VP Engineering", text: "The traffic graph on checkout is still climbing. Where are we?" },

@@ -525,6 +525,7 @@ describe("residential-proxy-stuffing", () => {
   it("the JA4 block alone stops every bot; the alert still wants closing", () => {
     const blocked = trapped(scenario, `waf block --ja4 ${BOT_JA4}`);
     expect(attackBlocked(blocked)).toBe(1);
+    expect(shellText(scenario, "siem search tls-fingerprints", blocked)).toMatch(new RegExp(`^${BOT_JA4}\\s+Python\\s+Chrome/114\\.0\\.0\\.0 \\(Windows\\)\\s+0\\s+40,000`, "m"));
     expect(blocked.cluster.errorRate).toBe(0);
     const { result } = closeOut(scenario, blocked);
     expect(result.objectives?.find((objective) => objective.label.startsWith(PROXY_ALERT))?.isMet).toBe(false);

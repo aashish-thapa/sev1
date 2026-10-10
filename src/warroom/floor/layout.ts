@@ -1,5 +1,5 @@
 import { databaseHealth, deploymentHealth, edgeHealth, podHealth, visiblePods, type Health, type NodeId } from "../health.ts";
-import type { ExternalService } from "../scenario.ts";
+import type { Scenario } from "../scenario.ts";
 import { openConnections } from "../sim/engine.ts";
 import type { ClusterState, PodPhase } from "../sim/model.ts";
 
@@ -28,7 +28,7 @@ const COMPUTE_ROW_Z = -2.5;
 const SUPPORT_ROW_Z = 2;
 
 /** Lays the live cluster out as a server hall. Same input, same hall. */
-export function layoutHall(cluster: ClusterState, externals: readonly ExternalService[]): Rack[] {
+export function layoutHall(cluster: ClusterState, scenario: Scenario): Rack[] {
   const deployment = cluster.deployments[0];
   const pods = visiblePods(cluster);
   const poolSize = deployment?.poolSize ?? 1;
@@ -40,7 +40,7 @@ export function layoutHall(cluster: ClusterState, externals: readonly ExternalSe
     kind: "network",
     label: "edge-lb",
     caption: `${Math.round(cluster.errorRate * 100)}% 5xx`,
-    health: edgeHealth(cluster),
+    health: edgeHealth(cluster, scenario),
     footprint: { x: -7, z: COMPUTE_ROW_Z, width: RACK.width, depth: RACK.depth },
     height: RACK.height,
     front: 1,
@@ -102,7 +102,7 @@ export function layoutHall(cluster: ClusterState, externals: readonly ExternalSe
     });
   }
 
-  externals.forEach((external, index) => {
+  scenario.externals.forEach((external, index) => {
     racks.push({
       key: `external-${external.id}`,
       node: { kind: "external", id: external.id },

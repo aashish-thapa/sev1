@@ -124,11 +124,11 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
   // Racks are laid out around their own origin, then wheeled into the data-centre room.
   const racks = useMemo(
     () =>
-      layoutHall(cluster, scenario.externals).map((rack) => ({
+      layoutHall(cluster, scenario).map((rack) => ({
         ...rack,
         footprint: { ...rack.footprint, x: rack.footprint.x + DATACENTRE_ORIGIN.x, z: rack.footprint.z + DATACENTRE_ORIGIN.z },
       })),
-    [cluster, scenario.externals],
+    [cluster, scenario],
   );
   const reduceMotion = useMemo(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches, []);
   const [pinned] = useState(pinnedQuality);
@@ -375,7 +375,7 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
         {rowSigns(cluster).map((sign) => (
           <RowSign key={sign.label} title={sign.label} health={sign.health} x={sign.x + DATACENTRE_ORIGIN.x} z={sign.z + DATACENTRE_ORIGIN.z} />
         ))}
-        <Beacon health={edgeHealth(cluster)} reduceMotion={reduceMotion} x={DATACENTRE_ORIGIN.x} z={DATACENTRE_ORIGIN.z} />
+        <Beacon health={edgeHealth(cluster, scenario)} reduceMotion={reduceMotion} x={DATACENTRE_ORIGIN.x} z={DATACENTRE_ORIGIN.z} />
         <Laptop isOpen={isLaptopOpen} reduceMotion={reduceMotion} screenRef={laptopScreenRef} />
         {settings.hasEffects && <Effects />}
         <PlayerRig start={start} racks={racks} usables={usables} readIntent={readIntent} onMove={onPlayerMove} onFocus={setFocusedKey} tremor={reduceMotion ? 0 : panic} control={rig} reduceMotion={reduceMotion} />

@@ -11,7 +11,7 @@ import {
   type Health,
   type NodeId,
 } from "../health.ts";
-import type { ExternalService } from "../scenario.ts";
+import type { Scenario } from "../scenario.ts";
 import { openConnections } from "../sim/engine.ts";
 import { isLive, type ClusterState } from "../sim/model.ts";
 
@@ -26,16 +26,17 @@ const EXTERNAL = { x: 300, y: 26 };
 
 type Props = {
   cluster: ClusterState;
-  externals: readonly ExternalService[];
+  scenario: Scenario;
   selected: NodeId | null;
   onSelect: (node: NodeId) => void;
 };
 
-export function ServiceMap({ cluster, externals, selected, onSelect }: Props) {
+export function ServiceMap({ cluster, scenario, selected, onSelect }: Props) {
+  const { externals } = scenario;
   const deployment = cluster.deployments[0];
   const pods = visiblePods(cluster);
   const connections = openConnections(cluster.deployments);
-  const edgeHealth = edgeHealthOf(cluster);
+  const edgeHealth = edgeHealthOf(cluster, scenario);
   const databaseHealth = databaseHealthOf(cluster);
   const isSelected = (node: NodeId) => sameNode(node, selected);
 

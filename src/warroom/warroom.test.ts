@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { advance, alertLabel, alertRate, declareResolved, debrief, openIncident, type Incident, type IncidentNotice } from "./incident.ts";
+import { edgeHealth } from "./health.ts";
 import type { Scenario } from "./scenario.ts";
 import { checkoutPoolLeak as scenario } from "./scenarios/checkout-pool-leak.ts";
 import { scaledToZero } from "./scenarios/scaled-to-zero.ts";
 import { rolloutRestart, rolloutUndo, scale, terminateIdleSessions, type ActionResult } from "./sim/actions.ts";
 import type { ClusterState } from "./sim/model.ts";
+import { calmScenario, calmView, panicOf } from "./ui/mood.ts";
 
 function play(seconds: number, incident: Incident) {
   const notices: IncidentNotice[] = [];
@@ -113,6 +115,15 @@ describe("an incident that pages on something other than 5xx", () => {
     }
     expect(notices).toEqual([{ kind: "reopened", rate: 0.2, label: "customers turned away", wasRollingOut: false }]);
     expect(incident.reopenCount).toBe(1);
+  });
+
+  it("lights the edge and the office by its metric, but not before anyone is paged", () => {
+    const incident = rolledBack();
+    const paged = pagingOn(() => 0.3);
+    expect(edgeHealth(incident.cluster, scenario)).toBe("ok");
+    expect(edgeHealth(incident.cluster, paged)).toBe("critical");
+    expect(panicOf(incident, paged)).toBeCloseTo(0.375);
+    expect(panicOf({ ...incident, cluster: calmView(incident.cluster) }, calmScenario(paged))).toBe(0);
   });
 });
 

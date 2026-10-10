@@ -30,8 +30,8 @@ function cidr(text: string) {
   return parsed;
 }
 
-function rule(attackShare: number, customerShare = 0): WafRule {
-  return { id: "r-0009", action: "block", expression: "test", createdAt: 0, createdBy: "test", customerShare, attackShare };
+function rule(attackShare: number, action: WafRule["action"] = "block"): WafRule {
+  return { id: "r-0009", action, expression: "test", createdAt: 0, createdBy: "test", customerShare: 0, attackShare };
 }
 
 describe("attack traffic at the edge", () => {
@@ -39,8 +39,15 @@ describe("attack traffic at the edge", () => {
     expect(attackLoad(shopUnder(), 100).requestsPerSecond).toBe(0);
     expect(attackLoad(shopUnder(singleIp), 0).requestsPerSecond).toBe(150);
     expect(attackLoad(shopUnder(singleIp), 100).requestsPerSecond).toBeCloseTo(180, 9);
-    expect(attackLoad(shopUnder(singleIp, [rule(0.5), rule(0.5)]), 100).requestsPerSecond).toBeCloseTo(45, 9);
     expect(attackLoad(shopUnder(singleIp, [rule(1)]), 100).requestsPerSecond).toBe(0);
+  });
+
+  it("adds up blocks, which pick out different attackers, and thins what they let through by each rate limit", () => {
+    // Blocking two ranges that hold 60% and 40% of the attackers stops all of them.
+    expect(attackLoad(shopUnder(singleIp, [rule(0.6), rule(0.4)]), 100).requestsPerSecond).toBeCloseTo(0, 9);
+    expect(attackLoad(shopUnder(singleIp, [rule(1), rule(1)]), 100).requestsPerSecond).toBe(0);
+    expect(attackLoad(shopUnder(singleIp, [rule(0.5), rule(0.5, "rate_limit")]), 100).requestsPerSecond).toBeCloseTo(45, 9);
+    expect(attackLoad(shopUnder(singleIp, [rule(0.5, "rate_limit"), rule(0.5, "rate_limit")]), 100).requestsPerSecond).toBeCloseTo(45, 9);
   });
 
   it("ranks attacker addresses among the customers by how much each one sends", () => {

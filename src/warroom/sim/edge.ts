@@ -108,9 +108,16 @@ export function blockedShare(rules: readonly WafRule[]): number {
   return 1 - rules.reduce((open, rule) => open * (1 - rule.customerShare), 1);
 }
 
-/** Share of attack traffic the WAF's rules stop between them. */
+/**
+ * Share of attack traffic the WAF's rules stop between them. Blocks pick out attacker addresses, so
+ * their shares add up (blocking two ranges stops both); rate limits thin whatever the blocks let through.
+ * ponytail: blocks are taken to cover different attackers; one partial block nested inside another
+ * overcounts. Evaluate each rule per attacker pool if a scenario ever needs that.
+ */
 export function blockedAttackShare(rules: readonly WafRule[]): number {
-  return 1 - rules.reduce((open, rule) => open * (1 - (rule.attackShare ?? 0)), 1);
+  const blocked = Math.min(1, rules.reduce((sum, rule) => sum + (rule.action === "block" ? (rule.attackShare ?? 0) : 0), 0));
+  const passed = rules.reduce((open, rule) => open * (rule.action === "rate_limit" ? 1 - (rule.attackShare ?? 0) : 1), 1);
+  return 1 - (1 - blocked) * passed;
 }
 
 /** Requests per second the attack sends at `t`, before the WAF: it keeps growing until something stops it. */

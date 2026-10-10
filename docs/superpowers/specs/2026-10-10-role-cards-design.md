@@ -30,7 +30,8 @@ Mix both kinds in each role: about half `diagnose` (four options) and half `find
 These come from the README ("Writing incident cards") and `scripts/validate-packs.ts`.
 
 - It must parse against `IncidentCardSchema` (`src/domain/incident.ts`); mind the field limits (alert title ≤ 72, question ≤ 80, options ≤ 64, explanation cause ≤ 90, why ≤ 340, tell ≤ 200, log text ≤ 220, code line ≤ 100, 2–14 log lines, 2–24 code lines, 8–60 metric points, `firedAt` as `HH:MM`).
-- Ids are unique across all packs, kebab-case, prefixed by role as the pack already does.
+- Ids are unique across all packs, kebab-case, and follow the pack's existing per-topic prefixes (e.g. `fe-`/`perf-`, `data-`/`ml-`).
+- A `find-line` answer must point at a `log` or `code` evidence block.
 - **Error strings must be verbatim** from the real software, checked against its source or official docs. Log lines for fictional services may use their own wording.
 - **Exactly one answer** follows from the evidence, and `explanation.tell` names the evidence that proves it.
 - **Distractors are plausible first suspects.** The correct option may be at most 4 characters longer than the longest distractor (enforced).

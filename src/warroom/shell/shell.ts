@@ -2,6 +2,7 @@ import { curl } from "./commands/curl.ts";
 import { flags } from "./commands/flags.ts";
 import { kubectl } from "./commands/kubectl.ts";
 import { models } from "./commands/models.ts";
+import { pipelines } from "./commands/pipelines.ts";
 import { psql } from "./commands/psql.ts";
 import { reconcile } from "./commands/reconcile.ts";
 import { releases } from "./commands/releases.ts";
@@ -45,7 +46,7 @@ const history: Command = {
   }),
 };
 
-const COMMANDS: readonly Command[] = [help, kubectl, psql, curl, flags, rum, remoteConfig, releases, siem, waf, warehouse, reconcile, models, history, clear];
+const COMMANDS: readonly Command[] = [help, kubectl, psql, curl, flags, rum, remoteConfig, releases, siem, waf, warehouse, reconcile, models, pipelines, history, clear];
 
 function installed(context: ShellContext): readonly Command[] {
   return COMMANDS.filter((command) => command.isAvailable?.(context) ?? true);

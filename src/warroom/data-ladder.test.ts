@@ -6,6 +6,7 @@ import { checkoutCluster } from "./scenarios/checkout-cluster.ts";
 import { checkoutCommerce } from "./scenarios/checkout-commerce.ts";
 import { checkoutMeltdown } from "./scenarios/checkout-meltdown.ts";
 import { scaledToZero } from "./scenarios/scaled-to-zero.ts";
+import { airflowCompact, airflowLine } from "./shell/commands/pipelines.ts";
 import { SSO_GROUPS } from "./shell/identity.ts";
 import { completeLine, runLine } from "./shell/shell.ts";
 import { customerLossRate, type Settlement } from "./sim/commerce-step.ts";
@@ -213,5 +214,80 @@ describe("the models command", () => {
     expect(runLine("models list", meltdown).output[0].text).toBe("bash: models: command not found");
     expect(runLine("help", meltdown).output.map((line) => line.text).join("\n")).not.toContain("models");
     expect(text("help")).toContain("models");
+  });
+});
+
+describe("the pipelines command", () => {
+  const DAG = "features_customer_daily";
+  const failedRun = [
+    { t: -6 * HOUR, source: DAG, level: "INFO" as const, text: airflowLine(8 * HOUR, -6 * HOUR, "taskinstance.py:2867", "INFO", "Starting attempt 3 of 3") },
+    { t: -6 * HOUR, source: DAG, level: "ERROR" as const, text: airflowLine(8 * HOUR, -6 * HOUR, "taskinstance.py:3313", "ERROR", "Task failed with exception") },
+  ];
+  const commerce = withFraud({
+    features: [
+      { name: "customer_orders_90d", pipeline: DAG, lastSuccessAt: -30 * HOUR, refresh: null },
+      { name: "customer_refunds_90d", pipeline: DAG, lastSuccessAt: -25 * HOUR, refresh: null },
+      { name: "device_accounts_30d", pipeline: "features_device_daily", lastSuccessAt: -5 * HOUR, refresh: null },
+    ],
+  });
+  const base = shop(commerce);
+  const scenario: Scenario = { ...base, opensAtSecondOfDay: 8 * HOUR, initialState: () => ({ ...base.initialState(), logs: { [DAG]: failedRun } }) };
+  const opened = openIncident(scenario);
+  const run = (line: string, incident: Incident = opened, role: Role = "data") => runLine(line, { cluster: incident.cluster, scenario, history: [], role });
+  const text = (line: string, incident: Incident = opened, role: Role = "data") =>
+    run(line, incident, role)
+      .output.map((output) => output.text)
+      .join("\n");
+  const apply = (line: string, incident: Incident) => ({ ...incident, cluster: run(line, incident).cluster ?? incident.cluster });
+
+  it("stamps lines the way Airflow 2.10's task log formatter does", () => {
+    expect(airflowLine(8 * HOUR, 0, "taskinstance.py:3313", "ERROR", "Task failed with exception")).toBe(
+      "[2026-10-10T08:00:00.000+0000] {taskinstance.py:3313} ERROR - Task failed with exception",
+    );
+    expect(airflowLine(2 * HOUR, -3 * HOUR, "x.py:1", "INFO", "m")).toBe("[2026-10-09T23:00:00.400+0000] {x.py:1} INFO - m");
+    expect(airflowCompact(2 * HOUR, 14 * 60 + 7)).toBe("20261010T021407");
+  });
+
+  it("lists each DAG behind the features with its state", () => {
+    expect(text("pipelines list")).toMatch(new RegExp(`${DAG}\\s+customer_orders_90d, customer_refunds_90d\\s+25h ago\\s+failed`));
+    expect(text("pipelines list")).toMatch(/features_device_daily\s+device_accounts_30d\s+03:00:00\s+success/);
+  });
+
+  it("prints a failed run's kept task log, and says when there's nothing to see", () => {
+    expect(text(`pipelines logs ${DAG}`)).toContain("{taskinstance.py:3313} ERROR - Task failed with exception");
+    expect(run(`pipelines logs ${DAG}`).output.find((line) => line.text.includes("Task failed"))?.tone).toBe("err");
+    expect(text("pipelines logs features_device_daily")).toContain("last scheduled run succeeded");
+    expect(text("pipelines logs nope")).toContain('DAG "nope" not found');
+  });
+
+  it("runs a DAG: its features refresh for a minute, then go fresh and stop costing declines", () => {
+    const triggered = apply(`pipelines run ${DAG}`, opened);
+    expect(text(`pipelines run ${DAG}`)).toMatch(new RegExp(`Triggered ${DAG}: manual__2026-10-10T08:00:00\\.\\d{6}\\+00:00 by oncall-data \\(2 tasks\\)`));
+    expect(text(`pipelines run ${DAG}`, triggered)).toContain("already has a run in progress");
+    expect(text("pipelines run nope")).toContain('DAG "nope" not found');
+
+    const midway = play(scenario, 30, triggered);
+    expect(text("pipelines list", midway)).toMatch(new RegExp(`${DAG}.*running`));
+    expect(text("models features fraud-scorer", midway)).toContain("refreshing (30 s left)");
+    expect(text(`pipelines logs ${DAG}`, midway)).toMatch(/Running <TaskInstance: features_customer_daily\.build_customer_orders_90d manual__\S+ \[running\]> on host /);
+    expect(customerLossRate(commerceOf(midway), midway.cluster.t)).toBeCloseTo(0.104, 9);
+
+    const done = play(scenario, 30, midway);
+    expect(text("pipelines list", done)).toMatch(new RegExp(`${DAG}.*success`));
+    expect(customerLossRate(commerceOf(done), done.cluster.t)).toBeCloseTo(0.004, 9);
+    const log = text(`pipelines logs ${DAG}`, done);
+    expect(log).toMatch(/Marking task as SUCCESS\. dag_id=features_customer_daily, task_id=build_customer_refunds_90d, run_id=manual__\S+, execution_date=20261010T080000, start_date=20261010T080002, end_date=20261010T080100/);
+    expect(log).toContain("{local_task_job_runner.py:266} INFO - Task exited with return code 0");
+  });
+
+  it("completes subcommands and DAGs", () => {
+    const complete = (line: string) => completeLine(line, { cluster: opened.cluster, scenario, history: [], role: "data" });
+    expect(complete("pip").line).toBe("pipelines ");
+    expect(complete("pipelines logs features_c").line).toBe(`pipelines logs ${DAG} `);
+  });
+
+  it("turns away other roles at the data-eng group", () => {
+    expect(text("pipelines list", opened, "infrastructure")).toContain("pipelines: 403 Forbidden: oncall-infrastructure@marlow.example is not in data-eng");
+    expect(run(`pipelines run ${DAG}`, opened, "security").cluster).toBeUndefined();
   });
 });

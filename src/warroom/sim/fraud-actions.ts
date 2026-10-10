@@ -4,7 +4,7 @@ import type { ClusterState } from "./model.ts";
 
 function withFraud(state: ClusterState, model: string, change: (fraud: FraudScoring) => FraudScoring | string): CommerceResult {
   const fraud = state.commerce?.fraud;
-  if (!state.commerce || !fraud) return { ok: false, error: "no models serve this incident" };
+  if (!state.commerce || !fraud) return { ok: false, error: "no models or pipelines serve this incident" };
   if (fraud.model !== model) return { ok: false, error: `model "${model}" not found` };
   const next = change(fraud);
   return typeof next === "string" ? { ok: false, error: next } : { ok: true, state: { ...state, commerce: { ...state.commerce, fraud: next } } };
@@ -32,4 +32,19 @@ export function setThreshold(state: ClusterState, model: string, threshold: numb
 
 export function setMode(state: ClusterState, model: string, mode: FraudScoring["mode"]): CommerceResult {
   return withFraud(state, model, (fraud) => (fraud.mode === mode ? `${model} is already in ${mode} mode` : { ...fraud, mode }));
+}
+
+/** A manual DAG run rebuilds and materializes its features in about a minute. */
+export const PIPELINE_RUN_SECONDS = 60;
+
+/** Triggers a run of `dag`: every feature it builds refreshes, and goes fresh when the run finishes. */
+export function runPipeline(state: ClusterState, dag: string): CommerceResult {
+  const model = state.commerce?.fraud?.model ?? "";
+  return withFraud(state, model, (fraud) => {
+    const built = fraud.features.filter((feature) => feature.pipeline === dag);
+    if (built.length === 0) return `DAG "${dag}" not found`;
+    if (built.some((feature) => feature.refresh)) return `${dag} already has a run in progress`;
+    const refresh = { startedAt: state.t, secondsLeft: PIPELINE_RUN_SECONDS };
+    return { ...fraud, features: fraud.features.map((feature) => (feature.pipeline === dag ? { ...feature, refresh } : feature)) };
+  });
 }

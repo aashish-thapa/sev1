@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { checkoutCommerce } from "./scenarios/checkout-commerce.ts";
+import type { Scenario } from "./scenario.ts";
+import { checkoutCluster } from "./scenarios/checkout-cluster.ts";
+import { checkoutCommerce, iosUserAgent, NO_RETRY } from "./scenarios/checkout-commerce.ts";
+import { scaledToZero } from "./scenarios/scaled-to-zero.ts";
+import { runLine } from "./shell/shell.ts";
 import { clientSegments } from "./sim/clients.ts";
 import type { Commerce, RemoteConfigEntry } from "./sim/commerce.ts";
 import { isOlderThan, updateWall } from "./sim/update-wall.ts";
@@ -53,5 +57,19 @@ describe("the update wall", () => {
     expect(walled(lowered, 30)["ios@7.3.0"]).toBe(0.75);
     expect(walled(lowered, 120)["ios@7.3.0"]).toBe(0);
     expect(walled(publish(walledShop, MIN_VERSION, "7.3.1 please", 0), 120)["ios@7.3.0"]).toBe(0);
+  });
+});
+
+describe("releases status", () => {
+  it("shows each build's failed checkouts and who is stuck on the forced-update screen", () => {
+    const defective = { version: "7.3.0", userAgent: iosUserAgent("7.3.0", 7301), timeoutMs: 10_000, retry: NO_RETRY, defects: [{ trigger: "always", failShare: 0.5, where: "server", message: "500" }] } as const;
+    const commerce = publish(checkoutCommerce({ platforms: { ios: { current: defective } }, updateWall: { configKey: MIN_VERSION } }), MIN_VERSION, "7.3.0", -600);
+    const scenario: Scenario = { ...scaledToZero, id: "releases-example", seed: "releases-example", roles: ["mobile"] };
+    const cluster = checkoutCluster({ seed: "releases-example", revisions: [{ number: 1, tag: "v4.11.3", changeCause: "v4.11.3", traits: [] }], revision: 1, commerce });
+    const lines = runLine("releases status", { cluster, scenario, history: [], role: "mobile" }).output.map((line) => line.text);
+    expect(lines[0]).toMatch(/REQ\/ORDER\s+FAILED$/);
+    expect(lines.find((line) => line.startsWith("ios"))).toMatch(/1\.00\s+50\.0%$/);
+    expect(lines.find((line) => line.startsWith("android"))).toMatch(/1\.00\s+100\.0%$/);
+    expect(lines).toContain("Android 7.2.4: 100.0% of sessions are on the forced-update screen.");
   });
 });

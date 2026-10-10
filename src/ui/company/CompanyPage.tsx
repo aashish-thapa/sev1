@@ -3,7 +3,8 @@ import { AccountContext } from "../../app/useAccount.ts";
 import type { Role } from "../../domain/incident.ts";
 import { formatCents } from "../../domain/economy.ts";
 import type { CompanyApi, CompanyOutcome } from "../../storage/company-api.ts";
-import type { Interview, InterviewAnswers, MyCompany, PendingPayout, Posting } from "../../storage/company-protocol.ts";
+import type { Interview, InterviewAnswers, MyCompany, PendingDividend, PendingPayout, Posting } from "../../storage/company-protocol.ts";
+import { InvestorPanel } from "./InvestorPanel.tsx";
 import { ROLE_INFO } from "../../domain/roles.ts";
 import { InterviewView } from "../work/InterviewView.tsx";
 import { CompanyDirectory } from "./CompanyDirectory.tsx";
@@ -26,11 +27,13 @@ export type CompanyPageProps = {
   onSignUp: () => void;
   /** Joins the company's office room at `code`. */
   enterOffice: (code: string) => void;
+  invest: (investRef: string, cents: number) => boolean;
+  claimDividend: (dividend: PendingDividend) => void;
 };
 
 /** Startup mode: found a company, answer offers, or run the one you're in. Accounts only. */
 export function CompanyPage(props: CompanyPageProps) {
-  const { api, isSignedIn, claimPayout } = props;
+  const { api, isSignedIn, claimPayout, claimDividend } = props;
   const sync = useContext(AccountContext)?.sync ?? "local";
   const [mine, setMine] = useState<CompanyOutcome<MyCompany> | null>(null);
   // After a wallet move (funding) the company is re-read once that save has gone "saving" and then "saved",
@@ -76,8 +79,10 @@ export function CompanyPage(props: CompanyPageProps) {
 
   // Pay the server booked lands in the wallet as soon as the page sees it.
   useEffect(() => {
-    if (mine?.ok) for (const payout of mine.value.payouts) claimPayout(payout);
-  }, [mine, claimPayout]);
+    if (!mine?.ok) return;
+    for (const payout of mine.value.payouts) claimPayout(payout);
+    for (const dividend of mine.value.dividends) claimDividend(dividend);
+  }, [mine, claimPayout, claimDividend]);
 
   useEffect(() => {
     if (awaiting.current === "move" && sync === "saving") awaiting.current = "save";
@@ -125,6 +130,15 @@ export function CompanyPage(props: CompanyPageProps) {
         </p>
       )}
       {company === null && <MyApplications applications={applications} />}
+      <InvestorPanel
+        api={api}
+        offers={mine.value.investmentOffers}
+        holdings={mine.value.holdings}
+        walletCents={props.walletCents}
+        invest={props.invest}
+        onMoved={() => setAwaitingSave(true)}
+        onChanged={refresh}
+      />
       {/* Without a company, joining one is the likelier first step: most players can't afford to found yet. */}
       {company === null && <CompanyDirectory api={api} onApply={(posting, name) => void apply(posting, name)} myApplications={applications} />}
       {invitations.length > 0 && <Invitations api={api} invitations={invitations} hasCompany={company !== null} onAnswered={refresh} />}

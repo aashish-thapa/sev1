@@ -135,6 +135,8 @@ export function App({ shareUrl, proSale, adminApi, companyApi, ...services }: Pr
             fundCompany: game.fundCompany,
             claimPayout: game.claimPayout,
             enterOffice: enterCompanyOffice,
+            invest: game.invest,
+            claimDividend: game.claimDividend,
           }}
           fetchLeaderboard={fetchLeaderboard}
           rooms={{

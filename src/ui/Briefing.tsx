@@ -13,7 +13,7 @@ import { TagMarks } from "./TagMark.tsx";
 import { AdminDashboard } from "./admin/AdminDashboard.tsx";
 import { CompanyPage } from "./company/CompanyPage.tsx";
 import type { CompanyApi } from "../storage/company-api.ts";
-import type { PendingPayout } from "../storage/company-protocol.ts";
+import type { PendingDividend, PendingPayout } from "../storage/company-protocol.ts";
 import { isAdmin } from "../domain/tags.ts";
 import type { AdminApi } from "../storage/admin-api.ts";
 import { LeaderboardPanel } from "./LeaderboardPanel.tsx";
@@ -36,6 +36,10 @@ type Props = {
     claimPayout: (payout: PendingPayout) => void;
     /** Joins the company's office room at `code`; the app switches to the office once inside. */
     enterOffice: (code: string) => void;
+    /** Spends an accepted investment from the wallet; false if the balance is short. */
+    invest: (investRef: string, cents: number) => boolean;
+    /** Earns a booked dividend into the wallet; claiming twice does nothing. */
+    claimDividend: (dividend: PendingDividend) => void;
   };
   rooms: {
     status: string;
@@ -154,6 +158,8 @@ export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, fetch
           claimPayout={company.claimPayout}
           onSignUp={() => setAccountOpen(true)}
           enterOffice={company.enterOffice}
+          invest={company.invest}
+          claimDividend={company.claimDividend}
         />
       ) : view === "admin" ? (
         canAdmin ? <AdminDashboard api={adminApi} /> : <p className="admin__note">The dashboard is for admins.</p>

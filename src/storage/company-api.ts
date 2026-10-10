@@ -11,6 +11,8 @@ import {
   POSTINGS_PATH,
   TOP_COMPANIES_PATH,
   WORK_PATH,
+  OFFERS_PATH,
+  AcceptOfferResponseSchema,
   WorkBoardSchema,
   WorkItemSchema,
   FoundResponseSchema,
@@ -25,6 +27,8 @@ import {
   type InterviewResult,
   type OpenPostingRequest,
   type WorkAnswer,
+  type AcceptOfferResponse,
+  type OfferRequest,
   type WorkBoard,
   type WorkItem,
   type MyCompany,
@@ -61,6 +65,12 @@ export interface CompanyApi {
   work(signal?: AbortSignal): Promise<CompanyOutcome<WorkBoard>>;
   /** One attempt per task, graded on the server. */
   answerWork(answer: WorkAnswer): Promise<CompanyOutcome<WorkItem>>;
+  /** Founder only: offer a player a stake for money. */
+  makeOffer(request: OfferRequest): Promise<CompanyOutcome<unknown>>;
+  cancelOffer(offerId: string): Promise<CompanyOutcome<unknown>>;
+  /** Returns the spend that pays for the stake; it counts once the wallet spends it and saves. */
+  acceptOffer(offerId: string): Promise<CompanyOutcome<AcceptOfferResponse>>;
+  declineOffer(offerId: string): Promise<CompanyOutcome<unknown>>;
 }
 
 const ErrorSchema = z.object({ error: z.enum(API_ERRORS), message: z.string().optional() });
@@ -123,6 +133,18 @@ export class HttpCompanyApi implements CompanyApi {
   }
   answerWork(answer: WorkAnswer) {
     return call(`${WORK_PATH}/${encodeURIComponent(answer.taskId)}`, "POST", answer, WorkItemSchema);
+  }
+  makeOffer(request: OfferRequest) {
+    return call(OFFERS_PATH, "POST", request, Anything, undefined, crypto.randomUUID());
+  }
+  cancelOffer(offerId: string) {
+    return call(`${OFFERS_PATH}/${encodeURIComponent(offerId)}/cancel`, "POST", {}, Anything);
+  }
+  acceptOffer(offerId: string) {
+    return call(`/api/offers/${encodeURIComponent(offerId)}/accept`, "POST", {}, AcceptOfferResponseSchema);
+  }
+  declineOffer(offerId: string) {
+    return call(`/api/offers/${encodeURIComponent(offerId)}/decline`, "POST", {}, Anything);
   }
 }
 

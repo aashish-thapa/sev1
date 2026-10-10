@@ -10,6 +10,8 @@ import type { Company, WorkDaySettlement } from "../../storage/company-protocol.
 import { WorkBoard } from "../work/WorkBoard.tsx";
 import { companyLevel } from "../../domain/company/levels.ts";
 import { Hiring } from "./Hiring.tsx";
+import { Investors } from "./Investors.tsx";
+import { Trackers } from "./Trackers.tsx";
 
 type Props = {
   api: CompanyApi;
@@ -32,6 +34,9 @@ const REASON_LABEL: Readonly<Record<Company["ledger"][number]["reason"], string>
   investment: "Investment",
   dividend: "Dividend",
 };
+
+const ROOM_KIND_TITLE = new Map(ROOM_KINDS.map((room) => [room.id as string, room.title]));
+const SERVER_TIER_TITLE = new Map(SERVER_TIERS.map((tier) => [tier.id as string, tier.title]));
 
 const OFFER_PROBLEM: Readonly<Record<"below_minimum" | "no_free_desk", string>> = {
   below_minimum: "That’s below the minimum for the role.",
@@ -221,6 +226,12 @@ export function Headquarters({ api, company, username, onChanged, enterOffice }:
       </section>
 
       {canHire && <Hiring api={api} company={company} isBusy={isBusy} act={act} />}
+
+      {company.capTable && <Investors api={api} capTable={company.capTable} offers={company.investmentOffers} isFounder={isFounder} isBusy={isBusy} act={act} />}
+
+      {company.trackers && (
+        <Trackers trackers={company.trackers} itemTitle={(item) => (ROOM_KIND_TITLE.get(item) ?? SERVER_TIER_TITLE.get(item) ?? item).toLowerCase()} />
+      )}
 
       {isFounder && (
         <section className="company__panel" aria-labelledby="shop-title">

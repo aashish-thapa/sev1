@@ -23,7 +23,7 @@ export type OfferTerms = { readonly investor: string; readonly amountCents: numb
 export type OfferProblem = "self_offer" | "below_minimum_investment" | "too_much_equity" | "founder_control";
 
 /** The founder's share after a run of offers is accepted, each diluting everyone before it. */
-function founderAfter(founderBps: number, offers: readonly { readonly equityBps: number }[]): number {
+export function founderAfter(founderBps: number, offers: readonly { readonly equityBps: number }[]): number {
   return offers.reduce((bps, offer) => (bps * (WHOLE_BPS - offer.equityBps)) / WHOLE_BPS, founderBps);
 }
 

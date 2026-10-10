@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
+import type { Role } from "../domain/incident.ts";
 import { advance, openIncident, type Incident } from "./incident.ts";
 import type { Scenario } from "./scenario.ts";
 import { checkoutCluster } from "./scenarios/checkout-cluster.ts";
 import { checkoutCommerce } from "./scenarios/checkout-commerce.ts";
+import { checkoutMeltdown } from "./scenarios/checkout-meltdown.ts";
 import { scaledToZero } from "./scenarios/scaled-to-zero.ts";
+import { SSO_GROUPS } from "./shell/identity.ts";
+import { completeLine, runLine } from "./shell/shell.ts";
 import { customerLossRate, type Settlement } from "./sim/commerce-step.ts";
 import type { Commerce, FraudScoring } from "./sim/commerce.ts";
 import { FEATURE_MAX_AGE_SECONDS, fraudDeclines, NO_FRAUD, scoredAt, stepFraud } from "./sim/fraud.ts";
@@ -137,5 +141,77 @@ describe("fraud scoring physics", () => {
     expect(commerceOf(flooded).gateway.timeoutShare).toBe(1);
     expect(flooded.cluster.errorRate).toBeGreaterThan(0.3);
     expect(commerceOf(flooded).ledger.fraudulentCaptures).toBeGreaterThan(120 * 40);
+  });
+});
+
+describe("the models command", () => {
+  const scenario = shop(withFraud({ features: [...SCORER.features, { name: "customer_refunds_90d", pipeline: "features_customer_daily", lastSuccessAt: -30 * HOUR, refresh: null }] }));
+  const opened = play(scenario, 5, openIncident(scenario));
+  const run = (line: string, role: Role = "data", incident: Incident = opened) => runLine(line, { cluster: incident.cluster, scenario, history: [], role });
+  const text = (line: string, role: Role = "data", incident: Incident = opened) =>
+    run(line, role, incident)
+      .output.map((output) => output.text)
+      .join("\n");
+  const fraudAfter = (line: string) => run(line).cluster?.commerce?.fraud;
+
+  it("lists the scorer and shows its versions, live decline rate and inputs", () => {
+    expect(text("models list")).toMatch(/fraud-scorer\s+v12\s+enforce\s+0\.85\s+/);
+    const shown = text("models show fraud-scorer");
+    expect(shown).toMatch(/v12 \*\s+9d ago\s+10\.4% live/);
+    expect(shown).toMatch(/v11\s+40d ago\s+0\.5% while serving/);
+    expect(text("models features fraud-scorer")).toMatch(/customer_refunds_90d\s+features_customer_daily\s+30h ago\s+30h\s+STALE: served as default 0/);
+    expect(text("models features fraud-scorer")).toMatch(/customer_orders_90d\s+features_customer_daily\s+\S+\s+6h0m\s+fresh/);
+    expect(text("models show nope")).toContain('model "nope" not found');
+  });
+
+  it("rolls back to the version before, or the one named", () => {
+    expect(fraudAfter("models rollback fraud-scorer")?.active).toBe("v11");
+    expect(text("models rollback fraud-scorer")).toContain("rolled back v12 → v11");
+    const rolledBack = { ...opened, cluster: run("models rollback fraud-scorer").cluster ?? opened.cluster };
+    expect(text("models rollback fraud-scorer", "data", rolledBack)).toContain("v11 is the oldest version");
+    expect(run("models rollback fraud-scorer --to v12", "data", rolledBack).cluster?.commerce?.fraud?.active).toBe("v12");
+    expect(text("models rollback fraud-scorer --to v9")).toContain('version "v9" not found');
+    expect(text("models rollback fraud-scorer --to v12")).toContain("already serving v12");
+  });
+
+  it("moves the threshold, and refuses anything that isn't a score", () => {
+    expect(fraudAfter("models threshold fraud-scorer 0.9")?.threshold).toBe(0.9);
+    expect(text("models threshold fraud-scorer 0.9")).toContain("threshold 0.85 → 0.9");
+    for (const bad of ["abc", "1.5", "0", "1", "-0.2"]) {
+      expect(run(`models threshold fraud-scorer ${bad}`).cluster, bad).toBeUndefined();
+      expect(text(`models threshold fraud-scorer ${bad}`), bad).toContain("between 0 and 1");
+    }
+  });
+
+  it("switches between enforce and fail-open", () => {
+    expect(fraudAfter("models mode fraud-scorer fail-open")?.mode).toBe("fail-open");
+    expect(text("models mode fraud-scorer fail-open")).toContain("enforce → fail-open");
+    expect(text("models mode fraud-scorer enforce")).toContain("already in enforce mode");
+    expect(text("models mode fraud-scorer off")).toContain('unknown mode "off"');
+  });
+
+  it("completes subcommands, the model, modes and versions", () => {
+    const complete = (line: string) => completeLine(line, { cluster: opened.cluster, scenario, history: [], role: "data" });
+    expect(complete("mod").line).toBe("models ");
+    expect(complete("models sh").line).toBe("models show ");
+    expect(complete("models show f").line).toBe("models show fraud-scorer ");
+    expect(complete("models mode fraud-scorer f").line).toBe("models mode fraud-scorer fail-open ");
+    expect(complete("models rollback fraud-scorer --to v1").candidates).toEqual(["v11", "v12"]);
+  });
+
+  it("turns away other roles the way the platform's SSO does, and changes nothing", () => {
+    for (const role of ["infrastructure", "frontend", "mobile", "security"] as const) {
+      expect(text("models list", role)).toBe(
+        `models: 403 Forbidden: oncall-${role}@marlow.example is not in ml-platform\nmodels: your groups: ${SSO_GROUPS[role].join(", ")} — ask in #access-requests`,
+      );
+      expect(run("models mode fraud-scorer fail-open", role).cluster).toBeUndefined();
+    }
+  });
+
+  it("isn't installed where no model serves checkout", () => {
+    const meltdown = { cluster: openIncident(checkoutMeltdown).cluster, scenario: checkoutMeltdown, history: [], role: "data" as const };
+    expect(runLine("models list", meltdown).output[0].text).toBe("bash: models: command not found");
+    expect(runLine("help", meltdown).output.map((line) => line.text).join("\n")).not.toContain("models");
+    expect(text("help")).toContain("models");
   });
 });

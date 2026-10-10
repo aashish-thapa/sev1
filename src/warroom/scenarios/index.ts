@@ -2,6 +2,7 @@ import type { Level } from "../../domain/career.ts";
 import { isPro, isReleasedFor, type Entitlements } from "../../domain/entitlements.ts";
 import type { Role } from "../../domain/incident.ts";
 import type { Scenario } from "../scenario.ts";
+import { addressAutocomplete500s } from "./address-autocomplete-500s.ts";
 import { checkoutMeltdown } from "./checkout-meltdown.ts";
 import { checkoutPoolLeak } from "./checkout-pool-leak.ts";
 import { crashOnCheckout } from "./crash-on-checkout.ts";
@@ -11,12 +12,12 @@ import { scaledToZero } from "./scaled-to-zero.ts";
 import { webAutoRetryStorm } from "./web-auto-retry-storm.ts";
 
 /** Every live incident the game ships; the app and the room server read this one list. */
-export const SCENARIOS: readonly Scenario[] = [scaledToZero, crashOnCheckout, oomAfterDeploy, checkoutPoolLeak, ordersIndexInvalid, checkoutMeltdown, webAutoRetryStorm];
+export const SCENARIOS: readonly Scenario[] = [scaledToZero, crashOnCheckout, oomAfterDeploy, checkoutPoolLeak, ordersIndexInvalid, checkoutMeltdown, webAutoRetryStorm, addressAutocomplete500s];
 
 /** Each role's own War Rooms, easiest first. A role's ladder grows as its incidents are written. */
 const LADDERS: Readonly<Record<Role, readonly Scenario[]>> = {
   infrastructure: [scaledToZero, crashOnCheckout, oomAfterDeploy, checkoutPoolLeak, ordersIndexInvalid],
-  frontend: [webAutoRetryStorm],
+  frontend: [webAutoRetryStorm, addressAutocomplete500s],
   mobile: [],
   security: [],
   data: [],

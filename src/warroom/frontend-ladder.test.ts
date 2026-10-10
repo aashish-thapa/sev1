@@ -4,6 +4,7 @@ import { advance, debrief, declareResolved, openIncident, type Incident } from "
 import type { Scenario } from "./scenario.ts";
 import { checkoutCluster } from "./scenarios/checkout-cluster.ts";
 import { checkoutCommerce, NO_RETRY, SHOP_FLAGS, WEB_USER_AGENT } from "./scenarios/checkout-commerce.ts";
+import { addressAutocomplete500s } from "./scenarios/address-autocomplete-500s.ts";
 import { scaledToZero } from "./scenarios/scaled-to-zero.ts";
 import { webAutoRetryStorm } from "./scenarios/web-auto-retry-storm.ts";
 import { runLine } from "./shell/shell.ts";
@@ -153,5 +154,57 @@ describe("tier 1: web-auto-retry-storm", () => {
 
   it("round-trips through multiplayer frames", () => {
     roundTrips(scenario, { 20: retriesOff });
+  });
+});
+
+describe("tier 2: address-autocomplete-500s", () => {
+  const scenario = addressAutocomplete500s;
+  const autocompleteOff = 'flags set checkout.address_autocomplete off --note "region 500s"';
+  // 60% of web's 52% of checkouts, and checkouts are 40% of requests.
+  const OPENING_RATE = 0.4 * 0.52 * 0.6;
+
+  it("opens with a steady share of web checkouts failing, and only loses more if nobody acts", () => {
+    const opened = openIncident(scenario);
+    expect(opened.cluster.errorRate).toBeCloseTo(OPENING_RATE, 6);
+    const tenMinutes = play(scenario, 600, opened);
+    expect(tenMinutes.cluster.errorRate).toBeCloseTo(OPENING_RATE, 6);
+    expect(pointsAt(scenario, tenMinutes)).toBeLessThan(pointsAt(scenario, opened) - 40);
+  });
+
+  it("names the failing field in RUM, and the flag that fills it flipped when the errors began", () => {
+    const opened = openIncident(scenario);
+    const errors = shell(scenario, opened, "rum errors").text;
+    expect(errors).toContain("Failed to load resource: the server responded with a status of 500 (Internal Server Error)");
+    expect(errors).toContain('unknown region \\"California\\"');
+    expect(shell(scenario, opened, "flags list").text).toMatch(/checkout\.address_autocomplete\s+on\s+team-checkout-web\s+13:09:00/);
+  });
+
+  it("closes at S or A with the worked solution", () => {
+    expect(["S", "A"]).toContain(workedSolution(scenario).grade);
+  });
+
+  it("changes nothing when the other flags flipped this hour go off", () => {
+    let incident = play(scenario, 30, openIncident(scenario));
+    incident = act(scenario, incident, "flags set checkout.gift_message off");
+    incident = act(scenario, incident, "flags set home.sale_banner off");
+    incident = play(scenario, 60, incident);
+    expect(incident.cluster.errorRate).toBeCloseTo(OPENING_RATE, 6);
+    expect(scenario.isRootCauseFixed(incident.cluster)).toBe(false);
+    expect(declareResolved(incident, scenario).notice?.kind).toBe("refused");
+  });
+
+  it("clears within the flag's 20 s propagation", () => {
+    const incident = play(scenario, 21, act(scenario, play(scenario, 30, openIncident(scenario)), autocompleteOff));
+    expect(incident.cluster.errorRate).toBe(0);
+    expect(scenario.isRootCauseFixed(incident.cluster)).toBe(true);
+  });
+
+  it("is deterministic", () => {
+    const run = () => play(scenario, 90, act(scenario, play(scenario, 30, openIncident(scenario)), autocompleteOff));
+    expect(run()).toEqual(run());
+  });
+
+  it("round-trips through multiplayer frames", () => {
+    roundTrips(scenario, { 20: autocompleteOff });
   });
 });

@@ -7,6 +7,7 @@ import { checkoutCommerce, NO_RETRY, SHOP_FLAGS, WEB_USER_AGENT } from "./scenar
 import { addressAutocomplete500s } from "./scenarios/address-autocomplete-500s.ts";
 import { deadKillSwitch } from "./scenarios/dead-kill-switch.ts";
 import { scaledToZero } from "./scenarios/scaled-to-zero.ts";
+import { staleServiceWorker } from "./scenarios/stale-service-worker.ts";
 import { webAutoRetryStorm } from "./scenarios/web-auto-retry-storm.ts";
 import { runLine } from "./shell/shell.ts";
 import { unsafeRetryShare } from "./sim/clients.ts";
@@ -108,7 +109,7 @@ describe("service-worker rollout", () => {
   it("shows each release's share of web sessions, and that the old one comes from the service worker", () => {
     const opened = openIncident(scenario);
     const web = opened.cluster.commerce && findPlatform(opened.cluster.commerce, "web");
-    expect(web && rolloutLabel(web)).toContain(`70% of tabs still on the service worker's precache (kill switch: ${KILL_SWITCH})`);
+    expect(web && rolloutLabel(web)).toBe("deployed · 70% of tabs still run a service worker's precached build");
     expect(shell(scenario, opened, "rum overview").text).toMatch(/2026\.10\.09-2\s+70%[\s\S]*2026\.10\.10-1\s+30%|2026\.10\.10-1\s+30%[\s\S]*2026\.10\.09-2\s+70%/);
     const session = shell(scenario, opened, "rum session").text;
     expect(session).toContain("release 2026.10.09-2 (70% of web sessions)");
@@ -277,5 +278,61 @@ describe("tier 3: dead-kill-switch", () => {
 
   it("round-trips through multiplayer frames", () => {
     roundTrips(scenario, { 20: killSwitch, 50: "flags set checkout.payment_element_v2 on", 60: walletOff });
+  });
+});
+
+describe("tier 4: stale-service-worker", () => {
+  const scenario = staleServiceWorker;
+  const killSwitchOn = 'flags set web.sw_kill_switch on --note "old worker pins tabs to the bad build"';
+  // 70% of web's 52% of customers are on the precached build, which retries without an Idempotency-Key.
+  const STALE_SHARE = 0.52 * 0.7;
+
+  it("opens mid storm with most web tabs on the replaced build, and nothing moves them if nobody acts", () => {
+    const opened = openIncident(scenario);
+    expect(opened.cluster.errorRate).toBeGreaterThan(0.4);
+    expect(shell(scenario, opened, "rum overview").text).toMatch(/2026\.10\.09-2\s+70%\s+[\d,]+\s+[\d,]+\s+4\.00/);
+    const tenMinutes = play(scenario, 600, opened);
+    expect(webAdoption(tenMinutes)).toBe(0.3);
+    expect(tenMinutes.cluster.errorRate).toBeGreaterThan(0.4);
+    expect(pointsAt(scenario, tenMinutes)).toBeLessThan(pointsAt(scenario, opened) - 40);
+  });
+
+  it("shows the old build coming from the service worker's precache, with the new worker waiting", () => {
+    const opened = openIncident(scenario);
+    expect(shell(scenario, opened, "rum session").text).toContain("GET / 200 (ServiceWorker)");
+    const worker = shell(scenario, opened, "rum service-worker").text;
+    expect(worker).toMatch(/#412 activated and is running\s+2026\.10\.09-2\s+70% of tabs/);
+    expect(worker).toContain("#413 waiting to activate");
+  });
+
+  it("closes at S or A with the worked solution", () => {
+    expect(["S", "A"]).toContain(workedSolution(scenario).grade);
+  });
+
+  it("moves every tab to the new build within three minutes of the kill switch, and the storm drains", () => {
+    const switched = act(scenario, play(scenario, 30, openIncident(scenario)), killSwitchOn);
+    const adopted = play(scenario, 90, switched);
+    expect(webAdoption(adopted)).toBeGreaterThanOrEqual(0.99);
+    expect(scenario.isRootCauseFixed(adopted.cluster)).toBe(true);
+    expect(play(scenario, 180, switched).cluster.errorRate).toBe(0);
+  });
+
+  it("doesn't move when auto-retry goes off: the precached build's retries ignore the flag", () => {
+    let incident = act(scenario, play(scenario, 30, openIncident(scenario)), "flags set checkout.auto_retry off");
+    incident = play(scenario, 300, incident);
+    expect(incident.cluster.errorRate).toBeGreaterThan(0.4);
+    expect(webAdoption(incident)).toBe(0.3);
+    expect(incident.cluster.commerce && unsafeRetryShare(incident.cluster.commerce, incident.cluster.t)).toBeCloseTo(STALE_SHARE, 6);
+    expect(scenario.isRootCauseFixed(incident.cluster)).toBe(false);
+    expect(declareResolved(incident, scenario).notice?.kind).toBe("refused");
+  });
+
+  it("is deterministic", () => {
+    const run = () => play(scenario, 200, act(scenario, play(scenario, 30, openIncident(scenario)), killSwitchOn));
+    expect(run()).toEqual(run());
+  });
+
+  it("round-trips through multiplayer frames", () => {
+    roundTrips(scenario, { 20: killSwitchOn });
   });
 });

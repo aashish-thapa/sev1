@@ -32,6 +32,7 @@ export function rolloutLabel(platform: Platform): string {
       return `phased${rollout.isPaused ? " · PAUSED" : ""} · day ${rollout.day}/7 (${percentToday}%)`;
     }
     case "service-worker":
-      return `deployed · ${Math.round((1 - platform.adoption) * 100)}% of tabs still on the service worker's precache (kill switch: ${rollout.killSwitchFlag})`;
+      if (platform.adoption >= 1) return "released (100%)";
+      return `deployed · ${Math.round((1 - platform.adoption) * 100)}% of tabs still run a service worker's precached build`;
   }
 }

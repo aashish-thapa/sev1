@@ -1,7 +1,10 @@
 import { CanvasTexture, SRGBColorSpace } from "three";
 
+/** A small circled glyph after the name, e.g. a featured badge, coloured by a design token. */
+export type NameMark = { readonly glyph: string; readonly colorToken: string };
+
 /** A rounded name-and-text card drawn from the design tokens, for bubbles and name tags. */
-export function bubbleTexture(name: string, text: string): CanvasTexture {
+export function bubbleTexture(name: string, text: string, mark?: NameMark): CanvasTexture {
   const scale = 2;
   const width = 420;
   const styles = getComputedStyle(document.documentElement);
@@ -34,6 +37,19 @@ export function bubbleTexture(name: string, text: string): CanvasTexture {
   context.fillStyle = token("--color-accent");
   context.font = `600 18px ${token("--font-mono")}`;
   context.fillText(name, 18, 30);
+  if (mark) {
+    const x = 18 + context.measureText(name).width + 18;
+    context.strokeStyle = token(mark.colorToken);
+    context.lineWidth = 2;
+    context.beginPath();
+    context.arc(x, 24, 11, 0, Math.PI * 2);
+    context.stroke();
+    context.fillStyle = token(mark.colorToken);
+    context.font = `600 14px ${token("--font-body")}`;
+    context.textAlign = "center";
+    context.fillText(mark.glyph, x, 29);
+    context.textAlign = "start";
+  }
   context.fillStyle = token("--color-ink");
   context.font = body;
   lines.forEach((text, index) => context.fillText(text, 18, 58 + index * 26));

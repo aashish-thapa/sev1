@@ -2,6 +2,7 @@ import { useFrame } from "@react-three/fiber";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { Group } from "three";
 import type { CommsMessage } from "../scenario.ts";
+import { badgeById } from "../../domain/achievements.ts";
 import type { Teammate } from "../ui/feed.ts";
 import { loopThrough, positionOnLoop, WALK_SPEED, type Point } from "./navigation.ts";
 import { PEOPLE, seatOf, type Person } from "./office.ts";
@@ -160,7 +161,14 @@ function TeammateModel({ teammate, reduceMotion }: { teammate: Teammate; reduceM
   const body = useRef<Group>(null);
   const target = teammate.position;
   const follower = useRef<Follower>({ x: target?.x ?? 0, z: target?.z ?? 0, speed: 0 });
-  const tag = useMemo(() => bubbleTexture(teammate.name, teammate.roleLabel), [teammate.name, teammate.roleLabel]);
+  const badge = teammate.badge === null ? undefined : badgeById(teammate.badge);
+  const tag = useMemo(
+    () =>
+      badge
+        ? bubbleTexture(teammate.name, `${teammate.roleLabel} · ${badge.title}`, { glyph: badge.glyph, colorToken: `--color-tier-${badge.tier}` })
+        : bubbleTexture(teammate.name, teammate.roleLabel),
+    [badge, teammate.name, teammate.roleLabel],
+  );
   useEffect(() => () => tag.dispose(), [tag]);
   const motion = () => {
     const { speed } = follower.current;

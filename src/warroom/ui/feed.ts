@@ -21,6 +21,8 @@ export type Teammate = {
   readonly id: string;
   readonly name: string;
   readonly roleLabel: string;
+  /** The badge they chose to show (an achievements catalog id), or null. */
+  readonly badge: string | null;
   readonly position: { readonly x: number; readonly z: number; readonly yaw: number } | null;
 };
 

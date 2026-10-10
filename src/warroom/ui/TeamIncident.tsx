@@ -30,7 +30,7 @@ export function TeamIncident({ room, scenario, role, overlay, onUseScreen, onClo
       selfId: room.room.playerId,
       teammates: room.players
         .filter((player) => player.id !== me && player.isConnected)
-        .map((player) => ({ id: player.id, name: player.name, roleLabel: ROLE_INFO[player.role].label, position: player.position })),
+        .map((player) => ({ id: player.id, name: player.name, roleLabel: ROLE_INFO[player.role].label, badge: player.badge, position: player.position })),
       activity: room.activity.map((item, index) => ({
         key: `${item.at}-${item.playerId}-${index}`,
         text: `${item.name} (${ROLE_INFO[item.role].label}) ran ${item.line}`,

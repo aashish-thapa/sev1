@@ -1,6 +1,6 @@
 import type { Commerce, FraudScoring } from "../../sim/commerce.ts";
 import { rollbackModel, setMode, setThreshold } from "../../sim/fraud-actions.ts";
-import { FEATURE_MAX_AGE_SECONDS, fraudDeclines, isFeatureStale } from "../../sim/fraud.ts";
+import { FEATURE_MAX_AGE_SECONDS, isFeatureStale, scoringWindow } from "../../sim/fraud.ts";
 import { applied, commerceCommand, count, percent, runEvidence, stamp, viewNames, WINDOW_SECONDS } from "../commerce-command.ts";
 import { ssoRefusal } from "../identity.ts";
 import { takeFlag } from "../tokenize.ts";
@@ -27,32 +27,18 @@ export function fraudCommand(spec: FraudCommandSpec): Command {
   };
 }
 
-/** The last five minutes at today's per-second rates: customers scored and declined, fraud attempts and what got through. */
-function window(context: ShellContext, commerce: Commerce) {
-  const effect = fraudDeclines(commerce, context.cluster.t);
-  const customers = commerce.pulse.organicCheckoutsPerSecond * WINDOW_SECONDS;
-  const attempts = (commerce.fraud?.fraudAttemptsPerSecond ?? 0) * WINDOW_SECONDS;
-  return {
-    customers,
-    declined: customers * effect.declinedCheckoutShare,
-    share: effect.declinedCheckoutShare,
-    attempts,
-    approvedFraud: effect.gatewayCallsPerSecond * WINDOW_SECONDS,
-  };
-}
-
 function unknownModel(name: string | undefined): ShellResult {
   return { output: err(name ? `models: error: model "${name}" not found (models list)` : "usage: models <command> <model>") };
 }
 
 function list(context: ShellContext, fraud: FraudScoring, commerce: Commerce): ShellResult {
-  const live = window(context, commerce);
+  const live = scoringWindow(commerce, context.cluster.t, WINDOW_SECONDS);
   return {
     output: [
       ...out(
         ...table([
           ["MODEL", "SERVING", "MODE", "THRESHOLD", "CUSTOMERS DECLINED (5m)", "ENDPOINT"],
-          [fraud.model, fraud.active, fraud.mode, String(fraud.threshold), `${count(live.declined)} (${percent(live.share)})`, "POST /checkout"],
+          [fraud.model, fraud.active, fraud.mode, String(fraud.threshold), `${count(live.declined)} (${percent(live.declinedShare)})`, "POST /checkout"],
         ]),
       ),
       ...dim("models show <model> for its versions; models features <model> for its inputs"),
@@ -61,7 +47,7 @@ function list(context: ShellContext, fraud: FraudScoring, commerce: Commerce): S
 }
 
 function show(context: ShellContext, fraud: FraudScoring, commerce: Commerce): ShellResult {
-  const live = window(context, commerce);
+  const live = scoringWindow(commerce, context.cluster.t, WINDOW_SECONDS);
   const rows = [...fraud.versions]
     .sort((left, right) => right.deployedAt - left.deployedAt)
     .map((version) => {
@@ -69,7 +55,7 @@ function show(context: ShellContext, fraud: FraudScoring, commerce: Commerce): S
       return [
         isServing ? `${version.version} *` : version.version,
         stamp(context, version.deployedAt),
-        isServing ? `${percent(live.share)} live` : `${percent(version.falseDeclineShare)} while serving`,
+        isServing ? `${percent(live.declinedShare)} live` : `${percent(version.falseDeclineShare)} while serving`,
         percent(version.catchShare),
         version.note,
       ];
@@ -82,7 +68,7 @@ function show(context: ShellContext, fraud: FraudScoring, commerce: Commerce): S
       ...out(`  serving     ${fraud.active}`, `  mode        ${decision}`, `  threshold   ${fraud.threshold} (tuned to ${fraud.tunedThreshold} on the holdout set)`, ""),
       ...out(...table([["VERSION", "DEPLOYED", "CUSTOMERS DECLINED", "HOLDOUT RECALL", "NOTE"], ...rows])),
       ...dim(
-        `Last 5 min: ${count(live.customers)} customer checkouts scored, ${count(live.declined)} declined · ${count(live.attempts)} fraud attempts, ${count(live.approvedFraud)} approved.`,
+        `Last 5 min: ${count(live.customers)} customer checkouts scored, ${count(live.declined)} declined · ${count(live.fraudAttempts)} fraud attempts, ${count(live.fraudApproved)} approved.`,
       ),
     ],
   };

@@ -6,6 +6,8 @@ import type { Scenario } from "./scenario.ts";
 import { checkoutCluster } from "./scenarios/checkout-cluster.ts";
 import { checkoutCommerce } from "./scenarios/checkout-commerce.ts";
 import { checkoutMeltdown } from "./scenarios/checkout-meltdown.ts";
+import { fraudModelRegression } from "./scenarios/fraud-model-regression.ts";
+import { scorerOf } from "./scenarios/fraud-scorer.ts";
 import { refundDoubleCharges, SETTLEMENT_CUTOFF } from "./scenarios/refund-double-charges.ts";
 import { scaledToZero } from "./scenarios/scaled-to-zero.ts";
 import { airflowCompact, airflowLine } from "./shell/commands/pipelines.ts";
@@ -416,6 +418,66 @@ describe("tier 1: refund last night's double charges", () => {
   it("round-trips through multiplayer frames", () => {
     const server = expectFramesToRoundTrip(scenario, [[50, "reconcile submit"]], 120);
     expect(commerceOf(server).ledger.refundBatches).toHaveLength(1);
+  });
+
+  it("offers chips the data laptop can run", () => expectChipsToRun(scenario));
+});
+
+describe("tier 2: good customers declined", () => {
+  const scenario = fraudModelRegression;
+  const loss = (incident: Incident) => alertRate(scenario, incident.cluster);
+
+  it("opens declining 14% of customers without a single 5xx, and loses more of them every minute", () => {
+    const opened = openIncident(scenario);
+    expect(loss(opened)).toBeCloseTo(0.14, 9);
+    expect(opened.cluster.errorRate).toBe(0);
+    const twoMinutes = playTo(scenario, 120, opened);
+    const tenMinutes = playTo(scenario, 600, twoMinutes);
+    expect(tenMinutes.cluster.failedCheckouts).toBeGreaterThan(twoMinutes.cluster.failedCheckouts * 4);
+    expect(commerceOf(tenMinutes).ledger.fraudulentCaptures).toBeGreaterThan(commerceOf(twoMinutes).ledger.fraudulentCaptures ?? 0);
+    expect(debrief(tenMinutes, scenario, true).points).toBeLessThan(debrief(twoMinutes, scenario, true).points);
+    expect(declareResolved(tenMinutes, scenario).notice?.kind).toBe("refused");
+  });
+
+  it("shows the declined customers are regulars, and the top reason a feature new in v13", () => {
+    const opened = openIncident(scenario);
+    const view = shellOn(scenario, opened, "warehouse run declined-checkouts").text;
+    expect(view).toMatch(/3\+ paid orders\s+\|\s+\d+\s+\|\s+5\d\.\d/);
+    expect(view).toContain("v13's score explanations: device_age_days < 1");
+    expect(shellOn(scenario, scripted(scenario, [[30, "models rollback fraud-scorer"]], 40), "warehouse run declined-checkouts").text).toContain("v12's score explanations: card_bin_velocity_1h");
+  });
+
+  it("closes at S or A with the worked solution", () => {
+    const { result } = workedSolution(scenario);
+    expect(result.isRootCauseFixed).toBe(true);
+    expect(["S", "A"]).toContain(result.grade);
+  });
+
+  it("raising the threshold on v13 only halves the damage, and resolve stays refused", () => {
+    const raised = scripted(scenario, [[30, "models threshold fraud-scorer 0.95"]], 120);
+    expect(loss(raised)).toBeGreaterThan(0.05);
+    expect(declareResolved(raised, scenario).notice?.kind).toBe("refused");
+    expect(scenario.isRootCauseFixed(raised.cluster)).toBe(false);
+  });
+
+  it("failing open clears the page but lets every fraud attempt through, and the debrief knows", () => {
+    const rolledBack = scripted(scenario, [[30, "models rollback fraud-scorer"]], 300);
+    const failedOpen = scripted(scenario, [[30, "models mode fraud-scorer fail-open"]], 300);
+    expect(loss(failedOpen)).toBe(0);
+    expect(scenario.isRootCauseFixed(failedOpen.cluster)).toBe(false);
+    const capturedSince = (incident: Incident) => commerceOf(incident).ledger.fraudulentCaptures ?? 0;
+    expect(capturedSince(failedOpen)).toBeGreaterThan(capturedSince(rolledBack) * 5);
+    expect(debrief(failedOpen, scenario, true).points).toBeLessThan(debrief(rolledBack, scenario, true).points - 20);
+  });
+
+  it("is deterministic", () => {
+    const steps = [[45, "models rollback fraud-scorer"]] as const;
+    expect(scripted(scenario, steps, 200)).toEqual(scripted(scenario, steps, 200));
+  });
+
+  it("round-trips through multiplayer frames", () => {
+    const server = expectFramesToRoundTrip(scenario, [[40, "models rollback fraud-scorer"]], 90);
+    expect(scorerOf(server.cluster)?.active).toBe("v12");
   });
 
   it("offers chips the data laptop can run", () => expectChipsToRun(scenario));

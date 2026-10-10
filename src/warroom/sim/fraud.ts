@@ -57,6 +57,27 @@ export function fraudDeclines(commerce: Commerce, t: number): FraudEffect {
   };
 }
 
+/** What the scorer saw over the last `seconds`, at this second's rates. */
+export type ScoringWindow = {
+  readonly customers: number;
+  readonly declined: number;
+  readonly declinedShare: number;
+  readonly fraudAttempts: number;
+  readonly fraudApproved: number;
+};
+
+export function scoringWindow(commerce: Commerce, t: number, seconds: number): ScoringWindow {
+  const effect = fraudDeclines(commerce, t);
+  const customers = commerce.pulse.organicCheckoutsPerSecond * seconds;
+  return {
+    customers,
+    declined: customers * effect.declinedCheckoutShare,
+    declinedShare: effect.declinedCheckoutShare,
+    fraudAttempts: (commerce.fraud?.fraudAttemptsPerSecond ?? 0) * seconds,
+    fraudApproved: effect.gatewayCallsPerSecond * seconds,
+  };
+}
+
 function stepRefresh(feature: FraudFeature, t: number): FraudFeature {
   if (!feature.refresh) return feature;
   const secondsLeft = feature.refresh.secondsLeft - 1;

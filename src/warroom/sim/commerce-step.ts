@@ -261,7 +261,7 @@ export function settleCommerce(commerce: Commerce, demand: CommerceDemand, outco
     ...commerce,
     gateway,
     ledger,
-    platforms: commerce.platforms.map(stepRollout),
+    platforms: commerce.platforms.map((platform) => stepRollout(platform, commerce)),
     pulse: {
       organicCheckoutsPerSecond: demand.organicCheckoutsPerSecond,
       checkoutAttemptsPerSecond: demand.checkoutAttemptsPerSecond,

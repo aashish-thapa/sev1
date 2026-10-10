@@ -26,7 +26,6 @@ import type { Tier } from "./tier.ts";
 /** Network and timer jitter between syncs: allow this much extra time and a couple of extra events. */
 const TIME_SLACK = 1.25;
 const EVENT_ALLOWANCE = 2;
-const MAX_INCIDENT_CENTS = 100 * Math.max(...Object.values(INCIDENT_CENTS_PER_POINT_BY_TIER));
 const MAX_CARD_CENTS = Math.max(...Object.values(CARD_BONUS_CENTS));
 const EARN_REASONS = ["salary", "card", "incident"] as const satisfies readonly PayReason[];
 
@@ -76,7 +75,8 @@ export function isPlausibleWallet(
 
   const incidents = delta("incident", "paidUnits");
   if (incidents > seconds / MIN_SECONDS_PER_INCIDENT + EVENT_ALLOWANCE) return false;
-  if (delta("incident", "earnedCents") > incidents * MAX_INCIDENT_CENTS) return false;
+  // Backstop for lines the per-line check can't see (evicted, or booked under another reason): the most any run pays at the level reached.
+  if (delta("incident", "earnedCents") > incidents * 100 * INCIDENT_CENTS_PER_POINT_BY_TIER[paidTier(5, topLevel)]) return false;
 
   const fresh = freshLines(previous, next);
   if (fresh.some((entry) => entry.reason === "incident" && !isFairIncidentPay(entry))) return false;
@@ -146,11 +146,16 @@ function isLedgerConsistent(previous: Wallet, next: Wallet): boolean {
   return isEvictedByCap && total <= balanceDelta;
 }
 
-/** Each reason's totals move by exactly its own lines, so money paid under one reason can't be booked to another. */
+/**
+ * Each reason's totals move by exactly its own lines, so money paid under one reason can't be booked to
+ * another, and each incident line is one paid incident, so one run can't carry several payouts.
+ */
 function isBookedByReason(previous: Wallet, next: Wallet, fresh: readonly LedgerEntry[]): boolean {
-  const linesFor = (reason: LedgerEntry["reason"]) => fresh.filter((entry) => entry.reason === reason).reduce((sum, entry) => sum + entry.amountCents, 0);
+  const linesFor = (reason: LedgerEntry["reason"]) => fresh.filter((entry) => entry.reason === reason);
+  const centsFor = (reason: LedgerEntry["reason"]) => linesFor(reason).reduce((sum, entry) => sum + entry.amountCents, 0);
   return (
-    EARN_REASONS.every((reason) => linesFor(reason) === next.earnedCents[reason] - previous.earnedCents[reason]) &&
-    SPEND_REASONS.every((reason) => -linesFor(reason) === next.spentCents[reason] - previous.spentCents[reason])
+    EARN_REASONS.every((reason) => centsFor(reason) === next.earnedCents[reason] - previous.earnedCents[reason]) &&
+    SPEND_REASONS.every((reason) => -centsFor(reason) === next.spentCents[reason] - previous.spentCents[reason]) &&
+    linesFor("incident").length === next.paidUnits.incident - previous.paidUnits.incident
   );
 }

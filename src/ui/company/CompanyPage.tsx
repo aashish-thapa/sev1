@@ -29,6 +29,8 @@ export type CompanyPageProps = {
   tasks: readonly Task[];
   /** The local day, YYYY-MM-DD. */
   day: string;
+  /** Joins the company's office room at `code`. */
+  enterOffice: (code: string) => void;
 };
 
 /** Startup mode: found a company, answer offers, or run the one you're in. Accounts only. */
@@ -161,7 +163,7 @@ export function CompanyPage(props: CompanyPageProps) {
           </button>
         </section>
       ) : (
-        <Headquarters api={api} company={company} username={props.username} onChanged={refresh} tasks={props.tasks} day={props.day} />
+        <Headquarters api={api} company={company} username={props.username} onChanged={refresh} tasks={props.tasks} day={props.day} enterOffice={props.enterOffice} />
       )}
       {company !== null && <CompanyDirectory api={api} onApply={null} myApplications={applications} />}
     </section>

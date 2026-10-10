@@ -37,6 +37,8 @@ type Props = {
     walletCents: number;
     fundCompany: (fundingRef: string, cents: number) => boolean;
     claimPayout: (payout: PendingPayout) => void;
+    /** Joins the company's office room at `code`; the app switches to the office once inside. */
+    enterOffice: (code: string) => void;
   };
   rooms: {
     status: string;
@@ -156,6 +158,7 @@ export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, fetch
           onSignUp={() => setAccountOpen(true)}
           tasks={company.tasks}
           day={company.today}
+          enterOffice={company.enterOffice}
         />
       ) : view === "admin" ? (
         canAdmin ? <AdminDashboard api={adminApi} /> : <p className="admin__note">The dashboard is for admins.</p>

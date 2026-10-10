@@ -21,6 +21,7 @@ type Props = {
   tasks: readonly Task[];
   /** The local day, YYYY-MM-DD. */
   day: string;
+  enterOffice: (code: string) => void;
 };
 
 const REASON_LABEL: Readonly<Record<Company["ledger"][number]["reason"], string>> = {
@@ -40,7 +41,7 @@ const OFFER_PROBLEM: Readonly<Record<"below_minimum" | "no_free_desk", string>> 
 };
 
 /** The company's HQ: money, people, rooms, servers, the day's books. Only the founder buys, hires and sets pay. */
-export function Headquarters({ api, company, username, onChanged, tasks, day }: Props) {
+export function Headquarters({ api, company, username, onChanged, tasks, day, enterOffice }: Props) {
   const work = useWorkLog(day);
   const myRole = company.members.find((member) => member.username === username)?.role ?? null;
   const [notice, setNotice] = useState<string | null>(null);
@@ -89,6 +90,21 @@ export function Headquarters({ api, company, username, onChanged, tasks, day }: 
             {company.workDay} so far). Harder work comes with it, and it pays more.
           </p>
         )}
+        <button
+          type="button"
+          className="button button--primary hq__office"
+          disabled={isBusy}
+          onClick={async () => {
+            setBusy(true);
+            setNotice(null);
+            const office = await api.enterOffice();
+            setBusy(false);
+            if (office.ok) enterOffice(office.value.code);
+            else setNotice(companyErrorText(office.error, office.message));
+          }}
+        >
+          Enter the office
+        </button>
       </header>
 
       <dl className="admin__tiles">

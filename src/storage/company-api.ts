@@ -49,6 +49,8 @@ export interface CompanyApi {
   /** Graded on the server; the application is created with its score. */
   answerInterview(interviewId: string, answers: InterviewAnswers): Promise<CompanyOutcome<InterviewResult>>;
   decide(applicationId: string, decision: "hire" | "reject"): Promise<CompanyOutcome<unknown>>;
+  /** The code of the company's own office room: members only, the same for every member, never listed. */
+  enterOffice(): Promise<CompanyOutcome<{ code: string }>>;
 }
 
 const ErrorSchema = z.object({ error: z.enum(API_ERRORS), message: z.string().optional() });
@@ -103,7 +105,12 @@ export class HttpCompanyApi implements CompanyApi {
   decide(applicationId: string, decision: "hire" | "reject") {
     return call(`/api/applications/${encodeURIComponent(applicationId)}/${decision}`, "POST", {}, Anything);
   }
+  enterOffice() {
+    return call(`${COMPANY_PATH}/office`, "POST", {}, OfficeSchema);
+  }
 }
+
+const OfficeSchema = z.object({ code: z.string().min(1) });
 
 function companies(outcome: CompanyOutcome<z.output<typeof CompanyListSchema>>): CompanyOutcome<readonly CompanySummary[]> {
   return outcome.ok ? { ok: true, value: outcome.value.companies } : outcome;

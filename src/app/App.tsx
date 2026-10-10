@@ -42,6 +42,7 @@ export function App({ shareUrl, proSale, adminApi, companyApi, tasks, ...service
   const game = useShiftGame(services);
   useClaimGrants(useContext(AccountContext)?.pendingGrants, game.progress.wallet, game.claimGrant);
   const room = useRoom({ url: roomUrl() });
+  const username = useContext(AccountContext)?.account?.username ?? null;
   const role = game.progress.role ?? "infrastructure";
   const isInRoom = room.room !== null && room.status !== "left" && room.status !== "failed";
   // Solo infra rotates through the pure infra outages; other roles and every team room get the cross-team meltdown.
@@ -115,6 +116,7 @@ export function App({ shareUrl, proSale, adminApi, companyApi, tasks, ...service
             walletCents: game.progress.wallet.balanceCents,
             fundCompany: game.fundCompany,
             claimPayout: game.claimPayout,
+            enterOffice: (code) => room.join(code, { name: username ?? "", role, badge }),
           }}
           fetchLeaderboard={fetchLeaderboard}
           rooms={{

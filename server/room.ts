@@ -8,6 +8,7 @@ import {
   type Position,
   type Resume,
   type ServerMessage,
+  type Signal,
 } from "../src/multiplayer/protocol.ts";
 import { advance, debrief, declareResolved, openIncident, type Incident } from "../src/warroom/incident.ts";
 import type { CommsMessage, Scenario } from "../src/warroom/scenario.ts";
@@ -50,6 +51,8 @@ type Seat = {
   readonly name: string;
   readonly role: Role;
   readonly badge: string | null;
+  /** Null until the client says it can do voice; only then is it sent handshakes. */
+  voice: { isMicOn: boolean } | null;
   position: Position | null;
   /** Null while the player is disconnected and the seat is held for them. */
   connection: Connection | null;
@@ -194,6 +197,22 @@ export class Room {
     this.logger("info", "incident_declared", { room: this.code, player: playerId, t: incident.cluster.t });
   }
 
+  /** A client that can do voice says so, and whether its mic is open; teammates see it in the player list. */
+  voice(playerId: string, isMicOn: boolean) {
+    const seat = this.seats.get(playerId);
+    if (!seat || seat.voice?.isMicOn === isMicOn) return;
+    seat.voice = { isMicOn };
+    this.broadcast({ type: "players", players: this.players() });
+  }
+
+  /** Passes one voice handshake step to a teammate in this room who can read it; anything else is dropped. */
+  signal(playerId: string, to: string, signal: Signal) {
+    const from = this.seats.get(playerId);
+    const target = this.seats.get(to);
+    if (!from?.voice || !target?.voice || target === from) return;
+    this.send(target, { type: "signal", from: playerId, signal });
+  }
+
   chat(playerId: string, text: string) {
     const seat = this.seats.get(playerId);
     if (seat) this.post(chatComms(seat.name, seat.role, text, this.incident.cluster.t));
@@ -251,6 +270,7 @@ export class Room {
       name: request.name,
       role: request.role,
       badge: request.badge,
+      voice: null,
       position: null,
       connection,
       history: [],
@@ -279,6 +299,7 @@ export class Room {
       position: seat.position,
       isConnected: seat.connection !== null,
       badge: seat.badge,
+      voice: seat.voice,
     }));
   }
 

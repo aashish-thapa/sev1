@@ -24,6 +24,8 @@ export type SessionOptions = {
   readonly rooms: RoomDirectory;
   readonly findScenario: ScenarioCatalog;
   readonly logger: Logger;
+  /** Milliseconds, for rate limits; injectable so tests can move time. */
+  readonly now?: () => number;
 };
 
 /** What a transport hands the session: each text frame, and the socket going away. */
@@ -35,10 +37,11 @@ export type Session = {
 type Seated = { readonly room: Room; readonly playerId: string };
 
 /** One socket's conversation with the rooms: parse every frame, route it to the player's room, release the seat on close. */
-export function openSession({ connection, rooms, findScenario, logger }: SessionOptions): Session {
+export function openSession({ connection, rooms, findScenario, logger, now = Date.now }: SessionOptions): Session {
   const reply = (message: ServerMessage) => connection.send(encodeServerMessage(message));
   const fail = (code: ErrorCode, message: string) => reply({ type: "error", code, message });
   let seated: Seated | null = null;
+  const signals = signalBudget(now);
 
   const enter = (room: Room, request: JoinRequest) => {
     const outcome = room.join(request, connection);
@@ -83,6 +86,12 @@ export function openSession({ connection, rooms, findScenario, logger }: Session
         return inRoom((room, playerId) => room.declare(playerId));
       case "chat":
         return inRoom((room, playerId) => room.chat(playerId, message.text));
+      case "voice":
+        return inRoom((room, playerId) => room.voice(playerId, message.isMicOn));
+      case "signal":
+        // A handshake runs a few dozen messages; past the budget they're dropped, not answered.
+        if (!signals.take()) return logger("warn", "signal_rate_limited", { room: seated?.room.code ?? null });
+        return inRoom((room, playerId) => room.signal(playerId, message.to, message.signal));
     }
   };
 
@@ -109,6 +118,26 @@ export function openSession({ connection, rooms, findScenario, logger }: Session
     end() {
       if (seated) seated.room.detach(seated.playerId, connection);
       seated = null;
+    },
+  };
+}
+
+/** Voice handshake messages one socket may send per window: generous for a five-way call, short of a flood. */
+const SIGNALS_PER_WINDOW = 120;
+const SIGNAL_WINDOW_MS = 10_000;
+
+function signalBudget(now: () => number) {
+  let windowStart = now();
+  let used = 0;
+  return {
+    take(): boolean {
+      const at = now();
+      if (at - windowStart >= SIGNAL_WINDOW_MS) {
+        windowStart = at;
+        used = 0;
+      }
+      used += 1;
+      return used <= SIGNALS_PER_WINDOW;
     },
   };
 }

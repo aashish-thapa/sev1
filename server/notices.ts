@@ -30,7 +30,7 @@ export function declaredComms(name: string, at: number): CommsMessage {
 }
 
 export function chatComms(name: string, role: Role, text: string, at: number): CommsMessage {
-  return { at, from: `${name} · ${role}`, text };
+  return { at, from: `${name} · ${role}`, text, kind: "chat" };
 }
 
 export function joinedComms(name: string, role: Role, badge: string | null, at: number): CommsMessage {

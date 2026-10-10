@@ -10,6 +10,7 @@ import {
   type Resume,
   type RoomVisibility,
   type ServerMessage,
+  type Signal,
   type ServerMessageOf,
   ROOM_CODE_QUERY,
 } from "./protocol.ts";
@@ -45,6 +46,7 @@ export type RoomEvents = {
   readonly comms: ServerMessageOf<"comms">;
   readonly error: ServerMessageOf<"error">;
   readonly closed: ServerMessageOf<"closed">;
+  readonly signal: ServerMessageOf<"signal">;
 };
 
 export type RoomClientOptions = {
@@ -92,7 +94,10 @@ export class RoomClient {
     comms: new Set(),
     error: new Set(),
     closed: new Set(),
+    signal: new Set(),
   };
+  /** Null until voice starts; resent on every new seat, since the server forgets it with the old one. */
+  private voiceHeld: boolean | null = null;
   private socket: SocketLike | null = null;
   private intent: Intent | null = null;
   private seatHeld: Seat | null = null;
@@ -153,6 +158,17 @@ export class RoomClient {
 
   chat(text: string) {
     this.send({ type: "chat", text });
+  }
+
+  /** Joins the room's voice calls and says whether the mic is open. */
+  voice(isMicOn: boolean) {
+    this.voiceHeld = isMicOn;
+    this.send({ type: "voice", isMicOn });
+  }
+
+  /** A voice handshake step for one teammate. Dropped while disconnected: a stale handshake is worse than none. */
+  signal(to: string, signal: Signal) {
+    if (this.statusHeld === "joined" && this.socket?.readyState === OPEN) this.transmit({ type: "signal", to, signal });
   }
 
   /** Throttled: call it every frame if convenient. */
@@ -239,6 +255,7 @@ export class RoomClient {
         this.startKeepalive();
         this.emit("welcome", message);
         this.flushOutbox();
+        if (this.voiceHeld !== null) this.transmit({ type: "voice", isMicOn: this.voiceHeld });
         return;
       case "state":
         return this.applyState(message);

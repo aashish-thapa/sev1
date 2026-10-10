@@ -55,7 +55,8 @@ describe("protocol parsing", () => {
   });
 
   it("measures the size limit in UTF-8 bytes, not characters", () => {
-    const raw = JSON.stringify({ type: "command", line: "€".repeat(700) });
+    // "€" is three bytes in UTF-8: a third of the limit in characters is over it in bytes.
+    const raw = JSON.stringify({ type: "command", line: "€".repeat(Math.ceil(MAX_INBOUND_BYTES / 3) + 10) });
     expect(raw.length).toBeLessThan(MAX_INBOUND_BYTES);
     expect(parseClientMessage(raw)).toMatchObject({ ok: false, code: "too_large" });
   });
@@ -164,6 +165,11 @@ class Probe {
     this.socket.send(raw);
   }
 
+  /** How many messages of `type` arrived and haven't been consumed by `next`. */
+  count(type: ServerMessageType) {
+    return this.received.filter((message) => message.type === type).length;
+  }
+
   /** Resolves with the first message (received so far or later) of `type` that passes `matches`, consuming it. */
   next<Type extends ServerMessageType>(type: Type, matches: (message: ServerMessageOf<Type>) => boolean = () => true) {
     return new Promise<ServerMessageOf<Type>>((resolve, reject) => {
@@ -248,6 +254,33 @@ describe("war room server", () => {
     ]);
     host.close();
     await expect.poll(publicRooms, { timeout: WAIT_MS, interval: 10 }).toEqual([]);
+  });
+
+  it("relays voice handshakes only to teammates who can do voice, and only so many", async () => {
+    await boot();
+    const { host, welcome } = await createRoom();
+    const join = async (name: string) => {
+      const engineer = await probe();
+      engineer.send({ type: "join", roomCode: welcome.roomCode, name, role: "frontend" });
+      return { engineer, id: (await engineer.next("welcome")).playerId };
+    };
+    const guest = await join("Sam");
+    const silent = await join("Lee");
+    host.send({ type: "voice", isMicOn: false });
+    guest.engineer.send({ type: "voice", isMicOn: true });
+    await host.next("players", (message) => message.players.some((player) => player.name === "Sam" && player.voice?.isMicOn === true));
+
+    const offer = { kind: "description", description: { type: "offer", sdp: "v=0" } } as const;
+    host.send({ type: "signal", to: guest.id, signal: offer });
+    host.send({ type: "signal", to: silent.id, signal: offer });
+    expect((await guest.engineer.next("signal")).from).toBe(welcome.playerId);
+
+    // 2 sent so far; a flood of 200 more gets 118 through before the 120-per-window budget runs out.
+    for (let index = 0; index < 200; index += 1) host.send({ type: "signal", to: guest.id, signal: offer });
+    await expect.poll(() => guest.engineer.count("signal"), { timeout: WAIT_MS, interval: 10 }).toBe(118);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(guest.engineer.count("signal")).toBe(118);
+    expect(silent.engineer.count("signal")).toBe(0);
   });
 
   it("shares one incident: a command from one engineer changes what both see", async () => {

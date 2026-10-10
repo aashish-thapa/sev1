@@ -16,7 +16,8 @@ export const MAX_PLAYERS_PER_ROOM = 5;
  */
 export const ROOM_CODE_QUERY = "room";
 /** Larger inbound frames get an error reply; the socket's hard `maxPayload` sits above this. */
-export const MAX_INBOUND_BYTES = 2048;
+/** Sized for a voice handshake (an audio-only SDP offer runs 1.5–3 KB); every field below is bounded on its own. */
+export const MAX_INBOUND_BYTES = 8192;
 export const MAX_COMMAND_LENGTH = 500;
 export const MAX_CHAT_LENGTH = 280;
 export const MAX_NAME_LENGTH = 24;
@@ -59,6 +60,26 @@ const OfferedBadgeSchema = z
 /** What clients accept back: any short id, so a client older than the catalog still parses the room. */
 const ShownBadgeSchema = z.string().max(40).nullable().default(null);
 
+/** One step of a voice call's WebRTC handshake, passed between two players by the room. */
+export const SignalSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("description"),
+    description: z.object({ type: z.enum(["offer", "answer", "pranswer", "rollback"]), sdp: z.string().max(6000).optional() }),
+  }),
+  z.object({
+    kind: z.literal("candidate"),
+    candidate: z
+      .object({
+        candidate: z.string().max(512).optional(),
+        sdpMid: z.string().max(32).nullable().optional(),
+        sdpMLineIndex: z.int().min(0).max(16).nullable().optional(),
+        usernameFragment: z.string().max(64).nullable().optional(),
+      })
+      .nullable(),
+  }),
+]);
+export type Signal = z.output<typeof SignalSchema>;
+
 /** Public rooms are listed for anyone to join; private ones only open to people given the code. */
 export const ROOM_VISIBILITIES = ["public", "private"] as const;
 export type RoomVisibility = (typeof ROOM_VISIBILITIES)[number];
@@ -86,6 +107,9 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("command"), line: z.string().max(MAX_COMMAND_LENGTH) }),
   z.strictObject({ type: z.literal("declare") }),
   z.strictObject({ type: z.literal("chat"), text: z.string().trim().min(1).max(MAX_CHAT_LENGTH) }),
+  /** Sent by a client that can do voice: it joins the room's calls, and says whether its mic is open. */
+  z.strictObject({ type: z.literal("voice"), isMicOn: z.boolean() }),
+  z.strictObject({ type: z.literal("signal"), to: PlayerIdSchema, signal: SignalSchema }),
   z.strictObject({ type: z.literal("leave") }),
   z.strictObject({ type: z.literal("ping"), nonce: z.int().nonnegative().optional() }),
 ]);
@@ -115,10 +139,12 @@ const PlayerSchema = z.object({
   /** False while a dropped player's seat is held for them to reconnect. */
   isConnected: z.boolean(),
   badge: ShownBadgeSchema,
+  /** Null for a client without voice; it's never sent a handshake it couldn't read. */
+  voice: z.object({ isMicOn: z.boolean() }).nullable().default(null),
 });
 export type Player = z.infer<typeof PlayerSchema>;
 
-const CommsMessageSchema = z.object({ at: z.number(), from: z.string(), text: z.string() }) satisfies z.ZodType<CommsMessage>;
+const CommsMessageSchema = z.object({ at: z.number(), from: z.string(), text: z.string(), kind: z.literal("chat").optional() }) satisfies z.ZodType<CommsMessage>;
 
 const OutputLineSchema = z.object({ text: z.string(), tone: z.enum(["out", "err", "dim"]) }) satisfies z.ZodType<OutputLine>;
 
@@ -169,6 +195,7 @@ export const ServerMessageSchema = z.discriminatedUnion("type", [
     didChangeCluster: z.boolean(),
   }),
   z.object({ type: z.literal("comms"), message: CommsMessageSchema }),
+  z.object({ type: z.literal("signal"), from: PlayerIdSchema, signal: SignalSchema }),
   z.object({ type: z.literal("error"), code: z.enum(ERROR_CODES), message: z.string() }),
   z.object({
     type: z.literal("closed"),

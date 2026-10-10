@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useVoice, type VoiceRoom } from "../../multiplayer/voice/useVoice.ts";
 import type { Role } from "../../domain/incident.ts";
 import { ROLE_INFO } from "../../domain/roles.ts";
 import type { useRoom } from "../../multiplayer/useRoom.ts";
@@ -9,6 +10,8 @@ import { completeLine } from "../shell/shell.ts";
 import { laptopBanner } from "./laptop-identity.ts";
 import type { IncidentFeed } from "./feed.ts";
 import { LiveIncident, type TeamContext } from "./LiveIncident.tsx";
+import { TeamChat } from "./TeamChat.tsx";
+import { VoiceControls } from "./VoiceControls.tsx";
 
 type Props = {
   room: ReturnType<typeof useRoom>;
@@ -40,6 +43,18 @@ export function TeamIncident({ room, scenario, role, overlay, onUseScreen, onClo
     };
   }, [me, room.activity, room.players, room.room, room.sendPresence]);
 
+  const voiceRoom: VoiceRoom | null = room.room
+    ? {
+        selfId: room.room.playerId,
+        // Only teammates whose client can do voice get a call; the rest never see a handshake.
+        peerIds: room.players.filter((player) => player.isConnected && player.voice !== null && player.id !== me).map((player) => player.id),
+        sendSignal: room.sendSignal,
+        onSignal: room.onSignal,
+        announceMic: room.announceMic,
+      }
+    : null;
+  const voice = useVoice(voiceRoom);
+
   if (!room.incident || !team) {
     return (
       <main className="paged">
@@ -63,18 +78,28 @@ export function TeamIncident({ room, scenario, role, overlay, onUseScreen, onClo
     complete: (line) => completeLine(line, { cluster: incident.cluster, scenario, history: room.history, role }),
   };
 
+  const members = room.players
+    .filter((player) => player.isConnected)
+    .map((player) => ({ id: player.id, name: player.name, isMicOn: player.voice?.isMicOn ?? false }));
+
   return (
-    <LiveIncident
-      scenario={scenario}
-      role={role}
-      isPaged
-      onPage={() => {}}
-      onClosed={onClosed}
-      onLeave={onLeave}
-      onUseScreen={onUseScreen}
-      overlay={overlay}
-      feed={feed}
-      team={team}
-    />
+    <>
+      <LiveIncident
+        scenario={scenario}
+        role={role}
+        isPaged
+        onPage={() => {}}
+        onClosed={onClosed}
+        onLeave={onLeave}
+        onUseScreen={onUseScreen}
+        overlay={overlay}
+        feed={feed}
+        team={team}
+      />
+      <aside className="team-panel" aria-label="Your team">
+        <VoiceControls voice={voice} selfId={team.selfId} members={members} />
+        <TeamChat comms={room.comms} onSend={room.chat} />
+      </aside>
+    </>
   );
 }

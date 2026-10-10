@@ -5,6 +5,8 @@ export type CommsMessage = {
   readonly at: number;
   readonly from: string;
   readonly text: string;
+  /** Set on lines a teammate typed, so a room can list its chat apart from the incident's traffic. */
+  readonly kind?: "chat";
 };
 
 export type Postmortem = {

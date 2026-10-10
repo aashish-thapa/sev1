@@ -5,7 +5,7 @@ import type { CommsMessage } from "../warroom/scenario.ts";
 import { promptFor } from "../warroom/shell/prompt.ts";
 import type { TerminalLine } from "../warroom/ui/useIncident.ts";
 import { RoomClient, seatOf, type Engineer, type RoomEvents, type RoomStatus, type Seat, type SocketConstructor } from "./client.ts";
-import type { Player, Position, Resume, RoomVisibility, ServerMessageOf } from "./protocol.ts";
+import type { Player, Position, Resume, RoomVisibility, ServerMessageOf, Signal } from "./protocol.ts";
 
 export type RoomInfo = {
   readonly code: string;
@@ -47,7 +47,9 @@ const INITIAL_VIEW: RoomView = {
   error: null,
 };
 
-type Event = { [Type in keyof RoomEvents]: { readonly type: Type; readonly event: RoomEvents[Type] } }[keyof RoomEvents];
+/** Events that change what the room shows; voice signals bypass state and go straight to their listener. */
+type StateEvent = Exclude<keyof RoomEvents, "signal">;
+type Event = { [Type in StateEvent]: { readonly type: Type; readonly event: RoomEvents[Type] } }[StateEvent];
 
 /** A multiplayer war room as React state. `url` is read once; pass `WebSocket` only to substitute the browser's. */
 export function useRoom(options: { url: string; WebSocket?: SocketConstructor }) {
@@ -56,7 +58,7 @@ export function useRoom(options: { url: string; WebSocket?: SocketConstructor })
   const [view, dispatch] = useReducer(reduce, INITIAL_VIEW);
 
   useEffect(() => {
-    const forward = <Type extends keyof RoomEvents>(type: Type) =>
+    const forward = <Type extends StateEvent>(type: Type) =>
       client.on(type, (event) => dispatch({ type, event } as Event));
     const unsubscribe = [
       forward("status"),
@@ -89,8 +91,14 @@ export function useRoom(options: { url: string; WebSocket?: SocketConstructor })
   const declare = useCallback(() => client.declare(), [client]);
   const chat = useCallback((text: string) => client.chat(text), [client]);
   const sendPresence = useCallback((position: Position) => client.presence(position), [client]);
+  const sendSignal = useCallback((to: string, signal: Signal) => client.signal(to, signal), [client]);
+  const onSignal = useCallback(
+    (listener: (from: string, signal: Signal) => void) => client.on("signal", (message) => listener(message.from, message.signal)),
+    [client],
+  );
+  const announceMic = useCallback((isMicOn: boolean) => client.voice(isMicOn), [client]);
 
-  return { ...view, create, join, leave, run, declare, chat, sendPresence };
+  return { ...view, create, join, leave, run, declare, chat, sendPresence, sendSignal, onSignal, announceMic };
 }
 
 function reduce(view: RoomView, { type, event }: Event): RoomView {

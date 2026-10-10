@@ -4,6 +4,7 @@ import { advance, alertRate, debrief, declareResolved, openIncident, type Incide
 import type { Scenario } from "./scenario.ts";
 import { checkoutCluster } from "./scenarios/checkout-cluster.ts";
 import { checkoutCommerce, iosUserAgent, NO_RETRY } from "./scenarios/checkout-commerce.ts";
+import { androidStagedRollout500s } from "./scenarios/android-staged-rollout-500s.ts";
 import { iosRetryConfig } from "./scenarios/ios-retry-config.ts";
 import { scaledToZero } from "./scenarios/scaled-to-zero.ts";
 import { runLine } from "./shell/shell.ts";
@@ -13,7 +14,7 @@ import { isOlderThan, updateWall } from "./sim/update-wall.ts";
 
 const MIN_VERSION = "min_supported_version";
 /** The mobile ladder, easiest first. */
-const LADDER: readonly Scenario[] = [iosRetryConfig];
+const LADDER: readonly Scenario[] = [iosRetryConfig, androidStagedRollout500s];
 /** As solutions.test.ts plays a worked answer: the first move 20 s after the page, a command every 8 s, then 180 s to settle. */
 const FIRST_MOVE_AT = 20;
 const THINKING_SECONDS = 8;
@@ -216,5 +217,48 @@ describe("ios-retry-config: the iOS retry storm", () => {
     expect(findPlatform(commerceOf(settled), "ios")?.adoption).toBe(findPlatform(commerceOf(opened), "ios")?.adoption);
     expect(refused?.kind).toBe("refused");
     expect(text(scenario, "releases rollback ios 7.3.0", settled)).toContain("no rollback");
+  });
+});
+
+describe("android-staged-rollout-500s: a growing staged rollout behind a remote-config switch", () => {
+  const scenario = androidStagedRollout500s;
+  const V2_OFF = "remote-config set android_checkout_v2_enabled false";
+  const HALT = "releases halt android 7.3.0";
+
+  it("fails most of Android 7.3.0's checkouts and no other build's", () => {
+    const status = text(scenario, "releases status", openIncident(scenario));
+    expect(status).toMatch(/android\s+7\.3\.0\s.*80\.0%/);
+    expect(status).toMatch(/android\s+7\.2\.4\s.*\s0\.0%/);
+    expect(status).toMatch(/ios\s+7\.3\.0\s.*\s0\.0%/);
+  });
+
+  it("gets worse as the rollout reaches more phones", () => {
+    const opened = openIncident(scenario);
+    const tenMinutes = playTo(scenario, opened, 600);
+    expect(tenMinutes.cluster.errorRate).toBeGreaterThan(opened.cluster.errorRate * 1.5);
+    expect(findPlatform(commerceOf(tenMinutes), "android")?.adoption).toBeGreaterThan(0.6);
+  });
+
+  it("halting alone stops the growth but leaves errors flat above the resolve gate", () => {
+    const { settled, refused } = tryFix(scenario, HALT);
+    const halted = playTo(scenario, settled, 600);
+    expect(halted.cluster.errorRate).toBeGreaterThan(0.03);
+    expect(halted.cluster.errorRate).toBeCloseTo(settled.cluster.errorRate, 6);
+    expect(refused?.kind).toBe("refused");
+  });
+
+  it("halting the healthy iOS release changes nothing", () => {
+    const { settled, refused } = tryFix(scenario, "releases halt ios 7.3.0");
+    expect(settled.cluster.errorRate).toBeGreaterThan(openIncident(scenario).cluster.errorRate);
+    expect(refused?.kind).toBe("refused");
+  });
+
+  it("the remote-config fix without the halt closes, but misses the halt objective and scores lower", () => {
+    const { refused, closed } = tryFix(scenario, V2_OFF);
+    expect(refused).toBeUndefined();
+    const withoutHalt = debrief(closed, scenario, true);
+    expect(withoutHalt.isRootCauseFixed).toBe(true);
+    expect(withoutHalt.objectives?.find((objective) => objective.role === "mobile")?.isMet).toBe(false);
+    expect(withoutHalt.points).toBeLessThan(debrief(tryFix(scenario, V2_OFF, HALT).closed, scenario, true).points);
   });
 });

@@ -48,11 +48,16 @@ export type PolicySource =
 
 export type PlatformId = "web" | "ios" | "android";
 
-/** When a build's defect fires: always, while a flag is on (or off), or while a remote-config key holds one value. */
+/**
+ * When a build's defect fires: always, while a flag is on (or off), while a remote-config key holds one
+ * value, while a comma-separated remote-config list lacks one entry, or only while every trigger in `all` holds.
+ */
 export type DefectTrigger =
   | "always"
   | { readonly flag: string; readonly failsWhenOn: boolean }
-  | { readonly remoteConfig: string; readonly failsWhen: string };
+  | { readonly remoteConfig: string; readonly failsWhen: string }
+  | { readonly remoteConfig: string; readonly failsWithout: string }
+  | { readonly all: readonly DefectTrigger[] };
 
 /** A bug shipped in a client build that fails some of its checkouts. */
 export type ClientDefect = {

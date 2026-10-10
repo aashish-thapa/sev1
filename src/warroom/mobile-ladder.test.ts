@@ -4,12 +4,12 @@ import { advance, alertRate, debrief, declareResolved, openIncident, type Incide
 import type { Scenario } from "./scenario.ts";
 import { androidStagedRollout500s } from "./scenarios/android-staged-rollout-500s.ts";
 import { checkoutCluster } from "./scenarios/checkout-cluster.ts";
-import { checkoutCommerce, iosUserAgent, NO_RETRY } from "./scenarios/checkout-commerce.ts";
+import { checkoutCommerce, iosUserAgent, NO_RETRY, SHOP_REMOTE_CONFIG } from "./scenarios/checkout-commerce.ts";
 import { forcedUpdateWall } from "./scenarios/forced-update-wall.ts";
 import { iosRetryConfig } from "./scenarios/ios-retry-config.ts";
 import { scaledToZero } from "./scenarios/scaled-to-zero.ts";
 import { runLine } from "./shell/shell.ts";
-import { clientSegments, unsafeRetryShare } from "./sim/clients.ts";
+import { clientSegments, triggerShare, unsafeRetryShare } from "./sim/clients.ts";
 import { customerLossRate } from "./sim/commerce-step.ts";
 import { findPlatform, type Commerce, type RemoteConfigEntry } from "./sim/commerce.ts";
 import { isOlderThan, updateWall } from "./sim/update-wall.ts";
@@ -125,6 +125,35 @@ describe("the update wall", () => {
     expect(walled(lowered, 30)["ios@7.3.0"]).toBe(0.75);
     expect(walled(lowered, 120)["ios@7.3.0"]).toBe(0);
     expect(walled(publish(walledShop, MIN_VERSION, "7.3.1 please", 0), 120)["ios@7.3.0"]).toBe(0);
+  });
+});
+
+describe("defect triggers on remote-config lists and combined conditions", () => {
+  const PINS = "api_pin_set";
+  const MODE = "api_pinning_mode";
+  const shop = checkoutCommerce({
+    remoteConfig: [
+      { key: PINS, description: "", readBy: "", allowed: null, baseVersion: 1, history: [{ at: -3600, by: "test", from: "", to: "sha256/old=", note: "" }] },
+      { key: MODE, description: "", readBy: "", allowed: ["enforce", "report-only"], baseVersion: 1, history: [{ at: -3600, by: "test", from: "report-only", to: "enforce", note: "" }] },
+      ...SHOP_REMOTE_CONFIG,
+    ],
+  });
+  const pinMissing = { remoteConfig: PINS, failsWithout: "sha256/new=" } as const;
+  const enforced = { remoteConfig: MODE, failsWhen: "enforce" } as const;
+
+  it("fires while the list lacks the entry, whatever else it holds", () => {
+    expect(triggerShare(pinMissing, shop, 0)).toBe(1);
+    expect(triggerShare(pinMissing, publish(shop, PINS, "sha256/typo=", 0), 120)).toBe(1);
+    expect(triggerShare(pinMissing, publish(shop, PINS, "sha256/old=, sha256/new=", 0), 60)).toBe(0.5);
+    expect(triggerShare(pinMissing, publish(shop, PINS, "sha256/old=,sha256/new=", 0), 120)).toBe(0);
+  });
+
+  it("fires only while every part holds", () => {
+    const both = { all: [pinMissing, enforced] };
+    expect(triggerShare(both, shop, 0)).toBe(1);
+    expect(triggerShare(both, publish(shop, MODE, "report-only", 0), 90)).toBe(0.25);
+    expect(triggerShare(both, publish(shop, MODE, "report-only", 0), 120)).toBe(0);
+    expect(triggerShare({ all: [] }, shop, 0)).toBe(1);
   });
 });
 

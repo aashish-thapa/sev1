@@ -12,7 +12,7 @@ const SECRET = "whsec_test_secret";
 const NOW = Date.UTC(2026, 9, 10, 12);
 const NOW_SECONDS = Math.floor(NOW / 1000);
 const PERIOD_END = NOW_SECONDS + 30 * 24 * 3600;
-const user: User = { id: "user-1", username: "maya", passwordHash: "x", createdAt: NOW };
+const user: User = { id: "user-1", username: "maya", passwordHash: "x", createdAt: NOW, tags: [] };
 
 class MemoryEntitlementStore implements EntitlementStore {
   readonly rows = new Map<string, { customerId: string | null; proUntil: number | null; eventAt: number; status: string | null }>();

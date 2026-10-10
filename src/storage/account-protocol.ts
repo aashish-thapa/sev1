@@ -5,7 +5,8 @@ import { ProgressSchema } from "../domain/progress.ts";
 export const API_ERRORS = ["invalid", "username_taken", "bad_credentials", "rate_limited", "signed_out", "rejected", "forbidden", "not_found", "billing_unavailable", "no_subscription", "already_subscribed", "payment_provider"] as const;
 export type ApiError = (typeof API_ERRORS)[number];
 
-export const AccountSchema = z.object({ username: z.string() });
+/** `tags` are granted marks such as "creator"; older servers omit them. */
+export const AccountSchema = z.object({ username: z.string(), tags: z.array(z.string()).default([]) });
 export type Account = z.output<typeof AccountSchema>;
 
 export const SyncedProgressSchema = z.object({ progress: ProgressSchema, updatedAt: z.int().nonnegative() });

@@ -50,7 +50,7 @@ class MemoryAccountStore implements AccountStore {
     const usernames = new Map([...this.users.values()].map((user) => [user.id, user.username]));
     return [...this.standings.entries()]
       .sort(([, a], [, b]) => b.experience - a.experience || a.updatedAt - b.updatedAt)
-      .map(([userId, standing]) => ({ userId, username: usernames.get(userId) ?? "", experience: standing.experience, title: standing.title, featuredBadge: standing.featuredBadge }));
+      .map(([userId, standing]) => ({ userId, username: usernames.get(userId) ?? "", tags: [] as readonly string[], experience: standing.experience, title: standing.title, featuredBadge: standing.featuredBadge }));
   }
   async topAccounts(limit: number) {
     return this.ranked().slice(0, limit).map(({ userId: _userId, ...account }) => account);

@@ -34,6 +34,11 @@ export type SaveResult = { readonly ok: true; readonly updatedAt: number } | { r
 
 type Clock = () => number;
 
+/** What the client may know about an account. */
+export function accountOf(user: User): Account {
+  return { username: user.username, tags: [...user.tags] };
+}
+
 /** What the leaderboard publishes for a save: only a badge the player has actually earned is shown. */
 function standingOf(progress: Progress): Standing {
   const career = careerLevel(progress);
@@ -56,7 +61,7 @@ export class AccountService {
   /** Creates the account and, when it's plausible, keeps the progress earned before signing up. */
   async signUp(username: string, password: string, anonymous: Progress | null, address: string): Promise<AuthResult> {
     if (await this.isOverLimit(`signup:${address}`, SIGNUPS_PER_ADDRESS)) return { ok: false, failure: "rate_limited" };
-    const user: User = { id: crypto.randomUUID(), username, passwordHash: await hashPassword(password), createdAt: this.now() };
+    const user: User = { id: crypto.randomUUID(), username, passwordHash: await hashPassword(password), createdAt: this.now(), tags: [] };
     if (!(await this.store.createUser(user))) return { ok: false, failure: "username_taken" };
 
     let progress: SyncedProgress | null = null;
@@ -64,7 +69,7 @@ export class AccountService {
       progress = { progress: anonymous, updatedAt: this.now() };
       await this.store.saveProgress(user.id, { body: JSON.stringify(anonymous), updatedAt: progress.updatedAt }, standingOf(anonymous), this.creditsSince(emptyProgress(), anonymous));
     }
-    return { ok: true, value: { account: { username }, token: await this.startSession(user), progress } };
+    return { ok: true, value: { account: accountOf(user), token: await this.startSession(user), progress } };
   }
 
   async signIn(username: string, password: string, address: string): Promise<AuthResult> {
@@ -79,7 +84,7 @@ export class AccountService {
       return { ok: false, failure: "bad_credentials" };
     }
     if (!(await verifyPassword(password, user.passwordHash))) return { ok: false, failure: "bad_credentials" };
-    return { ok: true, value: { account: { username: user.username }, token: await this.startSession(user), progress: await this.progressOf(user) } };
+    return { ok: true, value: { account: accountOf(user), token: await this.startSession(user), progress: await this.progressOf(user) } };
   }
 
   async signOut(token: string): Promise<void> {
@@ -121,7 +126,7 @@ export class AccountService {
   /** The top accounts by experience, and where the caller stands if signed in with saved progress. */
   async leaderboard(user: User | null): Promise<Leaderboard> {
     const top = await this.store.topAccounts(LEADERBOARD_SIZE);
-    const entries = top.map((account, index) => ({ rank: index + 1, ...account }));
+    const entries = top.map((account, index) => ({ rank: index + 1, ...account, tags: [...account.tags] }));
     return { entries, me: user ? await this.store.rankOf(user.id) : null };
   }
 

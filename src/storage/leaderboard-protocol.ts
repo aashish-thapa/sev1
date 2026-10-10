@@ -13,6 +13,8 @@ export const LeaderboardEntrySchema = z.object({
   experience: z.int().nonnegative(),
   /** The badge the player chose to show next to their name; a catalog id, or null. */
   featuredBadge: z.string().nullable(),
+  /** Granted tags such as "creator"; older servers send none. */
+  tags: z.array(z.string()).default([]),
 });
 export type LeaderboardEntry = z.output<typeof LeaderboardEntrySchema>;
 

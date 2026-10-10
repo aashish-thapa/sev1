@@ -1,11 +1,12 @@
 /** What the account service needs from storage; D1 in production, memory in tests. */
 import type { Title } from "../../src/domain/career.ts";
 
-export type User = { readonly id: string; readonly username: string; readonly passwordHash: string; readonly createdAt: number };
+/** `tags` are granted marks (e.g. "creator"), written only by operators on the server. */
+export type User = { readonly id: string; readonly username: string; readonly passwordHash: string; readonly createdAt: number; readonly tags: readonly string[] };
 export type SavedProgress = { readonly body: string; readonly updatedAt: number };
 /** What the leaderboard shows for an account, derived from its progress at save time. */
 export type Standing = { readonly experience: number; readonly title: Title; readonly featuredBadge: string | null };
-export type RankedAccount = Standing & { readonly username: string };
+export type RankedAccount = Standing & { readonly username: string; readonly tags: readonly string[] };
 /** One credit in the server's books. `sourceRef` identifies what earned it, so the same credit is never booked twice. */
 export type LedgerRow = { readonly id: string; readonly amountCents: number; readonly reason: string; readonly sourceRef: string; readonly createdAt: number };
 

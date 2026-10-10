@@ -1,9 +1,11 @@
+import { z } from "zod";
 import { DurableObject } from "cloudflare:workers";
 import { encodeServerMessage, ROOM_CODE_QUERY } from "../src/multiplayer/protocol.ts";
 import { publicListing, type RoomListing } from "../server/listing.ts";
 import { DEFAULT_ROOM_TIMING, Room, type Connection } from "../server/room.ts";
 import { findScenario } from "../server/scenarios.ts";
 import { openSession, type RoomDirectory } from "../server/session.ts";
+import { IDENTITY_TAGS_HEADER } from "./rooms.ts";
 import { DIRECTORY_NAME } from "./directory-object.ts";
 import type { Env } from "./env.ts";
 import { workerLogger } from "./log.ts";
@@ -43,7 +45,7 @@ export class RoomObject extends DurableObject<Env> {
       },
       close: (closeCode, reason) => socket.close(closeCode, reason),
     };
-    const session = openSession({ connection, rooms: this.directory(code), findScenario, logger: workerLogger });
+    const session = openSession({ connection, rooms: this.directory(code), findScenario, logger: workerLogger, identity: { tags: tagsOf(request) } });
     const bytes = new TextEncoder();
     socket.addEventListener("message", (event) => {
       if (typeof event.data !== "string") {
@@ -98,5 +100,17 @@ export class RoomObject extends DurableObject<Env> {
     this.listing = null;
     this.claimedCode = null;
     this.expiry = null;
+  }
+}
+
+const TagsSchema = z.array(z.string().min(1).max(40)).max(8);
+
+/** The worker resolved these from the session cookie before forwarding; a missing or bad header means none. */
+function tagsOf(request: Request): readonly string[] {
+  try {
+    const parsed = TagsSchema.safeParse(JSON.parse(request.headers.get(IDENTITY_TAGS_HEADER) ?? "[]"));
+    return parsed.success ? parsed.data : [];
+  } catch {
+    return [];
   }
 }

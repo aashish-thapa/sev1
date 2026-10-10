@@ -1,9 +1,24 @@
+import { z } from "zod";
 import type { Title } from "../../src/domain/career.ts";
 import type { AccountStore, LedgerRow, RankedAccount, SavedProgress, Standing, User } from "./store.ts";
 
-type UserRow = { id: string; username: string; password_hash: string; created_at: number };
+const TagsSchema = z.array(z.string().min(1).max(40)).max(16);
 
-const toUser = (row: UserRow): User => ({ id: row.id, username: row.username, passwordHash: row.password_hash, createdAt: row.created_at });
+type UserRow = { id: string; username: string; password_hash: string; created_at: number; tags: string };
+
+/** Tags are a JSON array in one column; anything unreadable counts as none rather than failing a sign-in. */
+function parseTags(raw: string | null | undefined): string[] {
+  const parsed = TagsSchema.safeParse((() => {
+    try {
+      return JSON.parse(raw ?? "[]");
+    } catch {
+      return [];
+    }
+  })());
+  return parsed.success ? parsed.data : [];
+}
+
+const toUser = (row: UserRow): User => ({ id: row.id, username: row.username, passwordHash: row.password_hash, createdAt: row.created_at, tags: parseTags(row.tags) });
 
 export class D1AccountStore implements AccountStore {
   private readonly db: D1Database;
@@ -13,7 +28,7 @@ export class D1AccountStore implements AccountStore {
   }
 
   async findUser(username: string): Promise<User | null> {
-    const row = await this.db.prepare("SELECT id, username, password_hash, created_at FROM users WHERE username = ?").bind(username).first<UserRow>();
+    const row = await this.db.prepare("SELECT id, username, password_hash, created_at, tags FROM users WHERE username = ?").bind(username).first<UserRow>();
     return row ? toUser(row) : null;
   }
 
@@ -32,7 +47,7 @@ export class D1AccountStore implements AccountStore {
   async findSessionUser(tokenHash: string, now: number): Promise<User | null> {
     const row = await this.db
       .prepare(
-        "SELECT users.id, users.username, users.password_hash, users.created_at FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.token_hash = ? AND sessions.expires_at > ?",
+        "SELECT users.id, users.username, users.password_hash, users.created_at, users.tags FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.token_hash = ? AND sessions.expires_at > ?",
       )
       .bind(tokenHash, now)
       .first<UserRow>();
@@ -68,12 +83,12 @@ export class D1AccountStore implements AccountStore {
   async topAccounts(limit: number): Promise<RankedAccount[]> {
     const { results } = await this.db
       .prepare(
-        "SELECT users.username, progress.experience, progress.title, progress.featured_badge FROM progress JOIN users ON users.id = progress.user_id " +
+        "SELECT users.username, users.tags, progress.experience, progress.title, progress.featured_badge FROM progress JOIN users ON users.id = progress.user_id " +
           "ORDER BY progress.experience DESC, progress.updated_at ASC LIMIT ?",
       )
       .bind(limit)
-      .all<{ username: string; experience: number; title: Title; featured_badge: string | null }>();
-    return results.map((row) => ({ username: row.username, experience: row.experience, title: row.title, featuredBadge: row.featured_badge }));
+      .all<{ username: string; tags: string; experience: number; title: Title; featured_badge: string | null }>();
+    return results.map((row) => ({ username: row.username, tags: parseTags(row.tags), experience: row.experience, title: row.title, featuredBadge: row.featured_badge }));
   }
 
   async rankOf(userId: string): Promise<{ rank: number; experience: number } | null> {

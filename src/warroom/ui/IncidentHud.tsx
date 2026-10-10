@@ -1,5 +1,6 @@
 import type { Incident } from "../incident.ts";
 import { SoundToggle } from "../../ui/SoundToggle.tsx";
+import { useCareer } from "../../app/career-context.ts";
 import { WalletChip } from "../../ui/WalletChip.tsx";
 import { clockAt, type Scenario } from "../scenario.ts";
 
@@ -43,6 +44,7 @@ type Props = {
 };
 
 export function IncidentHud({ incident, scenario, isPaged, onPage, onDeclare, onLeave }: Props) {
+  const career = useCareer();
   const { cluster, phase } = incident;
   const errorPercent = Math.round(cluster.errorRate * 100);
   if (!isPaged) {
@@ -52,7 +54,7 @@ export function IncidentHud({ incident, scenario, isPaged, onPage, onDeclare, on
           <button type="button" className="button button--quiet" onClick={onLeave}>
             Leave
           </button>
-          <p className="hud__title">On call · all quiet</p>
+          <p className="hud__title">{career.title} on call · all quiet</p>
           <dl className="hud__wallet">
             <WalletChip />
           </dl>

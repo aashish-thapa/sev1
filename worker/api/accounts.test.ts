@@ -62,7 +62,7 @@ function setup(start = Date.UTC(2026, 9, 10, 12)) {
   return { store, accounts, advance: (ms: number) => (now += ms), now: () => now };
 }
 
-const salary = (progress: Progress, minutes: number, at: number) => earn(progress, { kind: "salary", ref: payRef.salary(at), minutes }, at);
+const salary = (progress: Progress, minutes: number, at: number) => earn(progress, { kind: "salary", ref: payRef.salary(at), minutes, level: 0 }, at);
 
 describe("passwords", () => {
   it("verifies the right password and rejects others, salting each hash", async () => {

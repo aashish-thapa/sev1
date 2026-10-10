@@ -17,7 +17,7 @@ import { earn, emptyProgress, ProgressSchema } from "./progress.ts";
 const T0 = 1_760_000_000_000;
 let refCounter = 0;
 /** Each call is a distinct earning, as in play; reuse a returned value to model a retry. */
-const salary = () => ({ kind: "salary", ref: `salary:test:${(refCounter += 1)}`, minutes: 1 }) as const;
+const salary = () => ({ kind: "salary", ref: `salary:test:${(refCounter += 1)}`, minutes: 1, level: 2 }) as const;
 const ratedCard = () => ({ kind: "card", ref: `card:test:${(refCounter += 1)}`, difficulty: 2, mode: "rated", title: "Pool exhausted" }) as const;
 const incident = (points: number) => ({ kind: "incident", ref: `incident:test:${(refCounter += 1)}`, points, title: "Checkout meltdown", isTeam: false }) as const;
 
@@ -27,7 +27,7 @@ function payMany(wallet: Wallet, payments: readonly Parameters<typeof pay>[1][])
 
 describe("pay rules", () => {
   it("pays salary per whole active minute", () => {
-    expect(amountOf({ ...salary(), minutes: 3 })).toBe(3 * SALARY_CENTS_PER_MINUTE);
+    expect(amountOf({ ...salary(), minutes: 3 })).toBe(3 * SALARY_CENTS_PER_MINUTE[2]);
     expect(amountOf({ ...salary(), minutes: 0.9 })).toBe(0);
   });
 
@@ -47,7 +47,7 @@ describe("pay rules", () => {
 describe("wallet", () => {
   it("credits the balance, the per-reason totals and the ledger together", () => {
     const wallet = payMany(emptyWallet(), [salary(), ratedCard(), incident(80)]);
-    expect(wallet.balanceCents).toBe(SALARY_CENTS_PER_MINUTE + CARD_BONUS_CENTS[2] + 80 * INCIDENT_CENTS_PER_POINT);
+    expect(wallet.balanceCents).toBe(SALARY_CENTS_PER_MINUTE[2] + CARD_BONUS_CENTS[2] + 80 * INCIDENT_CENTS_PER_POINT);
     expect(wallet.paidUnits).toEqual({ salary: 1, card: 1, incident: 1 });
     expect(wallet.ledger.map((entry) => entry.reason)).toEqual(["salary", "card", "incident"]);
     expect(wallet.ledger.every((entry) => Number.isInteger(entry.amountCents))).toBe(true);
@@ -68,7 +68,7 @@ describe("wallet", () => {
     const wallet = payMany(emptyWallet(), Array.from({ length: LEDGER_LIMIT + 5 }, () => salary()));
     expect(wallet.ledger).toHaveLength(LEDGER_LIMIT);
     expect(wallet.ledger[0].seq).toBe(5);
-    expect(wallet.balanceCents).toBe((LEDGER_LIMIT + 5) * SALARY_CENTS_PER_MINUTE);
+    expect(wallet.balanceCents).toBe((LEDGER_LIMIT + 5) * SALARY_CENTS_PER_MINUTE[2]);
   });
 
   it("lets saves from before the wallet existed parse with an empty one", () => {

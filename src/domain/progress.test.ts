@@ -40,3 +40,22 @@ describe("correctCards", () => {
     expect(isPlausibleProgress(before, { ...before, correctCards: 500 }, 30)).toBe(false);
   });
 });
+
+describe("salary by level", () => {
+  const at = Date.UTC(2026, 9, 10, 12);
+  const minute = (level: 0 | 4) => earn(emptyProgress(), { kind: "salary", ref: payRef.salary(at), minutes: 1, level }, at);
+
+  it("pays an intern less than staff for the same minute", () => {
+    expect(minute(0).wallet.balanceCents).toBeLessThan(minute(4).wallet.balanceCents);
+  });
+
+  it("rejects a staff-rate salary from a player who is still an intern", () => {
+    expect(isPlausibleProgress(emptyProgress(), minute(0), 90)).toBe(true);
+    expect(isPlausibleProgress(emptyProgress(), minute(4), 90)).toBe(false);
+  });
+
+  it("rejects a forged War Room record that would promote without an incident payout", () => {
+    const forged = { ...emptyProgress(), warRoom: { "checkout-pool-leak": { bestPoints: 100, bestGrade: "S" as const, plays: 1 } } };
+    expect(isPlausibleProgress(emptyProgress(), forged, 600)).toBe(false);
+  });
+});

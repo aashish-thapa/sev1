@@ -1,4 +1,4 @@
-import { formatCents, SALARY_CENTS_PER_MINUTE, type LedgerEntry } from "../domain/economy.ts";
+import { formatCents, type LedgerEntry } from "../domain/economy.ts";
 
 type Line = { readonly key: string; readonly label: string; readonly amountCents: number };
 
@@ -7,7 +7,7 @@ function linesOf(entries: readonly LedgerEntry[]): Line[] {
   const salary = entries.filter((entry) => entry.reason === "salary");
   const bonuses = entries.filter((entry) => entry.reason !== "salary").map((entry) => ({ key: String(entry.seq), label: entry.note, amountCents: entry.amountCents }));
   const salaryCents = salary.reduce((sum, entry) => sum + entry.amountCents, 0);
-  const minutes = salaryCents / SALARY_CENTS_PER_MINUTE;
+  const minutes = salary.reduce((sum, entry) => sum + entry.units, 0);
   return salaryCents > 0 ? [{ key: "salary", label: `Salary · ${minutes} active ${minutes === 1 ? "minute" : "minutes"}`, amountCents: salaryCents }, ...bonuses] : bonuses;
 }
 

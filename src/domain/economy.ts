@@ -3,10 +3,15 @@
  * can use to tell an earned wallet from a forged one. All money is integer cents.
  */
 import { z } from "zod";
+import { careerLevel, type Level } from "./career.ts";
 import type { Progress } from "./progress.ts";
 
-/** Paid per minute of active play — roughly a mid-level engineer's $60/h, at real time. */
-export const SALARY_CENTS_PER_MINUTE = 100;
+/**
+ * Paid per minute of active play, by career level, at real time: an intern's $24/h up to staff's
+ * $114/h. Engineer ($60/h) is the middle of the ladder.
+ */
+export const SALARY_CENTS_PER_MINUTE: Readonly<Record<Level, number>> = { 0: 40, 1: 70, 2: 100, 3: 140, 4: 190 };
+const TOP_LEVEL: Level = 4;
 
 /** A correct call at a wall screen, by card difficulty. Today's rated problems pay full. */
 export const CARD_BONUS_CENTS: Readonly<Record<1 | 2 | 3, number>> = { 1: 1_500, 2: 2_500, 3: 4_000 };
@@ -29,7 +34,7 @@ export const LEDGER_LIMIT = 200;
  * re-sends the same ref, never a new one. Build it with `payRef`.
  */
 export type Payment =
-  | { readonly kind: "salary"; readonly ref: string; readonly minutes: number }
+  | { readonly kind: "salary"; readonly ref: string; readonly minutes: number; readonly level: Level }
   | { readonly kind: "card"; readonly ref: string; readonly difficulty: 1 | 2 | 3; readonly mode: "rated" | "practice"; readonly title: string }
   | { readonly kind: "incident"; readonly ref: string; readonly points: number; readonly title: string; readonly isTeam: boolean };
 
@@ -56,6 +61,8 @@ const LedgerEntrySchema = z.object({
   /** Unique per earning; the server deduplicates on it. */
   ref: z.string().min(1).max(160),
   amountCents: z.int().positive(),
+  /** What was paid for: active minutes for salary, one card or incident otherwise. Older entries predate it. */
+  units: z.int().positive().default(1),
   note: z.string().max(120),
 });
 
@@ -84,7 +91,7 @@ export function emptyWallet(): Wallet {
 export function amountOf(payment: Payment): number {
   switch (payment.kind) {
     case "salary":
-      return Math.max(0, Math.floor(payment.minutes)) * SALARY_CENTS_PER_MINUTE;
+      return Math.max(0, Math.floor(payment.minutes)) * SALARY_CENTS_PER_MINUTE[payment.level];
     case "card": {
       const full = CARD_BONUS_CENTS[payment.difficulty];
       return payment.mode === "rated" ? full : Math.round(full * PRACTICE_SHARE);
@@ -114,7 +121,7 @@ export function pay(wallet: Wallet, payment: Payment, at: number): Wallet {
   const amountCents = amountOf(payment);
   if (amountCents === 0 || wallet.ledger.some((entry) => entry.ref === payment.ref)) return wallet;
   const reason = payment.kind;
-  const entry: LedgerEntry = { seq: wallet.nextSeq, at, reason, ref: payment.ref, amountCents, note: noteOf(payment) };
+  const entry: LedgerEntry = { seq: wallet.nextSeq, at, reason, ref: payment.ref, amountCents, units: unitsOf(payment), note: noteOf(payment) };
   return {
     balanceCents: wallet.balanceCents + amountCents,
     earnedCents: { ...wallet.earnedCents, [reason]: wallet.earnedCents[reason] + amountCents },
@@ -134,7 +141,7 @@ const MAX_CARD_CENTS = Math.max(...Object.values(CARD_BONUS_CENTS));
  * Could `next` have been earned from `previous` in `elapsedSeconds` of play? Generous by design —
  * it stops forged wallets, not honest players on a laggy connection.
  */
-export function isPlausibleWallet(previous: Wallet, next: Wallet, elapsedSeconds: number): boolean {
+export function isPlausibleWallet(previous: Wallet, next: Wallet, elapsedSeconds: number, topLevel: Level = TOP_LEVEL): boolean {
   if (!(elapsedSeconds >= 0)) return false;
   const seconds = elapsedSeconds * TIME_SLACK;
   const delta = (reason: PayReason, of: "earnedCents" | "paidUnits") => next[of][reason] - previous[of][reason];
@@ -148,7 +155,9 @@ export function isPlausibleWallet(previous: Wallet, next: Wallet, elapsedSeconds
 
   const minutes = delta("salary", "paidUnits");
   if (minutes > seconds / 60 + 1) return false;
-  if (delta("salary", "earnedCents") !== minutes * SALARY_CENTS_PER_MINUTE) return false;
+  // A promotion can land mid-sync, so any rate from intern up to the level reached is honest.
+  const salary = delta("salary", "earnedCents");
+  if (salary < minutes * SALARY_CENTS_PER_MINUTE[0] || salary > minutes * SALARY_CENTS_PER_MINUTE[topLevel]) return false;
 
   const cards = delta("card", "paidUnits");
   if (cards > seconds / MIN_SECONDS_PER_CARD + EVENT_ALLOWANCE) return false;
@@ -163,10 +172,24 @@ export function isPlausibleWallet(previous: Wallet, next: Wallet, elapsedSeconds
 
 /** The server-side gate for a synced save: is the wallet growth honest? */
 export function isPlausibleProgress(previous: Progress, next: Progress, elapsedSeconds: number): boolean {
-  // Career level reads correctCards, so it may only grow by answers that were also paid for.
+  // Career level reads correctCards and passed War Rooms, so each may only grow by work that was also paid for.
   const newCorrect = next.correctCards - previous.correctCards;
   const newPaidCards = next.wallet.paidUnits.card - previous.wallet.paidUnits.card;
-  return newCorrect >= 0 && newCorrect <= newPaidCards && isPlausibleWallet(previous.wallet, next.wallet, elapsedSeconds);
+  const newPaidIncidents = next.wallet.paidUnits.incident - previous.wallet.paidUnits.incident;
+  return (
+    newCorrect >= 0 &&
+    newCorrect <= newPaidCards &&
+    improvedPassingWarRooms(previous, next) <= newPaidIncidents &&
+    isPlausibleWallet(previous.wallet, next.wallet, elapsedSeconds, careerLevel(next).level)
+  );
+}
+
+/** War Rooms whose best run newly reached a paying score; each needs its own incident payout. */
+function improvedPassingWarRooms(previous: Progress, next: Progress): number {
+  return Object.entries(next.warRoom).filter(([id, record]) => {
+    const before = previous.warRoom[id]?.bestPoints ?? 0;
+    return record.bestPoints >= INCIDENT_MIN_POINTS && record.bestPoints > before;
+  }).length;
 }
 
 /** New ledger lines must account for the balance change exactly — unless the cap pushed some out. */

@@ -7,7 +7,7 @@ import { MemoryProgressStore } from "./progress-store.ts";
 import { SyncingProgressStore, type ChangeClock } from "./syncing-progress-store.ts";
 
 const T0 = Date.UTC(2026, 9, 10, 12);
-const paid = (minutes: number) => earn(emptyProgress(), { kind: "salary", ref: payRef.salary(T0), minutes }, T0);
+const paid = (minutes: number) => earn(emptyProgress(), { kind: "salary", ref: payRef.salary(T0), minutes, level: 0 }, T0);
 
 class FakeApi implements AccountApi {
   saves: Progress[] = [];

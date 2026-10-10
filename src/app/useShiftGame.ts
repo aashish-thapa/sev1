@@ -1,11 +1,12 @@
 import { useCallback, useMemo, useState } from "react";
 import type { IncidentLibrary } from "../content/library.ts";
 import type { LocalDate } from "../domain/calendar.ts";
-import { ROLE_IDS, roleOf, type IncidentCard, type Role } from "../domain/incident.ts";
+import { careerLevel } from "../domain/career.ts";
+import { ROLE_IDS, ROLES, roleOf, type IncidentCard, type Role } from "../domain/incident.ts";
 import { payRef } from "../domain/economy.ts";
 import { chooseRole, earn, hasFinishedShift, recordAttempt, recordWarRoomRun, startShift, type Attempt, type Progress } from "../domain/progress.ts";
 import { overallRating, rateAttempt, STARTING_RATING } from "../domain/rating.ts";
-import { planShift, presentIncident, type PresentedIncident } from "../domain/shift.ts";
+import { planShift, presentIncident, type Pace, type PresentedIncident } from "../domain/shift.ts";
 import type { ProgressStore } from "../storage/progress-store.ts";
 import type { Debrief } from "../warroom/incident.ts";
 
@@ -81,14 +82,14 @@ export function useShiftGame({ library, store, today: clock, now = Date.now }: G
       const isOwnRoom = room === ownRole;
       if (isOwnRoom && !hasFinishedShift(progress, today)) {
         const active = progress.activeShift?.day === today ? progress.activeShift : null;
-        const ids = active?.incidentIds ?? planShift(cardsOf(library, ownRole), today, new Set(progress.seenIds));
+        const ids = active?.incidentIds ?? planShift(cardsOf(library, ownRole), today, new Set(progress.seenIds), undefined, paceOf(progress, ownRole));
         const next = active ? progress : startShift(progress, today, ids);
         commit(next);
         setDiscussion({ stage: "cards", room, paidFromSeq: next.wallet.nextSeq, run: buildRun("rated", today, ids, next.activeShift?.attempts ?? [], next, library) });
         return;
       }
       const pool = room === null ? library.cards : cardsOf(library, room);
-      const ids = planShift(pool, today, new Set(progress.seenIds), practiceRound);
+      const ids = planShift(pool, today, new Set(progress.seenIds), practiceRound, paceOf(progress, room ?? ownRole));
       setPracticeRound((round) => round + 1);
       setDiscussion({ stage: "cards", room, paidFromSeq: progress.wallet.nextSeq, run: buildRun("practice", today, ids, [], progress, library) });
     },
@@ -137,7 +138,7 @@ export function useShiftGame({ library, store, today: clock, now = Date.now }: G
   const paySalary = useCallback(
     (minutes: number) => {
       const at = now();
-      const paid = earn(progress, { kind: "salary", ref: payRef.salary(at), minutes }, at);
+      const paid = earn(progress, { kind: "salary", ref: payRef.salary(at), minutes, level: careerLevel(progress).level }, at);
       if (paid !== progress) commit(paid);
     },
     [commit, now, progress],
@@ -147,7 +148,7 @@ export function useShiftGame({ library, store, today: clock, now = Date.now }: G
     if (hasFinishedShift(progress, today)) return [];
     const role = progress.role ?? "infrastructure";
     const active = progress.activeShift?.day === today ? progress.activeShift : null;
-    const ids = active?.incidentIds.slice(active.attempts.length) ?? planShift(cardsOf(library, role), today, new Set(progress.seenIds));
+    const ids = active?.incidentIds.slice(active.attempts.length) ?? planShift(cardsOf(library, role), today, new Set(progress.seenIds), undefined, paceOf(progress, role));
     return ids.flatMap((id) => library.byId(id)?.alert ?? []);
   }, [library, progress, today]);
 
@@ -176,6 +177,12 @@ function countByRole(library: IncidentLibrary): Record<Role, number> {
   const counts = Object.fromEntries(ROLE_IDS.map((role) => [role, 0])) as Record<Role, number>;
   for (const card of library.cards) counts[roleOf(card.topic)] += 1;
   return counts;
+}
+
+/** Card difficulty follows your level, then your skill in that role's topics within it. */
+function paceOf(progress: Progress, role: Role): Pace {
+  const roleRatings = Object.fromEntries(ROLES[role].map((topic) => [topic, progress.ratings[topic] ?? STARTING_RATING]));
+  return { level: careerLevel(progress).level, rating: overallRating(roleRatings) };
 }
 
 function cardsOf(library: IncidentLibrary, role: Role): readonly IncidentCard[] {

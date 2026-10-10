@@ -2488,6 +2488,36 @@ a {
   font-variant-numeric: tabular-nums;
 }
 
+/* A promotion is the one payout that interrupts: top of the screen, with the new rate. */
+.promotion {
+  position: fixed;
+  top: max(var(--space-2xl), env(safe-area-inset-top));
+  left: 50%;
+  z-index: var(--z-toast);
+  transform: translateX(-50%);
+  max-width: calc(100% - 2 * var(--space-md));
+  pointer-events: none;
+}
+
+.promotion__card {
+  display: grid;
+  gap: var(--space-3xs);
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-md);
+  background: var(--color-paper-2);
+  color: var(--color-ink-2);
+  font-size: var(--text-sm);
+  text-align: center;
+  animation: reveal-rise var(--dur-long) var(--ease-out) both;
+}
+
+.promotion__card strong {
+  color: var(--color-accent);
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+}
+
 /* Salary ticks every minute: present, never loud. */
 .payout__line[data-reason="salary"] {
   border-color: var(--color-rule-2);
@@ -2546,10 +2576,58 @@ a {
   }
 }
 
-.briefing__pay {
+/* ── Career ladder: title, pay rate, experience toward the next promotion ── */
+
+.career {
+  display: grid;
+  gap: var(--space-2xs);
   max-width: 34rem;
+}
+
+.career__title {
+  margin: 0;
+  color: var(--color-ink);
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.career__pay {
   color: var(--color-muted);
   font-size: var(--text-sm);
+  font-weight: 400;
+}
+
+.career__meter {
+  inline-size: 100%;
+  block-size: var(--space-2xs);
+  appearance: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--color-paper-3);
+  overflow: hidden;
+}
+
+.career__meter::-webkit-progress-bar {
+  background: var(--color-paper-3);
+}
+
+.career__meter::-webkit-progress-value {
+  background: var(--color-accent);
+}
+
+.career__meter::-moz-progress-bar {
+  background: var(--color-accent);
+}
+
+.career__next {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.career-chip dd {
+  color: var(--color-ink);
 }
 
 /* ── Account (lobby): optional sign-up that keeps job-mode money across devices ── */

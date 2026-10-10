@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
+import { careerLevel } from "../domain/career.ts";
 import { warRoomPlays } from "../domain/progress.ts";
 import { Briefing } from "../ui/Briefing.tsx";
 import { DiscussionOverlay } from "../ui/DiscussionOverlay.tsx";
@@ -7,6 +8,8 @@ import { preloadFloor } from "../warroom/ui/floorLoader.ts";
 import { WarRoomView } from "../warroom/ui/WarRoomView.tsx";
 import { useRoom } from "../multiplayer/useRoom.ts";
 import { PayoutToast } from "../ui/PayoutToast.tsx";
+import { PromotionToast } from "../ui/PromotionToast.tsx";
+import { CareerContext } from "./career-context.ts";
 import { useActivityClock } from "./useActivityClock.ts";
 import { useShiftGame, type GameServices } from "./useShiftGame.ts";
 import { WalletContext } from "./wallet-context.ts";
@@ -24,7 +27,8 @@ export function App({ shareUrl, ...services }: Props) {
   const role = game.progress.role ?? "infrastructure";
   const isInRoom = room.room !== null && room.status !== "left" && room.status !== "failed";
   // Solo infra rotates through the pure infra outages; other roles and every team room get the cross-team meltdown.
-  const scenario = isInRoom ? (findScenario(room.room?.scenarioId ?? "") ?? TEAM_SCENARIO) : soloScenarioFor(role, warRoomPlays(game.progress));
+  const career = useMemo(() => careerLevel(game.progress), [game.progress]);
+  const scenario = isInRoom ? (findScenario(room.room?.scenarioId ?? "") ?? TEAM_SCENARIO) : soloScenarioFor(role, warRoomPlays(game.progress), career.level);
 
   // Fetch the 3D office while the player is still in the lobby.
   useEffect(preloadFloor, []);
@@ -46,6 +50,7 @@ export function App({ shareUrl, ...services }: Props) {
 
   return (
     <WalletContext value={game.progress.wallet}>
+      <CareerContext value={career}>
       {isInOffice ? (
         <>
           <WarRoomView
@@ -63,6 +68,7 @@ export function App({ shareUrl, ...services }: Props) {
             overlay={overlay}
           />
           <PayoutToast />
+          <PromotionToast />
         </>
       ) : (
         <Briefing
@@ -79,6 +85,7 @@ export function App({ shareUrl, ...services }: Props) {
           }}
         />
       )}
+      </CareerContext>
     </WalletContext>
   );
 }

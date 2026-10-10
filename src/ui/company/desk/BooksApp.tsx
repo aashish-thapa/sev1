@@ -30,7 +30,7 @@ export function BooksApp({ desk }: { desk: CompanyDesk }) {
   return (
     <div className="desk">
       {company.trackers && <Trackers trackers={company.trackers} itemTitle={(item) => (TITLE.get(item) ?? item).toLowerCase()} />}
-      {company.capTable && <Investors api={api} capTable={company.capTable} offers={company.investmentOffers} isFounder={isFounder} isBusy={isBusy} act={act} />}
+      {company.capTable && <Investors api={api} capTable={company.capTable} offers={company.investmentOffers} proposals={company.investmentProposals} isFounder={isFounder} isBusy={isBusy} act={act} />}
       <p className="company__note" role="status">
         {notice}
       </p>

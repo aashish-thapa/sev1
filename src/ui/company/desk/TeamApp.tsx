@@ -26,6 +26,11 @@ export function TeamApp({ desk }: { desk: CompanyDesk }) {
             <th scope="col">Name</th>
             <th scope="col">Role</th>
             <th scope="col">Pay a day</th>
+            {isFounder && (
+              <th scope="col">
+                <span className="admin__dim">Let go</span>
+              </th>
+            )}
           </tr>
         </thead>
         <tbody>
@@ -48,13 +53,36 @@ export function TeamApp({ desk }: { desk: CompanyDesk }) {
                         );
                       }}
                     />{" "}
-                    Can hire
+                    Hiring manager
                   </label>
                 ) : (
-                  !member.isFounder && member.canHire && <span className="admin__dim"> · hires</span>
+                  !member.isFounder && member.canHire && <span className="admin__dim"> · hiring manager</span>
                 )}
               </th>
-              <td>{ROLE_INFO[member.role].label}</td>
+              <td>
+                {isFounder && !member.isFounder ? (
+                  <select
+                    className="hq__role"
+                    aria-label={`${member.username}’s role`}
+                    value={member.role}
+                    disabled={isBusy}
+                    onChange={(event) => {
+                      const role = event.target.value as Role;
+                      // A new role can't pay below its own minimum.
+                      const payCents = Math.max(member.payCents, ROLE_MINIMUM_PAY_CENTS[role]);
+                      void act(() => api.setMember({ username: member.username, role, payCents, canHire: member.canHire }), () => `${member.username} is now ${ROLE_INFO[role].label}.`);
+                    }}
+                  >
+                    {ROLE_IDS.map((option) => (
+                      <option key={option} value={option}>
+                        {ROLE_INFO[option].label}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  ROLE_INFO[member.role].label
+                )}
+              </td>
               <td>
                 {isFounder ? (
                   <PayEditor
@@ -67,6 +95,13 @@ export function TeamApp({ desk }: { desk: CompanyDesk }) {
                   formatCents(member.payCents)
                 )}
               </td>
+              {isFounder && (
+                <td>
+                  {!member.isFounder && (
+                    <FireButton disabled={isBusy} username={member.username} onFire={() => void act(() => api.fire(member.username), () => `${member.username} has left the company.`)} />
+                  )}
+                </td>
+              )}
             </tr>
           ))}
           {company.pendingInvitations.map((invitation) => (
@@ -93,6 +128,28 @@ export function TeamApp({ desk }: { desk: CompanyDesk }) {
         {notice}
       </p>
     </div>
+  );
+}
+
+/** Two clicks, so nobody is let go by a slip. */
+function FireButton({ username, disabled, onFire }: { username: string; disabled: boolean; onFire: () => void }) {
+  const [isConfirming, setConfirming] = useState(false);
+  if (!isConfirming) {
+    return (
+      <button type="button" className="button button--quiet" disabled={disabled} onClick={() => setConfirming(true)}>
+        Fire
+      </button>
+    );
+  }
+  return (
+    <span className="hq__decide">
+      <button type="button" className="button button--ghost" disabled={disabled} onClick={onFire}>
+        Fire {username}
+      </button>
+      <button type="button" className="button button--quiet" onClick={() => setConfirming(false)}>
+        Keep
+      </button>
+    </span>
   );
 }
 

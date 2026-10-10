@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { checkInvestmentOffer, founderAfter, impliedValuationCents, MAX_OFFER_BPS, MIN_INVESTMENT_CENTS, type OfferProblem } from "../../domain/company/investors.ts";
 import { formatCents } from "../../domain/economy.ts";
 import type { CompanyApi } from "../../storage/company-api.ts";
-import type { CapTableWire, InvestmentOffer } from "../../storage/company-protocol.ts";
+import type { CapTableWire, InvestmentOffer, InvestmentProposal } from "../../storage/company-protocol.ts";
 import type { Act } from "./Hiring.tsx";
 import { percent } from "./percent.ts";
 
@@ -13,10 +13,19 @@ const OFFER_PROBLEM: Readonly<Record<OfferProblem, string>> = {
   founder_control: "That would leave you under 51% once your open offers are taken; the founder keeps control.",
 };
 
-type Props = { api: CompanyApi; capTable: CapTableWire; offers: readonly InvestmentOffer[]; isFounder: boolean; isBusy: boolean; act: Act };
+type Props = {
+  api: CompanyApi;
+  capTable: CapTableWire;
+  offers: readonly InvestmentOffer[];
+  /** Players asking to invest; the founder accepts (it becomes an offer to them) or declines. */
+  proposals: readonly InvestmentProposal[];
+  isFounder: boolean;
+  isBusy: boolean;
+  act: Act;
+};
 
 /** Who owns the company; the founder offers stakes to other players for money into the company. */
-export function Investors({ api, capTable, offers, isFounder, isBusy, act }: Props) {
+export function Investors({ api, capTable, offers, proposals, isFounder, isBusy, act }: Props) {
   return (
     <section className="company__panel" aria-labelledby="investors-title">
       <h2 id="investors-title" className="admin__heading">
@@ -51,6 +60,34 @@ export function Investors({ api, capTable, offers, isFounder, isBusy, act }: Pro
 
       {isFounder && (
         <>
+          {proposals.length > 0 && (
+            <ul className="shop" aria-label="Asking to invest">
+              {proposals.map((proposal) => (
+                <li key={proposal.id} className="shop__item">
+                  <span>
+                    <strong>{proposal.investor}</strong>
+                    <span className="admin__dim">
+                      {" "}
+                      wants {percent(proposal.equityBps)} for {formatCents(proposal.amountCents)} · values it at {formatCents(impliedValuationCents(proposal.amountCents, proposal.equityBps))}
+                    </span>
+                  </span>
+                  <span className="hq__decide">
+                    <button
+                      type="button"
+                      className="button button--primary"
+                      disabled={isBusy}
+                      onClick={() => void act(() => api.answerProposal(proposal.id, "accept"), () => `Accepted. ${proposal.investor} can now pay in.`)}
+                    >
+                      Accept
+                    </button>
+                    <button type="button" className="button button--quiet" disabled={isBusy} onClick={() => void act(() => api.answerProposal(proposal.id, "decline"), () => `Declined ${proposal.investor}.`)}>
+                      Decline
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
           {offers.length > 0 && (
             <ul className="shop" aria-label="Open offers">
               {offers.map((offer) => (

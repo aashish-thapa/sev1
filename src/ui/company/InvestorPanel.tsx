@@ -2,7 +2,7 @@ import { useState } from "react";
 import { categoryById } from "../../domain/company/catalog.ts";
 import { formatCents } from "../../domain/economy.ts";
 import type { CompanyApi } from "../../storage/company-api.ts";
-import type { Holding, ReceivedOffer } from "../../storage/company-protocol.ts";
+import type { Holding, MyProposal, ReceivedOffer } from "../../storage/company-protocol.ts";
 import { companyErrorText } from "./errors.ts";
 import { percent } from "./percent.ts";
 
@@ -10,6 +10,8 @@ type Props = {
   api: CompanyApi;
   offers: readonly ReceivedOffer[];
   holdings: readonly Holding[];
+  /** Your asks to invest, waiting on founders. */
+  proposals: readonly MyProposal[];
   walletCents: number;
   /** Spends the accepted offer's amount from the wallet against the server's ref; false if the balance is short. */
   invest: (investRef: string, cents: number) => boolean;
@@ -19,10 +21,10 @@ type Props = {
 };
 
 /** Offers to invest in other players' companies, and the stakes you hold. */
-export function InvestorPanel({ api, offers, holdings, walletCents, invest, onMoved, onChanged }: Props) {
+export function InvestorPanel({ api, offers, holdings, proposals, walletCents, invest, onMoved, onChanged }: Props) {
   const [notice, setNotice] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  if (offers.length === 0 && holdings.length === 0) return null;
+  if (offers.length === 0 && holdings.length === 0 && proposals.length === 0) return null;
 
   const accept = async (offer: ReceivedOffer) => {
     if (offer.amountCents > walletCents) return setNotice(`That stake costs ${formatCents(offer.amountCents)}; your wallet has ${formatCents(walletCents)}.`);
@@ -70,6 +72,34 @@ export function InvestorPanel({ api, offers, holdings, walletCents, invest, onMo
                   Decline
                 </button>
               </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {proposals.length > 0 && (
+        <ul className="shop" aria-label="Waiting on founders">
+          {proposals.map((proposal) => (
+            <li key={proposal.id} className="shop__item">
+              <span>
+                <strong>
+                  {percent(proposal.equityBps)} of {proposal.companyName}
+                </strong>
+                <span className="admin__dim"> · {formatCents(proposal.amountCents)} · waiting on the founder</span>
+              </span>
+              <button
+                type="button"
+                className="button button--quiet"
+                disabled={busyId !== null}
+                onClick={async () => {
+                  setBusyId(proposal.id);
+                  const withdrawn = await api.withdrawProposal(proposal.id);
+                  setBusyId(null);
+                  setNotice(withdrawn.ok ? "Proposal withdrawn." : companyErrorText(withdrawn.error, withdrawn.message));
+                  if (withdrawn.ok) onChanged();
+                }}
+              >
+                Withdraw
+              </button>
             </li>
           ))}
         </ul>

@@ -109,6 +109,16 @@ export function CompanyPage(props: CompanyPageProps) {
   if (!mine.ok) return <p className="admin__note">{companyErrorText(mine.error, mine.message)}</p>;
 
   const { company, invitations, applications } = mine.value;
+  const investing = {
+    ownCompanyId: company?.id ?? null,
+    proposals: mine.value.proposals,
+    propose: async (companyId: string, amountCents: number, equityBps: number) => {
+      const sent = await api.propose(companyId, { amountCents, equityBps });
+      if (!sent.ok) return companyErrorText(sent.error, sent.message);
+      void refresh();
+      return null;
+    },
+  };
   if (interview) {
     return (
       <section className="company" aria-label="Interview">
@@ -131,7 +141,7 @@ export function CompanyPage(props: CompanyPageProps) {
       )}
       {company === null && <MyApplications applications={applications} />}
       {/* Without a company, joining one is the likelier first step: most players can't afford to found yet. */}
-      {company === null && <CompanyDirectory api={api} onApply={(posting, name) => void apply(posting, name)} myApplications={applications} />}
+      {company === null && <CompanyDirectory api={api} onApply={(posting, name) => void apply(posting, name)} myApplications={applications} investing={investing} />}
       {invitations.length > 0 && <Invitations api={api} invitations={invitations} hasCompany={company !== null} onAnswered={refresh} />}
       {company === null ? (
         <FoundCompany
@@ -163,18 +173,19 @@ export function CompanyPage(props: CompanyPageProps) {
           </button>
         </section>
       ) : (
-        <CompanyCard api={api} company={company} enterOffice={props.enterOffice} />
+        <CompanyCard api={api} company={company} username={props.username} enterOffice={props.enterOffice} onLeft={refresh} />
       )}
       <InvestorPanel
         api={api}
         offers={mine.value.investmentOffers}
         holdings={mine.value.holdings}
+        proposals={mine.value.proposals}
         walletCents={props.walletCents}
         invest={props.invest}
         onMoved={() => setAwaitingSave(true)}
         onChanged={refresh}
       />
-      {company !== null && <CompanyDirectory api={api} onApply={null} myApplications={applications} />}
+      {company !== null && <CompanyDirectory api={api} onApply={null} myApplications={applications} investing={investing} />}
     </section>
   );
 }

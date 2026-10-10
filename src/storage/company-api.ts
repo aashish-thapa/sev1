@@ -29,6 +29,7 @@ import {
   type WorkAnswer,
   type AcceptOfferResponse,
   type OfferRequest,
+  type ProposalRequest,
   type WorkBoard,
   type WorkItem,
   type MyCompany,
@@ -71,6 +72,15 @@ export interface CompanyApi {
   /** Returns the spend that pays for the stake; it counts once the wallet spends it and saves. */
   acceptOffer(offerId: string): Promise<CompanyOutcome<AcceptOfferResponse>>;
   declineOffer(offerId: string): Promise<CompanyOutcome<unknown>>;
+  /** Ask a company's founder to let you invest; accepted, it becomes an offer to you. */
+  propose(companyId: string, request: ProposalRequest): Promise<CompanyOutcome<unknown>>;
+  withdrawProposal(proposalId: string): Promise<CompanyOutcome<unknown>>;
+  /** Founder only. */
+  answerProposal(proposalId: string, answer: "accept" | "decline"): Promise<CompanyOutcome<unknown>>;
+  /** Founder only; never the founder. */
+  fire(username: string): Promise<CompanyOutcome<unknown>>;
+  /** Any member but the founder. */
+  leave(): Promise<CompanyOutcome<unknown>>;
 }
 
 const ErrorSchema = z.object({ error: z.enum(API_ERRORS), message: z.string().optional() });
@@ -145,6 +155,21 @@ export class HttpCompanyApi implements CompanyApi {
   }
   declineOffer(offerId: string) {
     return call(`/api/offers/${encodeURIComponent(offerId)}/decline`, "POST", {}, Anything);
+  }
+  propose(companyId: string, request: ProposalRequest) {
+    return call(`${COMPANIES_PATH}/${encodeURIComponent(companyId)}/proposals`, "POST", request, Anything, undefined, crypto.randomUUID());
+  }
+  withdrawProposal(proposalId: string) {
+    return call(`/api/proposals/${encodeURIComponent(proposalId)}/withdraw`, "POST", {}, Anything);
+  }
+  answerProposal(proposalId: string, answer: "accept" | "decline") {
+    return call(`${COMPANY_PATH}/proposals/${encodeURIComponent(proposalId)}/${answer}`, "POST", {}, Anything);
+  }
+  fire(username: string) {
+    return call(`${COMPANY_PATH}/members/${encodeURIComponent(username)}/fire`, "POST", {}, Anything);
+  }
+  leave() {
+    return call(`${COMPANY_PATH}/leave`, "POST", {}, Anything);
   }
 }
 

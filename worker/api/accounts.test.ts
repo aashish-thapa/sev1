@@ -46,11 +46,14 @@ class MemoryAccountStore implements AccountStore {
       if (!this.ledger.has(key)) this.ledger.set(key, { ...credit, userId });
     }
   }
+  private tagsOf(userId: string): readonly string[] {
+    return [...this.users.values()].find((user) => user.id === userId)?.tags ?? [];
+  }
   private ranked() {
     const usernames = new Map([...this.users.values()].map((user) => [user.id, user.username]));
     return [...this.standings.entries()]
       .sort(([, a], [, b]) => b.experience - a.experience || a.updatedAt - b.updatedAt)
-      .map(([userId, standing]) => ({ userId, username: usernames.get(userId) ?? "", tags: [] as readonly string[], experience: standing.experience, title: standing.title, featuredBadge: standing.featuredBadge }));
+      .map(([userId, standing]) => ({ userId, username: usernames.get(userId) ?? "", tags: [...this.tagsOf(userId)], experience: standing.experience, title: standing.title, featuredBadge: standing.featuredBadge }));
   }
   async topAccounts(limit: number) {
     return this.ranked().slice(0, limit).map(({ userId: _userId, ...account }) => account);
@@ -190,5 +193,21 @@ describe("leaderboard", () => {
     expect(board.entries[0].featuredBadge).toBeNull();
     expect(board.me).toEqual({ rank: 2, experience: 0 });
     expect((await accounts.leaderboard(null)).me).toBeNull();
+  });
+});
+
+describe("leaderboard privacy", () => {
+  it("shows granted tags like creator but never permissions like admin", async () => {
+    const { store, accounts } = setup();
+    const signedUp = await accounts.signUp("founder", "correct horse battery", null, "1.1.1.9");
+    if (!signedUp.ok) throw new Error("sign-up failed");
+    const founder = store.users.get("founder");
+    if (!founder) throw new Error("no user");
+    store.users.set("founder", { ...founder, tags: ["creator", "admin"] });
+    const user = await accounts.userFor(signedUp.value.token);
+    if (!user) throw new Error("no session");
+    await accounts.saveProgress(user, emptyProgress());
+    const board = await accounts.leaderboard(null);
+    expect(board.entries[0].tags).toEqual(["creator"]);
   });
 });

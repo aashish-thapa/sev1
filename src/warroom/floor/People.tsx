@@ -3,6 +3,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { Group } from "three";
 import type { CommsMessage } from "../scenario.ts";
 import { badgeById } from "../../domain/achievements.ts";
+import { knownTags } from "../../domain/tags.ts";
 import type { Teammate } from "../ui/feed.ts";
 import { loopThrough, positionOnLoop, WALK_SPEED, type Point } from "./navigation.ts";
 import { PEOPLE, seatOf, type Person } from "./office.ts";
@@ -187,8 +188,9 @@ function TeammateModel({ teammate, reduceMotion }: { teammate: Teammate; reduceM
   const status = statusOf(target);
   const tag = useMemo(() => {
     const line = [teammate.roleLabel, status, badge?.title].filter(Boolean).join(" · ");
-    return badge ? bubbleTexture(teammate.name, line, { glyph: badge.glyph, colorToken: `--color-tier-${badge.tier}` }) : bubbleTexture(teammate.name, line);
-  }, [badge, status, teammate.name, teammate.roleLabel]);
+    const title = [teammate.name, ...knownTags(teammate.tags).map((tag) => tag.label)].join(" · ");
+    return badge ? bubbleTexture(title, line, { glyph: badge.glyph, colorToken: `--color-tier-${badge.tier}` }) : bubbleTexture(title, line);
+  }, [badge, status, teammate.name, teammate.roleLabel, teammate.tags]);
   useEffect(() => () => tag.dispose(), [tag]);
   const motion = () => {
     const { speed } = follower.current;

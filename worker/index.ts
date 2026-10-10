@@ -10,6 +10,7 @@ import { PUBLIC_ROOMS_PATH, type PublicRoomList } from "../src/multiplayer/proto
 import { DIRECTORY_NAME } from "./directory-object.ts";
 import type { Env } from "./env.ts";
 import { routeRoomSocket } from "./rooms.ts";
+import { shownTags } from "../src/domain/tags.ts";
 import { sessionTokenOf } from "./api/http.ts";
 
 /** Billing exists only once every Stripe value is configured; until then its routes answer 503. */
@@ -28,7 +29,7 @@ export default {
     const { pathname } = new URL(request.url);
     if (pathname === "/rooms") {
       const accounts = new AccountService(new D1AccountStore(env.DB), Date.now);
-      return routeRoomSocket(request, env, Math.random, async (socket) => (await accounts.userFor(sessionTokenOf(socket)))?.tags ?? []);
+      return routeRoomSocket(request, env, Math.random, async (socket) => shownTags((await accounts.userFor(sessionTokenOf(socket)))?.tags ?? []));
     }
     if (pathname === PUBLIC_ROOMS_PATH && request.method === "GET") {
       const list: PublicRoomList = { rooms: await env.DIRECTORY.getByName(DIRECTORY_NAME).list() };

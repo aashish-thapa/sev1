@@ -2,6 +2,7 @@ import { z } from "zod";
 import { featuredBadge } from "../../src/domain/achievements.ts";
 import { isPlausibleProgress, type TierOf } from "../../src/domain/audit.ts";
 import { careerLevel } from "../../src/domain/career.ts";
+import { shownTags } from "../../src/domain/tags.ts";
 import { emptyProgress, ProgressSchema, type Progress } from "../../src/domain/progress.ts";
 import type { Account, SyncedProgress } from "../../src/storage/account-protocol.ts";
 import { LEADERBOARD_SIZE, type Leaderboard } from "../../src/storage/leaderboard-protocol.ts";
@@ -126,7 +127,8 @@ export class AccountService {
   /** The top accounts by experience, and where the caller stands if signed in with saved progress. */
   async leaderboard(user: User | null): Promise<Leaderboard> {
     const top = await this.store.topAccounts(LEADERBOARD_SIZE);
-    const entries = top.map((account, index) => ({ rank: index + 1, ...account, tags: [...account.tags] }));
+    // Public: only tags meant to be seen; permissions like admin never leave the server this way.
+    const entries = top.map((account, index) => ({ rank: index + 1, ...account, tags: shownTags(account.tags) }));
     return { entries, me: user ? await this.store.rankOf(user.id) : null };
   }
 

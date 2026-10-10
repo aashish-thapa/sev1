@@ -7,6 +7,7 @@ import {
   parseCidr,
   protectedPaths,
   rateLimitReach,
+  sourcesByAsn,
   topReach,
   topRequestShare,
   topSources,
@@ -45,9 +46,33 @@ function pathsLabel(commerce: Commerce): string {
   return !path || path === "/checkout" ? "POST /checkout" : `POST /checkout, POST ${path}`;
 }
 
+function topByAsn(context: ShellContext, commerce: Commerce): ShellResult {
+  const networks = sourcesByAsn(commerce, context.cluster.t);
+  const total = networks.reduce((sum, network) => sum + network.requestsPerMinute, 0);
+  const rows = networks.map((network) => [
+    `AS${network.asn}`,
+    network.network,
+    SOURCE_TYPES[network.kind],
+    count(network.ips),
+    count(network.requestsPerMinute),
+    percent(total > 0 ? network.requestsPerMinute / total : 0),
+    network.prefixes.join(" "),
+  ]);
+  return {
+    output: [
+      ...out(`Top source networks · ${pathsLabel(commerce)} · last 5 min`),
+      ...out(...table([["ASN", "NETWORK", "TYPE", "IPS", "REQ/MIN", "SHARE", "PREFIXES"], ...rows])),
+      ...dim(`${count(distinctSourceIps(commerce))} distinct source IPs across ${networks.length} networks`),
+    ],
+  };
+}
+
 function top(args: readonly string[], context: ShellContext, commerce: Commerce): ShellResult {
-  const limit = Number(args[0] ?? 15);
-  if (!Number.isInteger(limit) || limit < 1) return { output: err("usage: waf top [N]") };
+  const { value: by, rest } = takeFlag(args, "--by");
+  if (by === "asn") return topByAsn(context, commerce);
+  if (by !== undefined && by !== "ip") return { output: err(`waf: error: cannot rank by "${by}" (ip, asn)`) };
+  const limit = Number(rest[0] ?? 15);
+  if (!Number.isInteger(limit) || limit < 1) return { output: err("usage: waf top [N] [--by ip|asn]") };
   const { t } = context.cluster;
   const rows = topSources(commerce, t, Math.min(limit, 100)).map((source) => [
     String(source.rank),
@@ -124,7 +149,7 @@ function remove(args: readonly string[], context: ShellContext): ShellResult {
 
 export const waf = commerceCommand({
   name: "waf",
-  usage: "waf rules | top [N] | block <ip|cidr> | block --top N | ratelimit <n>/<period> | delete <rule-id>",
+  usage: "waf rules | top [N] [--by asn] | block <ip|cidr> | block --top N | ratelimit <n>/<period> | delete <rule-id>",
   summary: "Edge WAF: rules, top talkers, blocks and rate limits",
   roles: ["security"],
   refuse: (_args, { role }) => ssoRefusal("waf", "waf-admins", role),
@@ -152,6 +177,7 @@ export const waf = commerceCommand({
     if (args.length === 1 && (args[0] === "delete" || args[0] === "rm")) return commerce.wafRules.map((rule) => rule.id);
     if (args.length === 1 && args[0] === "block") return ["--top", ...topSources(commerce, context.cluster.t, 5).map((source) => source.ip)];
     if (args.length === 1 && args[0] === "ratelimit") return ["20/1m", "60/1m", "600/1m"];
+    if (args[0] === "top") return args.at(-1) === "--by" ? ["ip", "asn"] : ["--by"];
     return [];
   },
 });

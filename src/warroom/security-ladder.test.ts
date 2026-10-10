@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { openIncident } from "./incident.ts";
 import { checkoutCommerce } from "./scenarios/checkout-commerce.ts";
+import { scaledToZero } from "./scenarios/scaled-to-zero.ts";
+import { runLine } from "./shell/shell.ts";
 import { attackLoad } from "./sim/attack.ts";
 import type { Attack, Commerce, SiemAlert, WafRule } from "./sim/commerce.ts";
 import { cidrReach, containmentRule, DISTINCT_SOURCE_IPS, ja4Reach, parseCidr, rateLimitReach, topReach, topSources, topTalkerShare } from "./sim/edge.ts";
@@ -106,5 +109,27 @@ describe("attack traffic at the edge", () => {
     expect(contained.customerShare).toBeCloseTo(topReach(shopUnder(cardTesters), 0, 500).customerShare, 12);
     expect(contained.attackShare).toBeCloseTo(0.031, 9);
     expect(containmentRule(shopUnder(), alert, 0)).not.toHaveProperty("attackShare");
+  });
+});
+
+/** Runs `line` on a security laptop in a cluster wrapped in `commerce`. */
+function securityShell(commerce: Commerce, line: string) {
+  const cluster = { ...openIncident(scaledToZero).cluster, commerce };
+  const result = runLine(line, { cluster, scenario: scaledToZero, history: [], role: "security" });
+  return { text: result.output.map((output) => output.text).join("\n"), commerce: result.cluster?.commerce };
+}
+
+describe("waf top --by asn", () => {
+  it("totals customers and attackers per origin network, busiest first, with the prefixes seen", () => {
+    const { text } = securityShell(shopUnder(cardTesters), "waf top --by asn");
+    const lines = text.split("\n");
+    expect(lines[0]).toBe("Top source networks · POST /checkout · last 5 min");
+    expect(lines[2]).toMatch(/^AS213230\s+HETZNER-CLOUD2-AS\s+hosting \/ datacenter\s+4,000\s+12,000\s+\S+%\s+5\.161\.0\.0\/16$/);
+    expect(text).toMatch(/AS7922\s+COMCAST-7922\s+residential ISP/);
+    expect(lines.at(-1)).toBe("7,140 distinct source IPs across 5 networks");
+  });
+
+  it("refuses a ranking it doesn't know", () => {
+    expect(securityShell(shopUnder(cardTesters), "waf top --by country").text).toContain('cannot rank by "country"');
   });
 });

@@ -115,7 +115,8 @@ export const SetMemberRequestSchema = z.object({ username: z.string(), role: Rol
  * POST /api/company/workday body: tasks the member shipped today. Phase 1 trusts it within a cap
  * (the server clamps it); phase 2 records each finished task on the server instead.
  */
-export const SettleRequestSchema = z.object({ tasksShipped: z.int().nonnegative().max(50) });
+/** Shipped work is counted from the server's own record; `tasksShipped` is accepted from older clients and ignored. */
+export const SettleRequestSchema = z.object({ tasksShipped: z.int().nonnegative().max(50).optional() });
 export type SettleRequest = z.input<typeof SettleRequestSchema>;
 
 /** POST /api/company/workday: what the settled day booked. */
@@ -217,3 +218,33 @@ export const InterviewResultSchema = z.object({
   application: MyApplicationSchema,
 });
 export type InterviewResult = z.output<typeof InterviewResultSchema>;
+
+// ── Daily work, recorded on the server ─────────────────────────────
+
+export const WORK_PATH = "/api/company/work";
+
+const TaskQuestionSchema = z.discriminatedUnion("kind", [CodeFixQuestionSchema, ReviewQuestionSchema]);
+
+export const WorkResultSchema = z.object({
+  outcome: z.enum(["shipped", "wrong-line", "wrong-fix", "correct", "shipped-a-bug", "blocked-a-good-pr"]),
+  isDone: z.boolean(),
+  reveal: z.object({ line: z.int().nonnegative().nullable(), cause: z.string(), why: z.string() }),
+});
+export type WorkResult = z.output<typeof WorkResultSchema>;
+
+/** One task on today's board; `result` is set once it's been answered (one attempt each). */
+export const WorkItemSchema = z.object({ question: TaskQuestionSchema, result: WorkResultSchema.nullable() });
+export type WorkItem = z.output<typeof WorkItemSchema>;
+
+/** GET /api/company/work: your board for the UTC day. */
+export const WorkBoardSchema = z.object({
+  day: z.string(),
+  items: z.array(WorkItemSchema).max(5),
+  /** Shipped by every member since the last closed work day: what closing the day will count. */
+  shippedSinceClose: Count,
+});
+export type WorkBoard = z.output<typeof WorkBoardSchema>;
+
+/** POST /api/company/work/:taskId: one answer, graded once. Returns the graded WorkItem. */
+export const WorkAnswerSchema = InterviewAnswerSchema;
+export type WorkAnswer = z.input<typeof WorkAnswerSchema>;

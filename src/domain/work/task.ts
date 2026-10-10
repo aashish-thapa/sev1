@@ -100,6 +100,26 @@ export function presentFixes(task: CodeFixTask, day: string): { readonly fixes: 
   return { fixes: order.map((index) => task.fixes[index]), order };
 }
 
+/** A bug fix as a player sees it: no bug line, patches in the order `fixOrder` records. */
+export type CodeFixQuestion = Pick<CodeFixTask, "kind" | "id" | "title" | "ticket" | "file" | "failing"> & { readonly fixes: readonly string[] };
+/** A PR as a player sees it: no verdict, no flaw, no explanation. */
+export type ReviewQuestion = Pick<PrReviewTask, "kind" | "id" | "title" | "author" | "description" | "path" | "language" | "diff">;
+export type TaskQuestion = CodeFixQuestion | ReviewQuestion;
+
+/** A player's answer to a question; a bug fix's `fix` indexes the patches in the order they were shown. */
+export type TaskAnswer =
+  | { readonly taskId: string; readonly kind: "code-fix"; readonly line: number; readonly fix: number }
+  | { readonly taskId: string; readonly kind: "pr-review"; readonly verdict: "approve" | "request-changes"; readonly flaggedLine: number | null };
+
+/** The task with everything that gives the answer away removed; a bug fix's patches shown in `fixOrder`. */
+export function asQuestion(task: Task, fixOrder: readonly number[] | null): TaskQuestion {
+  if (task.kind === "code-fix") {
+    const order = fixOrder ?? task.fixes.map((_, index) => index);
+    return { kind: task.kind, id: task.id, title: task.title, ticket: task.ticket, file: task.file, failing: task.failing, fixes: order.map((index) => task.fixes[index]) };
+  }
+  return { kind: task.kind, id: task.id, title: task.title, author: task.author, description: task.description, path: task.path, language: task.language, diff: task.diff };
+}
+
 /** Today's tasks for a role: ones the player hasn't finished first, fitting the company's category, in a fixed order for the day. */
 export function tasksForDay(tasks: readonly Task[], role: Role, category: CategoryId | null, day: string, finishedIds: ReadonlySet<string>, count: number): Task[] {
   const fits = tasks.filter((task) => task.role === role && (category === null || task.categories.length === 0 || task.categories.includes(category)));

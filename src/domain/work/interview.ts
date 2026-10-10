@@ -5,22 +5,16 @@
 import { seededRandom, shuffled } from "../random.ts";
 import { atDifficulty, type TaskDifficulty } from "../company/levels.ts";
 import type { Role } from "../incident.ts";
-import { gradeCodeFix, gradeReview, isDone, type CodeFixTask, type PrReviewTask, type Task } from "./task.ts";
+import { asQuestion, gradeCodeFix, gradeReview, isDone, type Task, type TaskAnswer, type TaskQuestion } from "./task.ts";
 
 export const INTERVIEW_LENGTH = 3;
 
-/** A bug fix as a candidate sees it: no bug line, patches in the order the key records. */
-export type CodeFixQuestion = Pick<CodeFixTask, "kind" | "id" | "title" | "ticket" | "file" | "failing"> & { readonly fixes: readonly string[] };
-/** A PR as a candidate sees it: no verdict, no flaw, no explanation. */
-export type ReviewQuestion = Pick<PrReviewTask, "kind" | "id" | "title" | "author" | "description" | "path" | "language" | "diff">;
-export type InterviewQuestion = CodeFixQuestion | ReviewQuestion;
+export type InterviewQuestion = TaskQuestion;
 
 /** What the server keeps to grade with: each question's task, and for a bug fix the order its patches were shown in. */
 export type InterviewKey = readonly { readonly taskId: string; readonly fixOrder: readonly number[] | null }[];
 
-export type InterviewAnswer =
-  | { readonly taskId: string; readonly kind: "code-fix"; readonly line: number; readonly fix: number }
-  | { readonly taskId: string; readonly kind: "pr-review"; readonly verdict: "approve" | "request-changes"; readonly flaggedLine: number | null };
+export type InterviewAnswer = TaskAnswer;
 
 /**
  * Picks the interview for `role` at a posting's difficulty: a bug fix and a review when the library
@@ -37,14 +31,9 @@ export function buildInterview(tasks: readonly Task[], role: Role, difficulties:
   const questions: InterviewQuestion[] = [];
   const key: { taskId: string; fixOrder: number[] | null }[] = [];
   for (const task of picked) {
-    if (task.kind === "code-fix") {
-      const order = shuffled(task.fixes.map((_, index) => index), random);
-      questions.push({ kind: task.kind, id: task.id, title: task.title, ticket: task.ticket, file: task.file, failing: task.failing, fixes: order.map((index) => task.fixes[index]) });
-      key.push({ taskId: task.id, fixOrder: order });
-    } else {
-      questions.push({ kind: task.kind, id: task.id, title: task.title, author: task.author, description: task.description, path: task.path, language: task.language, diff: task.diff });
-      key.push({ taskId: task.id, fixOrder: null });
-    }
+    const order = task.kind === "code-fix" ? shuffled(task.fixes.map((_, index) => index), random) : null;
+    questions.push(asQuestion(task, order));
+    key.push({ taskId: task.id, fixOrder: order });
   }
   return { questions, key };
 }

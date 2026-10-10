@@ -5,6 +5,7 @@ import type { Scenario } from "./scenario.ts";
 import { checkoutCluster } from "./scenarios/checkout-cluster.ts";
 import { checkoutCommerce, NO_RETRY, SHOP_FLAGS, WEB_USER_AGENT } from "./scenarios/checkout-commerce.ts";
 import { addressAutocomplete500s } from "./scenarios/address-autocomplete-500s.ts";
+import { deadKillSwitch } from "./scenarios/dead-kill-switch.ts";
 import { scaledToZero } from "./scenarios/scaled-to-zero.ts";
 import { webAutoRetryStorm } from "./scenarios/web-auto-retry-storm.ts";
 import { runLine } from "./shell/shell.ts";
@@ -206,5 +207,75 @@ describe("tier 2: address-autocomplete-500s", () => {
 
   it("round-trips through multiplayer frames", () => {
     roundTrips(scenario, { 20: autocompleteOff });
+  });
+});
+
+describe("tier 3: dead-kill-switch", () => {
+  const scenario = deadKillSwitch;
+  const walletOff = 'flags set checkout.v2_wallet_autofill off --note "wallet cards 500"';
+  const killSwitch = "flags set checkout.payment_element_v2 off";
+  // A quarter of web's 52% of checkouts; every web checkout once the v1 fallback is live.
+  const OPENING_RATE = 0.4 * 0.52 * 0.25;
+  const FALLBACK_RATE = 0.4 * 0.52;
+
+  /** Plays to the end of a 15-minute incident and scores it as if closed there. */
+  const pointsAfter = (moves: readonly (readonly [number, string])[]) => {
+    let incident = openIncident(scenario);
+    for (const [at, line] of moves) incident = act(scenario, play(scenario, at - incident.cluster.t, incident), line);
+    return pointsAt(scenario, play(scenario, 900 - incident.cluster.t, incident));
+  };
+
+  it("opens with a quarter of web checkouts failing, and only loses more if nobody acts", () => {
+    const opened = openIncident(scenario);
+    expect(opened.cluster.errorRate).toBeCloseTo(OPENING_RATE, 6);
+    const tenMinutes = play(scenario, 600, opened);
+    expect(tenMinutes.cluster.errorRate).toBeCloseTo(OPENING_RATE, 6);
+    expect(pointsAt(scenario, tenMinutes)).toBeLessThan(pointsAt(scenario, opened) - 40);
+  });
+
+  it("puts every 500 on the wallet path in RUM, beside a fallback nobody has used in weeks", () => {
+    const paths = shell(scenario, openIncident(scenario), "rum payment-paths").text;
+    expect(paths).toMatch(/wallet autofill\s+25\.0%\s+100\.0%/);
+    expect(paths).toMatch(/kill-switch fallback\s+0\.0%\s+— \(no sessions since 2026-09-02\)/);
+  });
+
+  it("closes at S or A with the worked solution", () => {
+    expect(["S", "A"]).toContain(workedSolution(scenario).grade);
+  });
+
+  it("backfires when the runbook's kill switch is pulled: every web checkout 500s on the dead v1 tokenizer", () => {
+    const pulled = play(scenario, 25, act(scenario, play(scenario, 30, openIncident(scenario)), killSwitch));
+    expect(pulled.cluster.errorRate).toBeCloseTo(FALLBACK_RATE, 6);
+    expect(shell(scenario, pulled, "rum errors").text).toContain("payments-vault POST /v1/tokens: 410 Gone");
+    expect(declareResolved(pulled, scenario).notice?.kind).toBe("refused");
+
+    const alsoWalletOff = play(scenario, 60, act(scenario, pulled, walletOff));
+    expect(alsoWalletOff.cluster.errorRate).toBeCloseTo(FALLBACK_RATE, 6);
+    expect(scenario.isRootCauseFixed(alsoWalletOff.cluster)).toBe(false);
+  });
+
+  it("recovers once the kill switch goes back on and wallet autofill goes off, but scores below the narrow fix", () => {
+    const narrow = pointsAfter([[40, walletOff]]);
+    const backfired = pointsAfter([
+      [40, killSwitch],
+      [100, "flags set checkout.payment_element_v2 on"],
+      [110, walletOff],
+    ]);
+    expect(backfired).toBeLessThan(narrow - 15);
+
+    let incident = act(scenario, play(scenario, 40, openIncident(scenario)), killSwitch);
+    incident = act(scenario, play(scenario, 60, incident), "flags set checkout.payment_element_v2 on");
+    incident = play(scenario, 30, act(scenario, incident, walletOff));
+    expect(incident.cluster.errorRate).toBe(0);
+    expect(scenario.isRootCauseFixed(incident.cluster)).toBe(true);
+  });
+
+  it("is deterministic", () => {
+    const run = () => play(scenario, 90, act(scenario, play(scenario, 30, openIncident(scenario)), killSwitch));
+    expect(run()).toEqual(run());
+  });
+
+  it("round-trips through multiplayer frames", () => {
+    roundTrips(scenario, { 20: killSwitch, 50: "flags set checkout.payment_element_v2 on", 60: walletOff });
   });
 });

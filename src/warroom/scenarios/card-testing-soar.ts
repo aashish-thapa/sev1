@@ -21,9 +21,9 @@ const CARD_TESTING: Attack = {
   requestsPerSecond: 190,
   growthPerSecond: 0.03,
   sources: { kind: "ranges", ranges: [{ cidr: TESTER_RANGE, asn: 213230, network: "HETZNER-CLOUD2-AS", ips: TESTERS }] },
-  // FoxIO ja4plus-mapping.csv: GoLang.
+  // FoxIO ja4plus-mapping.csv: GoLang, no ALPN, so HTTP/1.1 and Go's default User-Agent for it.
   ja4: "t13d190900_9dc949149365_97f8aa674fd9",
-  userAgent: "Go-http-client/2.0",
+  userAgent: "Go-http-client/1.1",
 };
 
 const ALERT: SiemAlert = {

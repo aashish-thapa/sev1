@@ -56,59 +56,86 @@ export const NO_PROMISED_MONEY: PromisedMoney = { fundings: new Map(), payouts: 
 /** Does the server stand behind this new ledger line (a purchase it can price, or pay it booked)? */
 type Vouch = (entry: LedgerEntry) => boolean;
 
-export function isPlausibleWallet(
+/** Why a wallet can't honestly follow the previous one, or null when it can. */
+export function walletProblem(
   previous: Wallet,
   next: Wallet,
   elapsedSeconds: number,
   topLevel: Level = 4,
   isAllowedSpend: Vouch = () => false,
   isBookedPay: Vouch = () => false,
-): boolean {
-  if (!(elapsedSeconds >= 0)) return false;
+): AuditProblem | null {
+  if (!(elapsedSeconds >= 0)) return "elapsed";
   const seconds = elapsedSeconds * TIME_SLACK;
   const delta = (reason: PayReason, of: "earnedCents" | "paidUnits") => next[of][reason] - previous[of][reason];
 
   for (const reason of EARN_REASONS) {
-    if (delta(reason, "earnedCents") < 0 || delta(reason, "paidUnits") < 0) return false;
+    if (delta(reason, "earnedCents") < 0 || delta(reason, "paidUnits") < 0) return "earned_went_down";
   }
   for (const reason of SPEND_REASONS) {
-    if (next.spentCents[reason] < previous.spentCents[reason] || next.boughtUnits[reason] < previous.boughtUnits[reason]) return false;
+    if (next.spentCents[reason] < previous.spentCents[reason] || next.boughtUnits[reason] < previous.boughtUnits[reason]) return "spent_went_down";
   }
   const earned = EARN_REASONS.reduce((sum, reason) => sum + next.earnedCents[reason], 0);
   const spent = SPEND_REASONS.reduce((sum, reason) => sum + next.spentCents[reason], 0);
-  if (next.balanceCents !== earned - spent) return false;
-  if (next.nextSeq < previous.nextSeq) return false;
+  if (next.balanceCents !== earned - spent) return "balance_mismatch";
+  if (next.nextSeq < previous.nextSeq) return "ledger_rewound";
 
   const minutes = delta("salary", "paidUnits");
-  if (minutes > seconds / 60 + 1) return false;
+  if (minutes > seconds / 60 + 1) return "salary_minutes";
   // A promotion can land mid-sync, so any rate from intern up to the level reached is honest.
   const salary = delta("salary", "earnedCents");
-  if (salary < minutes * SALARY_CENTS_PER_MINUTE[0] || salary > minutes * SALARY_CENTS_PER_MINUTE[topLevel]) return false;
+  if (salary < minutes * SALARY_CENTS_PER_MINUTE[0] || salary > minutes * SALARY_CENTS_PER_MINUTE[topLevel]) return "salary_rate";
 
   const cards = delta("card", "paidUnits");
-  if (cards > seconds / MIN_SECONDS_PER_CARD + EVENT_ALLOWANCE) return false;
-  if (delta("card", "earnedCents") > cards * MAX_CARD_CENTS) return false;
+  if (cards > seconds / MIN_SECONDS_PER_CARD + EVENT_ALLOWANCE) return "card_count";
+  if (delta("card", "earnedCents") > cards * MAX_CARD_CENTS) return "card_amount";
 
   const incidents = delta("incident", "paidUnits");
-  if (incidents > seconds / MIN_SECONDS_PER_INCIDENT + EVENT_ALLOWANCE) return false;
-  if (delta("incident", "earnedCents") > incidents * MAX_INCIDENT_CENTS) return false;
+  if (incidents > seconds / MIN_SECONDS_PER_INCIDENT + EVENT_ALLOWANCE) return "incident_count";
+  if (delta("incident", "earnedCents") > incidents * MAX_INCIDENT_CENTS) return "incident_amount";
 
   const fresh = freshLines(previous, next);
   const purchases = fresh.filter((entry) => (SPEND_REASONS as readonly string[]).includes(entry.reason));
-  if (purchases.some((entry) => entry.amountCents >= 0 || !isAllowedSpend(entry))) return false;
+  if (purchases.some((entry) => entry.amountCents >= 0 || !isAllowedSpend(entry))) return "unvouched_spend";
   // Payroll and grants come only from money the server issued, and each new cent of them must be one of those lines.
   for (const reason of SERVER_ISSUED) {
     const issued = fresh.filter((entry) => entry.reason === reason);
-    if (issued.some((entry) => entry.amountCents <= 0 || !isBookedPay(entry))) return false;
-    if (delta(reason, "earnedCents") !== issued.reduce((sum, entry) => sum + entry.amountCents, 0)) return false;
+    if (issued.some((entry) => entry.amountCents <= 0 || !isBookedPay(entry))) return "unvouched_pay";
+    if (delta(reason, "earnedCents") !== issued.reduce((sum, entry) => sum + entry.amountCents, 0)) return "pay_total";
   }
   // Money moved to a company (founding or investing) must be exactly the lines that moved it.
   for (const reason of ["company", "invest"] as const) {
     const moved = purchases.filter((entry) => entry.reason === reason).reduce((sum, entry) => sum - entry.amountCents, 0);
-    if (next.spentCents[reason] - previous.spentCents[reason] !== moved) return false;
+    if (next.spentCents[reason] - previous.spentCents[reason] !== moved) return "company_spend_total";
   }
 
-  return isLedgerConsistent(previous, next);
+  return isLedgerConsistent(previous, next) ? null : "ledger_inconsistent";
+}
+
+/** The rule a synced save broke, so the server can log why it refused (never the save itself). */
+export type AuditProblem =
+  | "elapsed"
+  | "earned_went_down"
+  | "spent_went_down"
+  | "balance_mismatch"
+  | "ledger_rewound"
+  | "salary_minutes"
+  | "salary_rate"
+  | "card_count"
+  | "card_amount"
+  | "incident_count"
+  | "incident_amount"
+  | "unvouched_spend"
+  | "unvouched_pay"
+  | "pay_total"
+  | "company_spend_total"
+  | "ledger_inconsistent"
+  | "correct_cards_went_down"
+  | "correct_cards_unpaid"
+  | "war_rooms_unpaid";
+
+export function isPlausibleWallet(...args: Parameters<typeof walletProblem>): boolean {
+  return walletProblem(...args) === null;
 }
 
 /**
@@ -122,10 +149,24 @@ export function isPlausibleProgress(
   tierOf: TierOf = NO_TIERS,
   promised: PromisedMoney = NO_PROMISED_MONEY,
 ): boolean {
+  return progressProblem(previous, next, elapsedSeconds, tierOf, promised) === null;
+}
+
+/** Why `next` can't honestly follow `previous`, or null when it can. */
+export function progressProblem(
+  previous: Progress,
+  next: Progress,
+  elapsedSeconds: number,
+  tierOf: TierOf = NO_TIERS,
+  promised: PromisedMoney = NO_PROMISED_MONEY,
+): AuditProblem | null {
   // Career level reads correctCards and passed War Rooms, so each may only grow by work that was also paid for.
   const newCorrect = next.correctCards - previous.correctCards;
   const newPaidCards = next.wallet.paidUnits.card - previous.wallet.paidUnits.card;
   const newPaidIncidents = next.wallet.paidUnits.incident - previous.wallet.paidUnits.incident;
+  // A first save may bring correct answers from before cards paid: they show in its own shift history.
+  const isFirstSave = previous.wallet.nextSeq === 0 && previous.correctCards === 0;
+  const unpaidAllowance = isFirstSave ? next.history.reduce((sum, day) => sum + day.correct, 0) : 0;
   const lowestLevel = careerLevel(previous).level;
   const isAllowedSpend: Vouch = (entry) => {
     // A company seed must be exactly what the server is waiting for, under the ref it issued.
@@ -138,12 +179,10 @@ export function isPlausibleProgress(
   };
   const issuedBy: Readonly<Record<ServerIssued, ReadonlyMap<string, number>>> = { payroll: promised.payouts, grant: promised.grants, dividend: promised.dividends };
   const isBookedPay: Vouch = (entry) => (SERVER_ISSUED as readonly string[]).includes(entry.reason) && issuedBy[entry.reason as ServerIssued].get(entry.ref) === entry.amountCents;
-  return (
-    newCorrect >= 0 &&
-    newCorrect <= newPaidCards &&
-    improvedPassingWarRooms(previous, next) <= newPaidIncidents &&
-    isPlausibleWallet(previous.wallet, next.wallet, elapsedSeconds, careerLevel(next).level, isAllowedSpend, isBookedPay)
-  );
+  if (newCorrect < 0) return "correct_cards_went_down";
+  if (newCorrect > newPaidCards + unpaidAllowance) return "correct_cards_unpaid";
+  if (improvedPassingWarRooms(previous, next) > newPaidIncidents) return "war_rooms_unpaid";
+  return walletProblem(previous.wallet, next.wallet, elapsedSeconds, careerLevel(next).level, isAllowedSpend, isBookedPay);
 }
 
 /** War Rooms whose best run newly reached a paying score; each needs its own incident payout. */

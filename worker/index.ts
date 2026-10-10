@@ -1,3 +1,4 @@
+import { workerLogger } from "./log.ts";
 import { findScenario } from "../server/scenarios.ts";
 import { AccountService, ATTEMPT_WINDOW_MS } from "./api/accounts.ts";
 import { D1AccountStore } from "./api/d1-store.ts";
@@ -102,7 +103,7 @@ export default {
         const windowStart = Math.floor(Date.now() / ATTEMPT_WINDOW_MS) * ATTEMPT_WINDOW_MS;
         return (await accountStore.countAttempt(key, windowStart)) > limit;
       };
-      const accounts = new AccountService(accountStore, Date.now, (id) => findScenario(id)?.tier, companyStore, grantStore, investorStore);
+      const accounts = new AccountService(accountStore, Date.now, { tierOf: (id) => findScenario(id)?.tier, bank: companyStore, grants: grantStore, investors: investorStore, logger: workerLogger });
       const entitlements = new D1EntitlementStore(env.DB);
       if (pathname === COMPANIES_PATH || pathname === TOP_COMPANIES_PATH) return handleDirectory(request, new CompanyDirectory(new D1CompanyDirectory(env.DB)));
       if (pathname === COMPANY_PATH || [COMPANY_PATH, COMPANIES_PATH, INVITATIONS_PATH, APPLY_PATH, INTERVIEWS_PATH, APPLICATIONS_PATH, RECEIVED_OFFERS_PATH, PROPOSALS_PATH].some((prefix) => pathname.startsWith(`${prefix}/`))) {

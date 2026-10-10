@@ -7,6 +7,7 @@ const SYNC_LABEL: Readonly<Record<SyncStatus, string>> = {
   saving: "Saving to your account…",
   saved: "Money and progress saved to your account",
   offline: "Can't reach the server — saved on this device for now",
+  rejected: "Your account couldn't take this save — kept on this device",
 };
 
 /** Sign up to keep your money across devices; playing never needs an account. */

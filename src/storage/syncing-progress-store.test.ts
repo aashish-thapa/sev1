@@ -82,6 +82,16 @@ describe("SyncingProgressStore", () => {
     expect(store.snapshot.revision).toBe(1);
   });
 
+  it("keeps this device's progress and says it wasn't saved when the account has no copy to offer", async () => {
+    const { store, api, local } = setup(T0);
+    api.answer = () => ({ ok: false, current: null });
+    local.save(paid(500));
+    await store.signedIn(null);
+    expect(local.load().wallet.balanceCents).toBe(paid(500).wallet.balanceCents);
+    expect(store.snapshot.status).toBe("rejected");
+    expect(store.snapshot.revision).toBe(0);
+  });
+
   it("reports offline when a push gets no answer", async () => {
     const { store, api } = setup(T0);
     api.answer = () => ({ ok: false, problem: { error: "offline", message: "" } });

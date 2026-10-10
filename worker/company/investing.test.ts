@@ -74,7 +74,7 @@ function world() {
     store.applyMoves(userId, moves, at);
     investors.applyMoves(userId, moves, at);
   });
-  const accounts = new AccountService(accountStore, () => now, undefined, store, undefined, investors);
+  const accounts = new AccountService(accountStore, () => now, { bank: store, investors });
   const newId = () => `id-${(ids += 1)}`;
   const proposalStore = new MemoryProposalStore((companyId) => store.companies.get(companyId)?.name ?? "");
   const companies = new CompanyService({ store, now: () => now, newId, isOverLimit: async () => false, investors, proposals: proposalStore });

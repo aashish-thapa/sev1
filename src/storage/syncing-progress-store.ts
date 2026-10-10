@@ -3,8 +3,11 @@ import type { SyncedProgress } from "./account-protocol.ts";
 import type { AccountApi } from "./account-api.ts";
 import type { ProgressStore } from "./progress-store.ts";
 
-/** local: not signed in · saving: a push is pending or in flight · saved: the account matches · offline: the last push got no answer. */
-export type SyncStatus = "local" | "saving" | "saved" | "offline";
+/**
+ * local: not signed in · saving: a push is pending or in flight · saved: the account matches ·
+ * offline: the last push got no answer · rejected: the server refused this copy and had none of its own to offer.
+ */
+export type SyncStatus = "local" | "saving" | "saved" | "offline" | "rejected";
 
 /** `revision` bumps whenever the account's copy replaces what's on this device. */
 export type SyncSnapshot = { readonly status: SyncStatus; readonly revision: number };
@@ -113,8 +116,13 @@ export class SyncingProgressStore implements ProgressStore, ProgressSync {
       this.setStatus("saved");
     } else if ("current" in outcome) {
       // The server couldn't square this copy with the account's history; the account's copy stands.
-      if (outcome.current) this.replace(outcome.current);
-      this.setStatus("saved");
+      // With no copy of its own, nothing was saved: keep this device's progress and say so rather than claim "saved".
+      if (outcome.current) {
+        this.replace(outcome.current);
+        this.setStatus("saved");
+      } else {
+        this.setStatus("rejected");
+      }
     } else {
       this.setStatus("offline");
     }

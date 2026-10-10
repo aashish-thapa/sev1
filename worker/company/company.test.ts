@@ -66,7 +66,7 @@ function world(pantryOf?: (userId: string, day: string) => Promise<number>) {
   let now = START;
   let ids = 0;
   const store = new MemoryCompanyStore();
-  const accounts = new AccountService(new MemoryAccounts(store), () => now, undefined, store);
+  const accounts = new AccountService(new MemoryAccounts(store), () => now, { bank: store });
   const companies = new CompanyService({ store, now: () => now, newId: () => `id-${(ids += 1)}`, isOverLimit: async () => false, pantryOf });
   const user = (id: string, username: string): User => {
     store.addUser(id, username);

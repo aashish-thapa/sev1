@@ -1,0 +1,180 @@
+[
+  {
+    "kind": "code-fix",
+    "id": "security-fix-sql-injection-fstring",
+    "role": "security",
+    "difficulty": 1,
+    "categories": [],
+    "title": "Order lookup returns every order for a crafted id",
+    "ticket": "Pentest finding (high): GET /orders/' OR '1'='1 returns all orders in the database.",
+    "file": {
+      "path": "orders/repository.py",
+      "language": "py",
+      "lines": [
+        "def find_order(conn, order_id: str) -> Order | None:",
+        "    with conn.cursor() as cursor:",
+        "        cursor.execute(f\"SELECT id, customer_id, total_cents FROM orders WHERE id = '{order_id}'\")",
+        "        row = cursor.fetchone()",
+        "    return Order(*row) if row else None"
+      ]
+    },
+    "failing": {
+      "test": "test_order_id_is_never_part_of_the_sql",
+      "output": [
+        "AssertionError: query returned 4213877 rows for id \"' OR '1'='1\"",
+        "assert len(rows) <= 1"
+      ]
+    },
+    "bugLine": 2,
+    "fixes": [
+      "        cursor.execute(\"SELECT id, customer_id, total_cents FROM orders WHERE id = %s\", (order_id,))",
+      "        cursor.execute(f\"SELECT id, customer_id, total_cents FROM orders WHERE id = '{order_id.replace(chr(39), '')}'\")",
+      "        cursor.execute(\"SELECT id, customer_id, total_cents FROM orders WHERE id = '%s'\" % order_id)",
+      "        cursor.execute(f\"SELECT id, customer_id, total_cents FROM orders WHERE id = '{order_id}' LIMIT 1\")"
+    ],
+    "fixAnswer": 0,
+    "explanation": {
+      "cause": "The id was pasted into the SQL text, so input could change the query itself.",
+      "why": "A parameter is sent separately from the statement and can only ever be a value. Stripping quotes, %-formatting or adding LIMIT 1 all still build SQL from user input."
+    }
+  },
+  {
+    "kind": "code-fix",
+    "id": "security-fix-missing-ownership-check",
+    "role": "security",
+    "difficulty": 2,
+    "categories": [],
+    "title": "Any signed-in user can read any invoice",
+    "ticket": "Bug bounty report: changing the number in /api/invoices/18231 shows other customers' invoices, names and addresses included.",
+    "file": {
+      "path": "src/api/invoices.ts",
+      "language": "ts",
+      "lines": [
+        "router.get(\"/api/invoices/:id\", requireSession, async (req, res) => {",
+        "  const invoice = await db.invoices.findOne({ id: req.params.id });",
+        "  if (!invoice) {",
+        "    res.status(404).json({ error: \"not_found\" });",
+        "    return;",
+        "  }",
+        "  res.json(invoice);",
+        "});"
+      ]
+    },
+    "failing": {
+      "test": "invoices \u203a a user can't read another user's invoice",
+      "output": [
+        "GET /api/invoices/18231 as user u_77",
+        "Expected status: 404",
+        "Received status: 200 (invoice belongs to u_12)"
+      ]
+    },
+    "bugLine": 1,
+    "fixes": [
+      "  const invoice = await db.invoices.findOne({ id: req.params.id, userId: req.session.userId });",
+      "  const invoice = await db.invoices.findOne({ id: Number(req.params.id) });",
+      "  const invoice = req.session ? await db.invoices.findOne({ id: req.params.id }) : null;",
+      "  const invoice = await db.invoices.findOne({ id: req.params.id, deletedAt: null });"
+    ],
+    "fixAnswer": 0,
+    "explanation": {
+      "cause": "The route checked that someone was signed in, not that the invoice was theirs.",
+      "why": "Scoping the lookup to the session's user makes another user's invoice indistinguishable from one that doesn't exist (404, not 403, so ids can't be probed). requireSession was already enforcing the session check itself."
+    }
+  },
+  {
+    "kind": "pr-review",
+    "id": "security-pr-log-request-bodies",
+    "role": "security",
+    "difficulty": 1,
+    "categories": [],
+    "title": "Log request bodies to debug the checkout errors",
+    "author": "Sam Tan",
+    "description": "We can't reproduce the 400s from the payment form. Logging every request body on /checkout for a week so we can see what clients send.",
+    "path": "src/middleware/logging.ts",
+    "language": "ts",
+    "diff": [
+      {
+        "op": " ",
+        "text": "export function requestLog(req: Request, _res: Response, next: NextFunction) {"
+      },
+      {
+        "op": " ",
+        "text": "  log.info(\"request\", { method: req.method, path: req.path, ip: req.ip });"
+      },
+      {
+        "op": "+",
+        "text": "  if (req.path === \"/checkout\") log.info(\"checkout body\", { body: req.body });"
+      },
+      {
+        "op": " ",
+        "text": "  next();"
+      },
+      {
+        "op": " ",
+        "text": "}"
+      }
+    ],
+    "verdict": "request-changes",
+    "flaw": 2,
+    "explanation": {
+      "cause": "The checkout body holds card numbers, CVCs and addresses, and this writes them to the logs.",
+      "why": "Logs are copied to many systems and kept for months: storing card data there is a PCI violation and a breach waiting to happen. Log validated field names and error codes, or a redacted copy, never the raw body."
+    }
+  },
+  {
+    "kind": "pr-review",
+    "id": "security-pr-login-rate-limit",
+    "role": "security",
+    "difficulty": 1,
+    "categories": [],
+    "title": "Rate-limit failed logins per account and per IP",
+    "author": "Lena Park",
+    "description": "Credential stuffing attempts are up. This counts failed logins per username and per IP in a 15-minute window and refuses after 10, with the same message as a wrong password.",
+    "path": "src/auth/login.ts",
+    "language": "ts",
+    "diff": [
+      {
+        "op": " ",
+        "text": "export async function login(username: string, password: string, ip: string) {"
+      },
+      {
+        "op": "+",
+        "text": "  if ((await failures.count(username, ip, WINDOW_15_MIN)) >= 10) throw new LoginError(\"bad_credentials\");"
+      },
+      {
+        "op": " ",
+        "text": "  const user = await users.findByUsername(username);"
+      },
+      {
+        "op": " ",
+        "text": "  if (!user || !(await verifyPassword(password, user.passwordHash))) {"
+      },
+      {
+        "op": "+",
+        "text": "    await failures.record(username, ip);"
+      },
+      {
+        "op": " ",
+        "text": "    throw new LoginError(\"bad_credentials\");"
+      },
+      {
+        "op": " ",
+        "text": "  }"
+      },
+      {
+        "op": " ",
+        "text": "  return sessions.create(user.id);"
+      },
+      {
+        "op": " ",
+        "text": "}"
+      }
+    ],
+    "verdict": "approve",
+    "flaw": null,
+    "explanation": {
+      "cause": "Nothing wrong: limits apply before the password check and the refusal looks like any wrong password.",
+      "why": "Counting by username and IP slows both single-account guessing and spraying, and the identical error doesn't reveal which usernames exist or are locked."
+    }
+  }
+]

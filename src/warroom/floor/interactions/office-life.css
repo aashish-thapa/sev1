@@ -181,3 +181,79 @@
     transform: none;
   }
 }
+
+/* ── Energy and fullness: two small gauges above the stick ── */
+
+.meters {
+  position: absolute;
+  left: max(var(--space-md), env(safe-area-inset-left));
+  bottom: calc(max(var(--space-md), env(safe-area-inset-bottom)) + 124px);
+  display: grid;
+  gap: var(--space-2xs);
+  pointer-events: none;
+}
+
+.meter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+}
+
+.meter__glyph {
+  display: inline-flex;
+  color: var(--color-ink-2);
+}
+
+.meter[data-low="true"] .meter__glyph {
+  color: var(--color-critical);
+}
+
+.meter__track {
+  inline-size: 72px;
+  block-size: 6px;
+  border-radius: var(--radius-sm);
+  background: var(--color-paper-3);
+  overflow: hidden;
+}
+
+.meter__fill {
+  display: block;
+  block-size: 100%;
+  background: var(--color-good);
+  transition: inline-size var(--dur-long) var(--ease-out);
+}
+
+.meter[data-low="true"] .meter__fill {
+  background: var(--color-critical);
+  animation: meter-pulse 1.6s var(--ease-out) infinite;
+}
+
+.meters[data-reduce-motion="true"] .meter__fill {
+  animation: none;
+  transition: none;
+}
+
+@keyframes meter-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* Running on empty: the edges of the view darken, slowly breathing. */
+.tired {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 30%, var(--color-paper) 95%);
+  pointer-events: none;
+  animation: tired-breathe 7s ease-in-out infinite;
+}
+
+.tired[data-reduce-motion="true"] {
+  animation: none;
+}
+
+@keyframes tired-breathe {
+  50% {
+    filter: brightness(0.75);
+  }
+}

@@ -21,11 +21,11 @@ export type Surface = "carpet" | "tile";
 const LOOKAHEAD_SECONDS = 0.005;
 const random: Random = Math.random;
 
-function sfxOutput(target: SfxTarget): AudioOutput | null {
+export function sfxOutput(target: SfxTarget): AudioOutput | null {
   return target.isMuted ? null : target.output("sfx");
 }
 
-function startTime(output: AudioOutput): number {
+export function startTime(output: AudioOutput): number {
   return output.context.currentTime + LOOKAHEAD_SECONDS;
 }
 

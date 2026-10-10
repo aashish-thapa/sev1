@@ -1,20 +1,25 @@
-import type { Cup } from "./coffee.ts";
+import type { Wellbeing } from "../../../domain/wellbeing.ts";
+import { Meters } from "./Meters.tsx";
 import type { StandupNotice } from "./useStandup.ts";
 
 type Props = {
-  cup: Cup;
-  onSip: () => void;
+  /** What C does right now, if anything: sip the coffee or eat the snack. */
+  held: "coffee" | "snack" | null;
+  onConsume: () => void;
   standup: StandupNotice | null;
+  wellbeing: Wellbeing;
+  reduceMotion: boolean;
 };
 
-/** The small, quiet layer of office life over the floor: the sip button while you hold a cup, and the calendar. */
-export function LifeHud({ cup, onSip, standup }: Props) {
+/** The small, quiet layer of office life over the floor: your energy and fullness, the C button while you hold something, and the calendar. */
+export function LifeHud({ held, onConsume, standup, wellbeing, reduceMotion }: Props) {
   return (
     <>
+      <Meters wellbeing={wellbeing} reduceMotion={reduceMotion} />
       <div className="life" aria-live="polite">
-        {cup.kind === "holding" && (
-          <button type="button" className="life__chip life__chip--action" onClick={onSip}>
-            <kbd>C</kbd> Sip
+        {held && (
+          <button type="button" className="life__chip life__chip--action" onClick={onConsume}>
+            <kbd>C</kbd> {held === "coffee" ? "Sip" : "Eat"}
           </button>
         )}
       </div>

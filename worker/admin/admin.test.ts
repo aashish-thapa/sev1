@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AdminStatsSchema, AdminUsersSchema } from "../../src/storage/admin-protocol.ts";
+import { MemoryGrantStore } from "../grants/memory-store.ts";
+import { GrantDesk } from "../grants/service.ts";
 import { AdminService, signupSeries } from "./service.ts";
 import type { AdminStore, RawStats } from "./store.ts";
 
@@ -47,18 +49,19 @@ describe("admin stats", () => {
 });
 
 describe("admin gate", () => {
+  const grants = new GrantDesk({ store: new MemoryGrantStore(() => "x"), findUser: async () => null, now: () => NOW, newId: () => "g", isOverLimit: async () => false });
   const userWith = (tags: string[]) => ({ userFor: async () => ({ id: "u", username: "x", passwordHash: "", createdAt: NOW, tags }) });
   const statsRequest = () => new Request("https://sev1.test/api/admin/stats", { headers: { cookie: "sev1_session=t" } });
 
   it("refuses guests and signed-in players without the admin tag alike", async () => {
     const { handleAdmin } = await import("./routes.ts");
-    expect((await handleAdmin(statsRequest(), { userFor: async () => null }, service)).status).toBe(403);
-    expect((await handleAdmin(statsRequest(), userWith(["creator"]), service)).status).toBe(403);
+    expect((await handleAdmin(statsRequest(), { userFor: async () => null }, service, grants)).status).toBe(403);
+    expect((await handleAdmin(statsRequest(), userWith(["creator"]), service, grants)).status).toBe(403);
   });
 
   it("serves admins", async () => {
     const { handleAdmin } = await import("./routes.ts");
-    const response = await handleAdmin(statsRequest(), userWith(["admin"]), service);
+    const response = await handleAdmin(statsRequest(), userWith(["admin"]), service, grants);
     expect(response.status).toBe(200);
     expect(AdminStatsSchema.safeParse(await response.json()).success).toBe(true);
   });

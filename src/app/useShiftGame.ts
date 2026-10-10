@@ -4,10 +4,30 @@ import type { LocalDate } from "../domain/calendar.ts";
 import { careerLevel } from "../domain/career.ts";
 import { ROLE_IDS, ROLES, roleOf, type IncidentCard, type Role } from "../domain/incident.ts";
 import { paidTier, payRef } from "../domain/economy.ts";
-import { hasBoughtSolution, spend, type SpendOutcome } from "../domain/purchases.ts";
+import { earnGrant, earnPayroll, fundCompany as fundCompanyFrom, hasBoughtSolution, spend, type SpendOutcome } from "../domain/purchases.ts";
 import type { Tier } from "../domain/tier.ts";
+import type { PendingPayout } from "../storage/company-protocol.ts";
+import type { PendingGrant } from "../storage/account-protocol.ts";
 import { hasEarned } from "../domain/achievements.ts";
-import { chooseRole, earn, featureBadge, hasFinishedShift, hintsUsedOn, recordAssistedRun, spendHint as spendHintOn, recordAttempt, recordWarRoomRun, startShift, type Attempt, type Progress } from "../domain/progress.ts";
+import {
+  chooseRole,
+  consume,
+  earn,
+  featureBadge,
+  hasFinishedShift,
+  hintsUsedOn,
+  recordAssistedRun,
+  recordAttempt,
+  recordWarRoomRun,
+  spendHint as spendHintOn,
+  startShift,
+  takeFromPantry,
+  wearDown,
+  type Attempt,
+  type Progress,
+} from "../domain/progress.ts";
+import type { ConsumableId } from "../domain/pantry.ts";
+import type { Refuel } from "../domain/wellbeing.ts";
 import { overallRating, rateAttempt, STARTING_RATING } from "../domain/rating.ts";
 import { planShift, presentIncident, type Pace, type PresentedIncident } from "../domain/shift.ts";
 import type { ProgressStore } from "../storage/progress-store.ts";
@@ -63,6 +83,12 @@ export type ShiftGame = {
   /** Records the run and pays the resolution bonus (every player in a team room is paid their own). */
   /** Buys the step-by-step solution for this run; the run then pays nothing and earns no experience. */
   buySolution(scenario: { readonly id: string; readonly title: string; readonly tier: Tier }, runStartedAt: number): SpendOutcome;
+  /** Spends a company seed from the wallet under the server's funding ref; false when the balance is short. Repeats are no-ops. */
+  fundCompany(fundingRef: string, cents: number): boolean;
+  /** Earns a payout the company booked, once; an already-claimed payout changes nothing. */
+  claimPayout(payout: PendingPayout): void;
+  /** Earns money an admin granted into the wallet, once per grant; the next save claims it on the server. */
+  claimGrant(grant: PendingGrant): void;
   /** Allowance hints opened today (Pro's daily free hints). */
   readonly hintsUsedToday: number;
   /** Records one allowance hint opened today. */
@@ -70,6 +96,10 @@ export type ShiftGame = {
   recordWarRoom(scenario: { readonly id: string; readonly title: string; readonly tier: Tier }, result: Debrief, run: { readonly isTeam: boolean; readonly startedAt: number }): void;
   /** Pays salary for whole minutes of active play in the office. */
   paySalary(minutes: number): void;
+  /** Takes a serving from the office pantry (logged for startup mode's costs). */
+  takeFromPantry(id: ConsumableId): void;
+  /** A sip or a bite: `portion` of a serving's energy or fullness. */
+  consume(kind: Refuel, portion: number): void;
 };
 
 export function useShiftGame({ library, store, today: clock, now = Date.now }: GameServices): ShiftGame {
@@ -169,10 +199,35 @@ export function useShiftGame({ library, store, today: clock, now = Date.now }: G
     },
     [commit, now, progress],
   );
+  const fundCompany = useCallback(
+    (fundingRef: string, cents: number): boolean => {
+      const outcome = fundCompanyFrom(progress.wallet, fundingRef, cents, now());
+      if (outcome.ok && outcome.wallet !== progress.wallet) commit({ ...progress, wallet: outcome.wallet });
+      return outcome.ok;
+    },
+    [commit, now, progress],
+  );
+  const claimPayout = useCallback(
+    (payout: PendingPayout) => {
+      const wallet = earnPayroll(progress.wallet, payout, now());
+      if (wallet !== progress.wallet) commit({ ...progress, wallet });
+    },
+    [commit, now, progress],
+  );
+  const claimGrant = useCallback(
+    (grant: PendingGrant) => {
+      const wallet = earnGrant(progress.wallet, grant, now());
+      if (wallet !== progress.wallet) commit({ ...progress, wallet });
+    },
+    [commit, now, progress],
+  );
+  const takeFromPantryNow = useCallback((id: ConsumableId) => commit(takeFromPantry(progress, id, today)), [commit, progress, today]);
+  const consumeNow = useCallback((kind: Refuel, portion: number) => commit(consume(progress, kind, portion)), [commit, progress]);
   const paySalary = useCallback(
     (minutes: number) => {
       const at = now();
-      const paid = earn(progress, { kind: "salary", ref: payRef.salary(at), minutes, level: careerLevel(progress).level }, at);
+      // The same active minutes pay salary and wear you down, saved together.
+      const paid = wearDown(earn(progress, { kind: "salary", ref: payRef.salary(at), minutes, level: careerLevel(progress).level }, at), minutes);
       if (paid !== progress) commit(paid);
     },
     [commit, now, progress],
@@ -207,7 +262,12 @@ export function useShiftGame({ library, store, today: clock, now = Date.now }: G
     hintsUsedToday: hintsUsedOn(progress, today),
     spendHint,
     buySolution,
+    fundCompany,
+    claimPayout,
+    claimGrant,
     paySalary,
+    takeFromPantry: takeFromPantryNow,
+    consume: consumeNow,
   };
 }
 

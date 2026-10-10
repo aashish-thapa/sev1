@@ -5,6 +5,8 @@ import { AnimationMixer, Frustum, Matrix4, Sphere, Vector3, type AnimationAction
 import type { AvatarId, ClipName } from "../assets/catalog.ts";
 import { avatarUrl, clipsFor, clipUrls, cloneAvatar, hideHead, sexOf, STRIDE_SPEED } from "./avatars.ts";
 import type { Motion } from "./behaviour.ts";
+import type { Carried } from "../office.ts";
+import { HandItem } from "./HandItem.tsx";
 
 /** Draco is unused; meshopt decodes the geometry and animation buffers. */
 const USE_DRACO = false;
@@ -23,9 +25,11 @@ type Props = {
   motion: () => Motion;
   /** The player's own body: no head, so the camera can sit at the eyes. */
   isFirstPerson?: boolean;
+  /** Read every frame: what they have in their right hand, if anything. */
+  carried?: () => Carried | null;
 };
 
-export function Avatar({ id, motion, isFirstPerson = false }: Props) {
+export function Avatar({ id, motion, isFirstPerson = false, carried }: Props) {
   const sex = sexOf(id);
   const avatar = useGLTF(avatarUrl(id), USE_DRACO, USE_MESHOPT);
   const takes = useGLTF(clipUrls(sex), USE_DRACO, USE_MESHOPT);
@@ -88,6 +92,7 @@ export function Avatar({ id, motion, isFirstPerson = false }: Props) {
     <group ref={group}>
       {/* Rocketbox rigs already face +Z, the floor's heading 0. */}
       <primitive object={body} />
+      {carried && <HandItem body={body} carried={carried} />}
     </group>
   );
 }

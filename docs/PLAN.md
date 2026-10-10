@@ -44,6 +44,43 @@ Your job-mode money funds a company of your own.
 
 Startup mode needs money that the server holds and decides on (see the anti-cheat item under Hosting). Job-mode wallets are kept on the device and only sanity-checked by the server.
 
+### Startup mode: build plan (decided 2026-10-10)
+
+Decisions:
+
+- **Seed money comes from the founder's earned job-mode money.** Founding needs a minimum: the first room plus a week of payroll for the founder.
+- **Time passes in work days, only while members play.** Nobody goes broke while everyone is offline. A work day closes when a member finishes a shift; that settles payroll, revenue and costs.
+- **Revenue = category base × uptime × shipped work.** Each category has a base daily revenue. Outages and missing roles cut it; finished tasks (bugs fixed, PRs reviewed, features shipped) raise it.
+- **Categories at launch:** E-commerce, Fintech, Social / consumer app, B2B SaaS. The category picks which incidents and daily tasks the company gets.
+- **No random staff.** Only invited players work there. A role nobody holds is covered by paying a contractor per issue.
+- **Every member is paid at least their role's minimum** per work day, from company funds.
+- **Accounts only, and every company balance is held on the server.** Money moves between players (salaries, investments), so nothing here is trusted from the client.
+
+Phases, each one playable on its own:
+
+1. **Found and staff.** Create a company (name, category, seed from your wallet). Buy the first room. Invite players by username with a role and pay (≥ the role minimum); they accept or decline. A company HQ page shows funds, rooms, staff, payroll and a ledger.
+2. **Daily work.** Each role gets a task board: fix a bug (a failing test with the code, pick the fix or the line), review a PR (a diff, approve or flag the line that breaks it), routine ops, plus pages from the category's incidents. Buy servers (more capacity, fewer and smaller incidents). Hire a contractor for a missing role. Revenue settles per work day.
+3. **The office.** The company's 3D office shows only the rooms it bought. Expand by buying more; only members are on the floor. Pantry and office upkeep become operating costs.
+4. **Investors.** Invite investors who put money into company funds for a share. Profit share at the end of a work week. Trackers for investments, inventory (assets), expenses and earnings.
+
+Ownership:
+
+- **Pure rules in src/domain/company/** (catalogs, minimum pay, costs, settlement, pure functions with no clock reads): the War Room session.
+- **Task content** (code-fix and PR-review kinds and their packs per category): the War Room session.
+- **Lobby and HQ pages:** the War Room session.
+- **D1 tables, server-held balances, company APIs and invitations:** the account/economy session.
+- **The 3D office per company:** the account/economy session.
+
+### Startup mode: hiring, levels and the company leaderboard (planned 2026-10-10)
+
+- **Company leaderboard.** The top companies by revenue over their last 7 work days, showing category, level, size and founder. A company that's coasting falls off.
+- **Find companies.** Search companies by name or category, see their level, size and open roles.
+- **Hiring.** A founder (or a member they make a hiring manager) opens a posting with a role, pay (≥ the role minimum), a minimum career level and a minimum interview score. Players apply by taking the interview. The founder or a hiring manager hires or rejects among applicants who meet the bar. Direct invitations still work too.
+- **Interviews are graded on the server.** Three tasks for the role, at the posting's difficulty, served without their answers and graded server-side, so the score can't be faked from the browser.
+- **Company levels: easy work first, harder as it grows.** Garage, Seed, Series A, Growth, Scale, by lifetime revenue and work days. A level sets the daily task difficulty (easy for a garage, hard at Scale), the pay a posting can ask for, and later which incidents page the company.
+
+Ownership follows phase 1: pure rules, schemas and screens are the War Room session's; D1, endpoints and server-side grading are the account/economy session's.
+
 ## Hosting: free, always on (no Render)
 
 Everything runs on the **Cloudflare Workers Free** plan, with no idle sleep or cold-start parking.

@@ -1,0 +1,213 @@
+[
+  {
+    "kind": "code-fix",
+    "id": "infra-fix-go-duration-nanoseconds",
+    "role": "infrastructure",
+    "difficulty": 1,
+    "categories": [],
+    "title": "Gateway calls time out instantly after the config refactor",
+    "ticket": "Since this morning's config refactor every charge fails with 'context deadline exceeded', even though the payment gateway is healthy and TIMEOUT_SECONDS is still 3.",
+    "file": {
+      "path": "internal/payments/client.go",
+      "language": "go",
+      "lines": [
+        "func (c *Client) Charge(ctx context.Context, req ChargeRequest) (*Charge, error) {",
+        "\tctx, cancel := context.WithTimeout(ctx, time.Duration(c.cfg.TimeoutSeconds))",
+        "\tdefer cancel()",
+        "",
+        "\tbody, err := json.Marshal(req)",
+        "\tif err != nil {",
+        "\t\treturn nil, fmt.Errorf(\"encode charge: %w\", err)",
+        "\t}",
+        "\thttpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+\"/v1/charges\", bytes.NewReader(body))",
+        "\tif err != nil {",
+        "\t\treturn nil, err",
+        "\t}",
+        "\treturn c.do(httpReq)",
+        "}"
+      ]
+    },
+    "failing": {
+      "test": "TestChargeWaitsForSlowGateway (gateway answers in 800ms)",
+      "output": [
+        "--- FAIL: TestChargeWaitsForSlowGateway (0.00s)",
+        "    client_test.go:41: Charge() error = Post \"http://127.0.0.1:51734/v1/charges\": context deadline exceeded",
+        "    client_test.go:42: deadline was 3ns after the call; want 3s"
+      ]
+    },
+    "bugLine": 1,
+    "fixes": [
+      "\tctx, cancel := context.WithTimeout(ctx, time.Duration(c.cfg.TimeoutSeconds)*time.Second)",
+      "\tctx, cancel := context.WithTimeout(ctx, time.Duration(c.cfg.TimeoutSeconds)*time.Millisecond)",
+      "\tctx, cancel := context.WithCancel(ctx)",
+      "\tctx, cancel := context.WithTimeout(context.Background(), time.Duration(c.cfg.TimeoutSeconds))"
+    ],
+    "fixAnswer": 0,
+    "explanation": {
+      "cause": "time.Duration(3) is three nanoseconds: a Duration counts nanoseconds, so a plain number needs a unit.",
+      "why": "Every charge's context expired before the request left the process. Multiplying by time.Second restores the 3 s budget; dropping the timeout entirely would let a slow gateway pin connections forever."
+    }
+  },
+  {
+    "kind": "code-fix",
+    "id": "infra-fix-go-http-client-no-timeout",
+    "role": "infrastructure",
+    "difficulty": 2,
+    "categories": [],
+    "title": "Checkout pods hang when the fraud service stalls",
+    "ticket": "During the fraud-check vendor's incident, checkout-api pods stopped answering entirely. Goroutine dumps show hundreds of requests stuck in fraudClient.Score for over ten minutes.",
+    "file": {
+      "path": "internal/fraud/client.go",
+      "language": "go",
+      "lines": [
+        "func New(baseURL string) *Client {",
+        "\treturn &Client{",
+        "\t\tbaseURL: baseURL,",
+        "\t\thttp:    &http.Client{},",
+        "\t}",
+        "}",
+        "",
+        "func (c *Client) Score(ctx context.Context, order Order) (float64, error) {",
+        "\tres, err := c.http.Get(c.baseURL + \"/score?order=\" + order.ID)",
+        "\tif err != nil {",
+        "\t\treturn 0, err",
+        "\t}",
+        "\tdefer res.Body.Close()",
+        "\treturn decodeScore(res.Body)",
+        "}"
+      ]
+    },
+    "failing": {
+      "test": "TestScoreGivesUpOnAStalledVendor",
+      "output": [
+        "--- FAIL: TestScoreGivesUpOnAStalledVendor (30.00s)",
+        "    client_test.go:77: test timed out: Score() still blocked after 30s",
+        "    client_test.go:78: want an error within 2s"
+      ]
+    },
+    "bugLine": 3,
+    "fixes": [
+      "\t\thttp:    &http.Client{Timeout: 2 * time.Second},",
+      "\t\thttp:    http.DefaultClient,",
+      "\t\thttp:    &http.Client{Transport: &http.Transport{MaxIdleConns: 100}},",
+      "\t\thttp:    &http.Client{Timeout: 2},"
+    ],
+    "fixAnswer": 0,
+    "explanation": {
+      "cause": "A zero-value http.Client has no timeout, so a vendor that accepts the connection and never answers holds the request forever.",
+      "why": "Each stuck call held a goroutine and a slot until the pods stopped serving anything. A client-wide Timeout bounds every call; http.DefaultClient has the same missing timeout, and Timeout: 2 would be two nanoseconds."
+    }
+  },
+  {
+    "kind": "pr-review",
+    "id": "infra-pr-pool-times-replicas",
+    "role": "infrastructure",
+    "difficulty": 2,
+    "categories": [],
+    "title": "Scale checkout-api for the autumn sale",
+    "author": "Sam Tan",
+    "description": "Marketing expects 3x traffic on Saturday. Doubling replicas and giving each pod a bigger Hikari pool so we don't run out of connections like last time. orders-db is max_connections = 100.",
+    "path": "deploy/checkout-api/values.yaml",
+    "language": "yaml",
+    "diff": [
+      {
+        "op": " ",
+        "text": "checkoutApi:"
+      },
+      {
+        "op": "-",
+        "text": "  replicas: 3"
+      },
+      {
+        "op": "+",
+        "text": "  replicas: 6"
+      },
+      {
+        "op": " ",
+        "text": "  resources:"
+      },
+      {
+        "op": " ",
+        "text": "    requests: { cpu: 500m, memory: 768Mi }"
+      },
+      {
+        "op": " ",
+        "text": "  env:"
+      },
+      {
+        "op": "-",
+        "text": "    SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: \"20\""
+      },
+      {
+        "op": "+",
+        "text": "    SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: \"50\""
+      },
+      {
+        "op": " ",
+        "text": "    SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT: \"30000\""
+      }
+    ],
+    "verdict": "request-changes",
+    "flaw": 7,
+    "explanation": {
+      "cause": "6 replicas x 50 connections is 300 against a database that allows 100.",
+      "why": "The first pods to start would take every slot and the rest would crash-loop on 'too many clients'. Pool size times replicas has to fit under max_connections with headroom; more replicas with the same or a smaller pool is the safe change."
+    }
+  },
+  {
+    "kind": "pr-review",
+    "id": "infra-pr-readiness-probe",
+    "role": "infrastructure",
+    "difficulty": 1,
+    "categories": [],
+    "title": "Add a readiness probe to the order-status worker",
+    "author": "Priya Nair",
+    "description": "The worker gets traffic before its consumers are connected, so the first requests after every deploy 503. This adds a readiness probe on the endpoint that only returns 200 once the consumers are up.",
+    "path": "deploy/order-status/deployment.yaml",
+    "language": "yaml",
+    "diff": [
+      {
+        "op": " ",
+        "text": "      containers:"
+      },
+      {
+        "op": " ",
+        "text": "        - name: order-status"
+      },
+      {
+        "op": " ",
+        "text": "          image: registry.internal/order-status:v2.8.1"
+      },
+      {
+        "op": "+",
+        "text": "          readinessProbe:"
+      },
+      {
+        "op": "+",
+        "text": "            httpGet: { path: /ready, port: 8080 }"
+      },
+      {
+        "op": "+",
+        "text": "            periodSeconds: 5"
+      },
+      {
+        "op": "+",
+        "text": "            failureThreshold: 3"
+      },
+      {
+        "op": " ",
+        "text": "          ports:"
+      },
+      {
+        "op": " ",
+        "text": "            - containerPort: 8080"
+      }
+    ],
+    "verdict": "approve",
+    "flaw": null,
+    "explanation": {
+      "cause": "Nothing wrong: the probe checks an endpoint that reflects real readiness, with sane timings.",
+      "why": "A readiness probe only takes a pod out of the load balancer, it never restarts it, so a strict check is safe here. The trap to avoid would be pointing a liveness probe at a dependency."
+    }
+  }
+]

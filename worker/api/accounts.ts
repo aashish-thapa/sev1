@@ -1,17 +1,18 @@
 import { z } from "zod";
 import { featuredBadge } from "../../src/domain/achievements.ts";
-import { isPlausibleProgress, type TierOf } from "../../src/domain/audit.ts";
+import { isPlausibleProgress, NO_PROMISED_MONEY, type PromisedMoney, type TierOf } from "../../src/domain/audit.ts";
 import { careerLevel } from "../../src/domain/career.ts";
+import { payRef } from "../../src/domain/economy.ts";
 import { shownTags } from "../../src/domain/tags.ts";
 import { emptyProgress, ProgressSchema, type Progress } from "../../src/domain/progress.ts";
 import type { Account, SyncedProgress } from "../../src/storage/account-protocol.ts";
 import { LEADERBOARD_SIZE, type Leaderboard } from "../../src/storage/leaderboard-protocol.ts";
 import { hashPassword, verifyPassword } from "./password.ts";
-import type { AccountStore, LedgerRow, Standing, User } from "./store.ts";
+import type { AccountStore, CompanyBank, GrantBank, LedgerRow, PendingGrant, SaveMoves, Standing, User } from "./store.ts";
 import { hashToken, newSessionToken } from "./tokens.ts";
 
 export const SESSION_SECONDS = 30 * 24 * 60 * 60;
-const ATTEMPT_WINDOW_MS = 15 * 60_000;
+export const ATTEMPT_WINDOW_MS = 15 * 60_000;
 /** Per username and per address, per window: enough for typos, too few to guess a password. */
 const LOGIN_ATTEMPTS_PER_USER = 10;
 const LOGIN_ATTEMPTS_PER_ADDRESS = 40;
@@ -35,6 +36,19 @@ export type SaveResult = { readonly ok: true; readonly updatedAt: number } | { r
 
 type Clock = () => number;
 
+/** Seeds, payroll and grant claims new in this save, for the server's books to settle alongside it. */
+function saveMovesOf(previous: Progress, next: Progress): SaveMoves {
+  const fresh = next.wallet.ledger.filter((entry) => entry.seq >= previous.wallet.nextSeq);
+  return {
+    fundingRefs: fresh.filter((entry) => entry.reason === "company").map((entry) => entry.ref),
+    payoutIds: fresh.filter((entry) => entry.reason === "payroll").map((entry) => entry.ref.slice(PAYROLL_REF_PREFIX.length)),
+    grantIds: fresh.filter((entry) => entry.reason === "grant").map((entry) => entry.ref.slice(GRANT_REF_PREFIX.length)),
+  };
+}
+
+const PAYROLL_REF_PREFIX = payRef.payroll("");
+const GRANT_REF_PREFIX = payRef.grant("");
+
 /** What the client may know about an account. */
 export function accountOf(user: User): Account {
   return { username: user.username, tags: [...user.tags] };
@@ -52,11 +66,17 @@ export class AccountService {
   private readonly now: Clock;
   /** Caps incident payouts and prices solutions in a synced save; without it, both are refused. */
   private readonly tierOf: TierOf | undefined;
+  /** What companies are waiting for from or owe each player; without it, company money in a save is refused. */
+  private readonly bank: CompanyBank | undefined;
+  /** Admin grants issued to each player; without it, grant money in a save is refused. */
+  private readonly grants: GrantBank | undefined;
 
-  constructor(store: AccountStore, now: Clock, tierOf?: TierOf) {
+  constructor(store: AccountStore, now: Clock, tierOf?: TierOf, bank?: CompanyBank, grants?: GrantBank) {
     this.store = store;
     this.now = now;
     this.tierOf = tierOf;
+    this.bank = bank;
+    this.grants = grants;
   }
 
   /** Creates the account and, when it's plausible, keeps the progress earned before signing up. */
@@ -109,10 +129,23 @@ export class AccountService {
     const current = await this.progressOf(user);
     const since = current?.updatedAt ?? user.createdAt;
     const elapsedSeconds = Math.max(0, (this.now() - since) / 1000);
-    if (!isPlausibleProgress(current?.progress ?? emptyProgress(), next, elapsedSeconds, this.tierOf)) return { ok: false, current };
+    const previous = current?.progress ?? emptyProgress();
+    const promised = await this.promisedTo(user);
+    if (!isPlausibleProgress(previous, next, elapsedSeconds, this.tierOf, promised)) return { ok: false, current };
     const updatedAt = this.now();
-    await this.store.saveProgress(user.id, { body: JSON.stringify(next), updatedAt }, standingOf(next), this.creditsSince(current?.progress ?? emptyProgress(), next));
+    await this.store.saveProgress(user.id, { body: JSON.stringify(next), updatedAt }, standingOf(next), this.creditsSince(previous, next), saveMovesOf(previous, next));
     return { ok: true, updatedAt };
+  }
+
+  /** Admin grants waiting for this player's game to claim them. */
+  pendingGrants(user: User): Promise<readonly PendingGrant[]> {
+    return this.grants ? this.grants.pendingFor(user.id) : Promise.resolve([]);
+  }
+
+  /** Everything the server has promised this player's wallet and not yet seen claimed. */
+  private async promisedTo(user: User): Promise<PromisedMoney> {
+    const [company, grants] = await Promise.all([this.bank ? this.bank.claimsFor(user.id, this.now()) : NO_PROMISED_MONEY, this.pendingGrants(user)]);
+    return { fundings: company.fundings, payouts: company.payouts, grants: new Map(grants.map((grant) => [payRef.grant(grant.id), grant.amountCents])) };
   }
 
   /** The account's balance by the server's books, which startup-mode spending will draw on. */

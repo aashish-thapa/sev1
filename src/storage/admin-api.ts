@@ -1,11 +1,27 @@
 /** The admin dashboard's reads. The server checks the admin tag on every request; the client only asks. */
-import { ADMIN_STATS_PATH, ADMIN_USERS_PATH, AdminStatsSchema, AdminUsersSchema, type AdminStats, type AdminUser } from "./admin-protocol.ts";
+import {
+  ADMIN_GRANTS_PATH,
+  ADMIN_STATS_PATH,
+  ADMIN_USERS_PATH,
+  AdminStatsSchema,
+  AdminUsersSchema,
+  GrantListSchema,
+  GrantResponseSchema,
+  type AdminStats,
+  type AdminUser,
+  type Grant,
+  type GrantRequest,
+} from "./admin-protocol.ts";
 
-export type AdminRead<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly problem: "forbidden" | "unreachable" };
+export type AdminRead<T, Problem extends string = never> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly ok: false; readonly problem: "forbidden" | "unreachable" | Problem };
 
 export interface AdminApi {
   stats(signal: AbortSignal): Promise<AdminRead<AdminStats>>;
   users(query: string, signal: AbortSignal): Promise<AdminRead<readonly AdminUser[]>>;
+  grant(request: GrantRequest): Promise<AdminRead<Grant, "unknown_user">>;
+  grants(username: string, signal: AbortSignal): Promise<AdminRead<readonly Grant[]>>;
 }
 
 export class HttpAdminApi implements AdminApi {
@@ -21,6 +37,31 @@ export class HttpAdminApi implements AdminApi {
     if (!read.ok) return read;
     const parsed = AdminUsersSchema.safeParse(read.value);
     return parsed.success ? { ok: true, value: parsed.data.users } : { ok: false, problem: "unreachable" };
+  }
+
+  async grant(request: GrantRequest): Promise<AdminRead<Grant, "unknown_user">> {
+    try {
+      const response = await fetch(ADMIN_GRANTS_PATH, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { accept: "application/json", "content-type": "application/json", "idempotency-key": crypto.randomUUID() },
+        body: JSON.stringify(request),
+      });
+      if (response.status === 401 || response.status === 403) return { ok: false, problem: "forbidden" };
+      if (response.status === 404) return { ok: false, problem: "unknown_user" };
+      if (!response.ok) return { ok: false, problem: "unreachable" };
+      const parsed = GrantResponseSchema.safeParse(await response.json());
+      return parsed.success ? { ok: true, value: parsed.data.grant } : { ok: false, problem: "unreachable" };
+    } catch {
+      return { ok: false, problem: "unreachable" };
+    }
+  }
+
+  async grants(username: string, signal: AbortSignal): Promise<AdminRead<readonly Grant[]>> {
+    const read = await get(`${ADMIN_GRANTS_PATH}?username=${encodeURIComponent(username)}`, signal);
+    if (!read.ok) return read;
+    const parsed = GrantListSchema.safeParse(read.value);
+    return parsed.success ? { ok: true, value: parsed.data.grants } : { ok: false, problem: "unreachable" };
   }
 }
 

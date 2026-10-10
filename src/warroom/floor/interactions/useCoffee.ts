@@ -1,18 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useWellbeing } from "../../../app/wellbeing-context.ts";
 import { coffeeBrew, getAudio } from "../../../audio/index.ts";
 import { FURNITURE } from "../office.ts";
 import { nowSeconds } from "./clock.ts";
-import { caffeineLeft, canBrew, NO_COFFEE, settle, sip as sipFrom, startBrewing, walkSpeedScale, type Coffee } from "./coffee.ts";
+import { canBrew, NO_COFFEE, settle, sip as sipFrom, SIPS_PER_CUP, startBrewing, walkSpeedScale, type Coffee } from "./coffee.ts";
 import type { Usable } from "./usable.ts";
 
 const MACHINE = FURNITURE.find((item) => item.kind === "coffee");
 
-/** The kitchen coffee machine and the cup in your hand. */
-export function useCoffee() {
+type Options = {
+  /** Only with an empty hand: no brewing while you're holding a snack. */
+  isHandFree: () => boolean;
+  /** The last sip: the empty cup goes on your desk. */
+  onFinished: () => void;
+};
+
+/** The kitchen coffee machine and the cup in your hand; each sip gives back some energy. */
+export function useCoffee({ isHandFree, onFinished }: Options) {
+  const { takeFromPantry, consume } = useWellbeing();
   const [coffee, setCoffee] = useState<Coffee>(NO_COFFEE);
   const coffeeRef = useRef(coffee);
-  // Re-rendered once a second while caffeinated, so the countdown chip ticks.
-  const [, setTick] = useState(0);
 
   const update = useCallback((change: (current: Coffee) => Coffee) => {
     const next = change(coffeeRef.current);
@@ -21,11 +28,18 @@ export function useCoffee() {
   }, []);
 
   const brew = useCallback(() => {
-    if (!canBrew(coffeeRef.current)) return;
+    if (!canBrew(coffeeRef.current) || !isHandFree()) return;
     update((current) => startBrewing(current, nowSeconds()));
+    takeFromPantry("coffee");
     coffeeBrew(getAudio().engine);
-  }, [update]);
-  const sip = useCallback(() => update((current) => sipFrom(current, nowSeconds())), [update]);
+  }, [isHandFree, takeFromPantry, update]);
+  const sip = useCallback(() => {
+    if (coffeeRef.current.cup.kind !== "holding") return;
+    const next = sipFrom(coffeeRef.current, nowSeconds());
+    update(() => next);
+    consume("coffee", 1 / SIPS_PER_CUP);
+    if (next.cup.kind === "none") onFinished();
+  }, [consume, onFinished, update]);
 
   const readyAt = coffee.cup.kind === "brewing" ? coffee.cup.readyAt : null;
   useEffect(() => {
@@ -34,12 +48,6 @@ export function useCoffee() {
     return () => window.clearTimeout(timer);
   }, [readyAt, update]);
 
-  const isCaffeinated = caffeineLeft(coffee, nowSeconds()) > 0;
-  useEffect(() => {
-    if (!isCaffeinated) return;
-    const timer = window.setInterval(() => setTick((tick) => tick + 1), 1000);
-    return () => window.clearInterval(timer);
-  }, [isCaffeinated]);
 
   const usables = useMemo<Usable[]>(
     () => (MACHINE && canBrew(coffee) ? [{ key: "coffee", footprint: MACHINE.footprint, verb: "Make", label: "a coffee", use: brew }] : []),

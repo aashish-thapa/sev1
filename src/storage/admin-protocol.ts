@@ -62,3 +62,31 @@ export type AdminUser = z.output<typeof AdminUserSchema>;
 
 export const AdminUsersSchema = z.object({ users: z.array(AdminUserSchema).max(ADMIN_USERS_LIMIT) });
 export type AdminUsers = z.output<typeof AdminUsersSchema>;
+
+export const ADMIN_GRANTS_PATH = "/api/admin/grants";
+/** The most one grant can give: $100,000. Test money, not a lever for the leaderboard (grants never count toward badges or XP). */
+export const MAX_GRANT_CENTS = 10_000_000;
+
+/** POST /api/admin/grants: put money in a player's wallet. They claim it the next time their game loads. */
+export const GrantRequestSchema = z.object({
+  username: z.string().trim().min(1).max(24),
+  amountCents: z.int().positive().max(MAX_GRANT_CENTS),
+  note: z.string().trim().max(120).default(""),
+});
+export type GrantRequest = z.input<typeof GrantRequestSchema>;
+
+export const GrantSchema = z.object({
+  id: z.string(),
+  username: z.string(),
+  amountCents: z.int().positive(),
+  note: z.string(),
+  grantedBy: z.string(),
+  grantedAt: z.number(),
+  /** Null until the player's game has claimed it into their wallet. */
+  claimedAt: z.number().nullable(),
+});
+export type Grant = z.output<typeof GrantSchema>;
+
+export const GrantResponseSchema = z.object({ grant: GrantSchema });
+/** GET /api/admin/grants?username=: one player's grants, newest first. */
+export const GrantListSchema = z.object({ grants: z.array(GrantSchema).max(100) });

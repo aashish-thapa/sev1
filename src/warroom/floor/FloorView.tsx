@@ -23,7 +23,13 @@ import { PinnedNotes } from "./interactions/PinnedNotes.tsx";
 import { eyeHeightOf, lookWhileSeated, wantsToWalk, type Stance } from "./interactions/stance.ts";
 import { StickyWallPanel } from "./interactions/StickyWallPanel.tsx";
 import type { Usable } from "./interactions/usable.ts";
-import { useCoffee } from "./interactions/useCoffee.ts";
+import { useHands } from "./interactions/useHands.ts";
+import { useBodyCues } from "./interactions/useBodyCues.ts";
+import { HeldSnack } from "./interactions/HeldSnack.tsx";
+import { BITES_PER_SNACK } from "./interactions/snack.ts";
+import { DeskLeftovers } from "./pantry/DeskLeftovers.tsx";
+import { DeskClutter } from "./pantry/DeskClutter.tsx";
+import { MachineAtWork } from "./pantry/MachineAtWork.tsx";
 import { useSeating } from "./interactions/useSeating.ts";
 import { hasPresenceChanged, presenceOf, type PlayerPresence } from "./interactions/presence.ts";
 import { useSmallTalk } from "./interactions/useSmallTalk.ts";
@@ -146,7 +152,10 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
   const career = useCareer();
   const seating = useSeating(getPlayer);
   const readStance = seating.readStance;
-  const coffee = useCoffee();
+  const hands = useHands();
+  const readHolding = hands.holding;
+  const lookScale = hands.lookScale;
+  useBodyCues(hands.wellbeing, true);
   const smallTalk = useSmallTalk(panic);
   const noteWall = useStickyWall();
   const standup = useStandup(isPaged, career.title);
@@ -160,12 +169,12 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
       ...racks.flatMap((rack) => (rack.node ? [{ key: rack.key, footprint: rack.footprint, verb: "Inspect", label: rack.label, use: () => inspect(rack) }] : [])),
       ...WALL_SCREENS.map((screen) => ({ key: screen.id, footprint: screenFootprint(screen), verb: "Discuss at", label: screen.title.split(" · ")[0], use: () => onUseScreen(screen) })),
       ...seating.usables,
-      ...coffee.usables,
+      ...hands.usables,
       ...smallTalk.usables,
       ...noteWall.usables,
       ...standup.usables,
     ],
-    [coffee.usables, inspect, noteWall.usables, onUseScreen, racks, seating.usables, smallTalk.usables, standup.usables],
+    [hands.usables, inspect, noteWall.usables, onUseScreen, racks, seating.usables, smallTalk.usables, standup.usables],
   );
   // Sitting, the only thing to do with E is get up again.
   const focused = seating.standUsable ?? usables.find((usable) => usable.key === focusedKey) ?? null;
@@ -188,12 +197,13 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
     const intent: Intent = {
       forward: axis(["w", "arrowup"], ["s", "arrowdown"]) - state.stick.y,
       strafe: axis(["d"], ["a"]) + state.stick.x,
-      yawDelta: -state.look.x * LOOK_SPEED + axis(["arrowleft", "q"], ["arrowright"]) * seconds * 1.8,
-      pitchDelta: -state.look.y * LOOK_SPEED,
+      // Running on empty makes even turning your head feel heavy.
+      yawDelta: (-state.look.x * LOOK_SPEED + axis(["arrowleft", "q"], ["arrowright"]) * seconds * 1.8) * lookScale(),
+      pitchDelta: -state.look.y * LOOK_SPEED * lookScale(),
     };
     state.look = { x: 0, y: 0 };
     return intent;
-  }, []);
+  }, [lookScale]);
 
   const rackFootprints = useMemo(() => racks.map((rack) => rack.footprint), [racks]);
   const rackFootprintsRef = useRef(rackFootprints);
@@ -223,7 +233,7 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
         rememberControlsLearned();
         setKnowsControls(true);
       }
-      const presence = presenceOf(player, readStance(), isOnLaptopRef.current);
+      const presence = presenceOf(player, readStance(), isOnLaptopRef.current, readHolding());
       if (hasPresenceChanged(lastPresence.current, presence)) {
         lastPresence.current = presence;
         onPresence?.(presence);
@@ -234,7 +244,7 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
         onStep?.(where.surface);
       }
     },
-    [onPresence, onStep, onWhereabouts, readStance],
+    [onPresence, onStep, onWhereabouts, readStance, readHolding],
   );
   const moveStick = useCallback((x: number, y: number) => {
     controls.current.stick = { x, y };
@@ -245,7 +255,7 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
     if (["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright", "q", "e", "c"].includes(key)) event.preventDefault();
     if (isDown && !event.repeat && (key === "e" || key === "enter")) focused?.use();
     if (isDown && !event.repeat && key === "l") onToggleLaptop();
-    if (isDown && !event.repeat && key === "c") coffee.sip();
+    if (isDown && !event.repeat && key === "c") hands.consume();
     if (isDown && !event.repeat && key === "escape" && !isLaptopOpen) seating.stand();
     if (isDown) controls.current.keys.add(key);
     else controls.current.keys.delete(key);
@@ -281,10 +291,11 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
     [isLaptopOpen, onToggleLaptop],
   );
   const rig = useMemo<RigControl>(
-    () => ({ stance: seating.readStance, takeTeleport: seating.takeTeleport, pace: coffee.pace, standUp: seating.stand }),
-    [coffee.pace, seating.readStance, seating.stand, seating.takeTeleport],
+    () => ({ stance: seating.readStance, takeTeleport: seating.takeTeleport, pace: hands.pace, standUp: seating.stand }),
+    [hands.pace, seating.readStance, seating.stand, seating.takeTeleport],
   );
-  const cup = coffee.coffee.cup;
+  const cup = hands.coffee.cup;
+  const snack = hands.snack;
 
   const onRackClick = useCallback(
     (rack: Rack, event: ThreeEvent<MouseEvent>) => {
@@ -316,7 +327,7 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
       className="floor"
       tabIndex={0}
       role="application"
-      aria-label="The office. W A S D or arrow keys to walk, drag to look, E to use what's in front of you (sit at a desk, make coffee, chat, inspect a rack), C to sip your coffee, L to raise your laptop."
+      aria-label="The office. W A S D or arrow keys to walk, drag to look, E to use what's in front of you (sit at a desk, make coffee, chat, inspect a rack), C to sip your coffee or eat your snack, L to raise your laptop."
       onKeyDown={onKey(true)}
       onKeyUp={onKey(false)}
       onBlur={() => controls.current.keys.clear()}
@@ -339,8 +350,17 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
         <SelfBody seed={selfAvatarSeed} getPlayer={getPlayer} getStance={seating.readStance} reduceMotion={reduceMotion} />
         <MyDesk role={role} onOpenTerminal={openTerminalAtDesk} />
         <PinnedNotes notes={noteWall.notes} />
-        {cup.kind === "brewing" && coffee.machine && <BrewingCup machine={coffee.machine} reduceMotion={reduceMotion} />}
+        {cup.kind === "brewing" && hands.machine && <BrewingCup machine={hands.machine} reduceMotion={reduceMotion} />}
+        <MachineAtWork getPlayer={getPlayer} isPlayerBrewing={cup.kind === "brewing"} reduceMotion={reduceMotion} />
         <HeldCup isHeld={cup.kind === "holding"} sips={cup.kind === "holding" ? SIPS_PER_CUP - cup.sipsLeft : 0} isHandsBusy={isLaptopOpen} reduceMotion={reduceMotion} />
+        <HeldSnack
+          item={snack.kind === "holding" ? snack.item : null}
+          bitesTaken={snack.kind === "holding" ? BITES_PER_SNACK - snack.bitesLeft : 0}
+          isHandsBusy={isLaptopOpen}
+          reduceMotion={reduceMotion}
+        />
+        <DeskLeftovers leftovers={hands.leftovers} />
+        <DeskClutter />
         {racks.map((rack) => (
           <RackModel
             key={rack.key}
@@ -369,9 +389,11 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
       )}
       {!isBusy && (
         <LifeHud
-          cup={cup}
-          onSip={coffee.sip}
+          held={cup.kind === "holding" ? "coffee" : snack.kind === "holding" ? "snack" : null}
+          onConsume={hands.consume}
           standup={standup.notice}
+          wellbeing={hands.wellbeing}
+          reduceMotion={reduceMotion}
         />
       )}
       {noteWall.isOpen && <StickyWallPanel notes={noteWall.notes} onPin={noteWall.pin} onClose={noteWall.close} />}

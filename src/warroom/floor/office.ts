@@ -100,13 +100,15 @@ export const SPAWN = { x: PLAYER_DESK.x, z: PLAYER_DESK.z + 1.3, yaw: 0 } as con
 
 
 /** Built-in fittings drawn procedurally; loose furniture and props live in `environment/furnishing.ts`. */
-export type Furniture = { readonly kind: "table" | "counter" | "fridge" | "coffee"; readonly footprint: Footprint; readonly height: number };
+export type Furniture = { readonly kind: "table" | "counter" | "fridge" | "coffee" | "snacks"; readonly footprint: Footprint; readonly height: number };
 
 export const FURNITURE: readonly Furniture[] = [
   { kind: "table", footprint: { x: 10.75, z: 10, width: 3.2, depth: 1.4 }, height: 0.75 },
   { kind: "table", footprint: { x: 18.25, z: 10, width: 3.2, depth: 1.4 }, height: 0.75 },
   { kind: "counter", footprint: { x: 21.2, z: -7, width: 1, depth: 9 }, height: 0.95 },
   { kind: "coffee", footprint: { x: 21.2, z: -9.5, width: 0.6, depth: 0.5 }, height: 1.45 },
+  // On the counter: a fruit bowl and a shelf of packets.
+  { kind: "snacks", footprint: { x: 21.2, z: -6.6, width: 0.6, depth: 0.8 }, height: 1.4 },
   { kind: "fridge", footprint: { x: 21.2, z: -2.8, width: 0.9, depth: 0.8 }, height: 1.9 },
   { kind: "table", footprint: { x: 15, z: -10, width: 1.2, depth: 1.2 }, height: 0.75 },
   { kind: "table", footprint: { x: 15, z: -5, width: 1.2, depth: 1.2 }, height: 0.75 },
@@ -210,6 +212,7 @@ export const NAV_NODES: readonly NavNode[] = [
   node("room-b", 18.25, 7.8),
   node("kitchen", 14, -2),
   node("kitchen:coffee", 19.8, -9.5),
+  node("kitchen:snacks", 19.8, -6.6),
   node("cabin-a:door", -19.25, 1),
   node("cabin-a", -19.25, -1.6),
   node("cabin-b:door", -13.75, 1),
@@ -240,6 +243,7 @@ export const NAV_EDGES: readonly (readonly [string, string])[] = [
   ["room-b:door", "room-b"],
   ["corridor:14", "kitchen"],
   ["kitchen", "kitchen:coffee"],
+  ["kitchen", "kitchen:snacks"],
   ["corridor:-19.25", "cabin-a:door"],
   ["cabin-a:door", "cabin-a"],
   ["corridor:-13.75", "cabin-b:door"],
@@ -249,12 +253,33 @@ export const NAV_EDGES: readonly (readonly [string, string])[] = [
 // ── People ────────────────────────────────────────────────────────
 
 /** What someone standing still is doing — it picks their animation. */
+/** What someone can be seen carrying around the office. */
+export type Carried = "cup" | "snack";
+
 export type StandingActivity = "chatting" | "on-phone" | "on-laptop" | "presenting" | "waiting";
 
 export type Person =
   | { readonly kind: "seated"; readonly id: string; readonly desk: Desk; readonly avatar: AvatarId }
-  | { readonly kind: "standing"; readonly id: string; readonly x: number; readonly z: number; readonly yaw: number; readonly activity: StandingActivity; readonly avatar: AvatarId }
-  | { readonly kind: "walker"; readonly id: string; readonly stops: readonly { readonly node: string; readonly pause: number }[]; readonly avatar: AvatarId; readonly offset: number }
+  | {
+      readonly kind: "standing";
+      readonly id: string;
+      readonly x: number;
+      readonly z: number;
+      readonly yaw: number;
+      readonly activity: StandingActivity;
+      readonly avatar: AvatarId;
+      /** Something in their hand while they stand there. */
+      readonly holds?: Carried;
+    }
+  | {
+      readonly kind: "walker";
+      readonly id: string;
+      readonly stops: readonly { readonly node: string; readonly pause: number }[];
+      readonly avatar: AvatarId;
+      readonly offset: number;
+      /** Picks something up at the `from` stop and carries it until leaving the stop after. */
+      readonly carries?: { readonly item: Carried; readonly from: string };
+    }
   /** Someone from the incident channel: waits at home, walks over when their message lands. */
   | { readonly kind: "messenger"; readonly id: string; readonly name: string; readonly home: string; readonly avatar: AvatarId };
 
@@ -267,10 +292,11 @@ const seatedDesks = DESKS.filter((desk, index) => desk.id !== PLAYER_DESK.id && 
 
 export const PEOPLE: readonly Person[] = [
   ...seatedDesks.slice(0, 18).map((desk, index): Person => ({ kind: "seated", id: `seated-${index}`, desk, avatar: castMember(index) })),
-  { kind: "standing", id: "stand-room-b-1", x: 17.2, z: 11.4, yaw: Math.PI * 0.85, activity: "chatting", avatar: "Male_Adult_07" },
-  { kind: "standing", id: "stand-room-b-2", x: 19.4, z: 11.5, yaw: Math.PI * 1.15, activity: "waiting", avatar: "Female_Adult_08" },
+  { kind: "standing", id: "stand-room-b-1", x: 17.2, z: 11.4, yaw: Math.PI * 0.85, activity: "chatting", avatar: "Male_Adult_07", holds: "cup" },
+  { kind: "standing", id: "stand-room-b-2", x: 19.4, z: 11.5, yaw: Math.PI * 1.15, activity: "waiting", avatar: "Female_Adult_08", holds: "cup" },
   { kind: "standing", id: "stand-kitchen", x: 15.7, z: -5.6, yaw: Math.PI * 0.3, activity: "on-phone", avatar: "Male_Adult_12" },
-  { kind: "walker", id: "walker-coffee", stops: [{ node: "mid:-10.5", pause: 4 }, { node: "kitchen:coffee", pause: 7 }], avatar: "Female_Adult_02", offset: 0 },
+  { kind: "walker", id: "walker-coffee", stops: [{ node: "mid:-10.5", pause: 4 }, { node: "kitchen:coffee", pause: 7 }], avatar: "Female_Adult_02", offset: 0, carries: { item: "cup", from: "kitchen:coffee" } },
+  { kind: "walker", id: "walker-snack", stops: [{ node: "kitchen:snacks", pause: 5 }, { node: "front:-0.5", pause: 6 }], avatar: "Male_Adult_02", offset: 23, carries: { item: "snack", from: "kitchen:snacks" } },
   { kind: "walker", id: "walker-meeting", stops: [{ node: "mid:-0.5", pause: 6 }, { node: "room-a", pause: 9 }], avatar: "Male_Adult_04", offset: 11 },
   { kind: "walker", id: "walker-tech", stops: [{ node: "dc:aisle-mid", pause: 8 }, { node: "corridor:-5.5", pause: 2 }, { node: "kitchen", pause: 5 }], avatar: "Female_Adult_12", offset: 4 },
   { kind: "walker", id: "walker-phone", stops: [{ node: "corridor:-15.5", pause: 3 }, { node: "corridor:4.5", pause: 3 }], avatar: "Male_Adult_09", offset: 17 },

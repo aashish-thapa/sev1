@@ -1,10 +1,12 @@
-import { useEffect, useMemo } from "react";
+import { useContext, useEffect, useMemo } from "react";
 import { careerLevel } from "../domain/career.ts";
 import { warRoomPlays } from "../domain/progress.ts";
 import { Briefing } from "../ui/Briefing.tsx";
 import { OfficeErrorBoundary } from "../ui/OfficeErrorBoundary.tsx";
 import type { ProSale } from "../ui/ProPanel.tsx";
 import type { AdminApi } from "../storage/admin-api.ts";
+import type { CompanyApi } from "../storage/company-api.ts";
+import type { Task } from "../domain/work/task.ts";
 import { DiscussionOverlay } from "../ui/DiscussionOverlay.tsx";
 import { findScenario, soloScenarioFor, TEAM_SCENARIO } from "../warroom/scenarios/index.ts";
 import { preloadFloor } from "../warroom/ui/floorLoader.ts";
@@ -19,21 +21,35 @@ import { CareerContext } from "./career-context.ts";
 import { useActivityClock } from "./useActivityClock.ts";
 import { useShiftGame, type GameServices } from "./useShiftGame.ts";
 import { WalletContext } from "./wallet-context.ts";
+import { AccountContext } from "./useAccount.ts";
+import { useClaimGrants } from "./useClaimGrants.ts";
+import { WellbeingContext } from "./wellbeing-context.ts";
 
 /** Rooms share the app's origin (the dev server proxies /rooms to the room server). */
 function roomUrl(): string {
   return `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/rooms`;
 }
 
-type Props = GameServices & { readonly shareUrl: string; readonly proSale: ProSale; readonly adminApi: AdminApi };
+type Props = GameServices & {
+  readonly shareUrl: string;
+  readonly proSale: ProSale;
+  readonly adminApi: AdminApi;
+  readonly companyApi: CompanyApi;
+  readonly tasks: readonly Task[];
+};
 
-export function App({ shareUrl, proSale, adminApi, ...services }: Props) {
+export function App({ shareUrl, proSale, adminApi, companyApi, tasks, ...services }: Props) {
   const game = useShiftGame(services);
+  useClaimGrants(useContext(AccountContext)?.pendingGrants, game.progress.wallet, game.claimGrant);
   const room = useRoom({ url: roomUrl() });
   const role = game.progress.role ?? "infrastructure";
   const isInRoom = room.room !== null && room.status !== "left" && room.status !== "failed";
   // Solo play rotates through the role's unlocked War Rooms; a room plays the incident its host picked.
   const career = useMemo(() => careerLevel(game.progress), [game.progress]);
+  const wellbeing = useMemo(
+    () => ({ wellbeing: game.progress.wellbeing, takeFromPantry: game.takeFromPantry, consume: game.consume }),
+    [game.consume, game.progress.wellbeing, game.takeFromPantry],
+  );
   const scenario = isInRoom ? (findScenario(room.room?.scenarioId ?? "") ?? TEAM_SCENARIO) : soloScenarioFor(role, warRoomPlays(game.progress), career.level);
 
   // Fetch the 3D office while the player is still in the lobby.
@@ -65,6 +81,7 @@ export function App({ shareUrl, proSale, adminApi, ...services }: Props) {
   return (
     <WalletContext value={game.progress.wallet}>
       <CareerContext value={career}>
+      <WellbeingContext value={wellbeing}>
       {isInOffice ? (
         <OfficeErrorBoundary onLeave={leaveOffice}>
           <WarRoomView
@@ -91,6 +108,14 @@ export function App({ shareUrl, proSale, adminApi, ...services }: Props) {
           onFeatureBadge={game.featureBadge}
           proSale={proSale}
           adminApi={adminApi}
+          company={{
+            api: companyApi,
+            tasks,
+            today: game.today,
+            walletCents: game.progress.wallet.balanceCents,
+            fundCompany: game.fundCompany,
+            claimPayout: game.claimPayout,
+          }}
           fetchLeaderboard={fetchLeaderboard}
           rooms={{
             status: room.status,
@@ -101,6 +126,7 @@ export function App({ shareUrl, proSale, adminApi, ...services }: Props) {
           }}
         />
       )}
+      </WellbeingContext>
       </CareerContext>
     </WalletContext>
   );

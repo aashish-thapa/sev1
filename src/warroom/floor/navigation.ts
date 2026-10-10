@@ -57,7 +57,14 @@ export function route(fromId: string, toId: string): Point[] {
 }
 
 /** A closed loop through `stops`, pausing at each one. */
-export type Loop = { readonly points: readonly Point[]; readonly pauses: readonly number[]; readonly length: number; readonly duration: number };
+export type Loop = {
+  readonly points: readonly Point[];
+  readonly pauses: readonly number[];
+  readonly length: number;
+  readonly duration: number;
+  /** The point index each stop starts at, in stop order. */
+  readonly stopPoints: readonly number[];
+};
 
 export const WALK_SPEED = 1.25;
 
@@ -104,9 +111,11 @@ export function walkingPath(path: readonly Point[]): Point[] {
 export function loopThrough(stops: readonly { node: string; pause: number }[]): Loop {
   const centreline: Point[] = [];
   const stopPauses: number[] = [];
+  const stopCentrelineIndex: number[] = [];
   stops.forEach((stop, index) => {
     const next = stops[(index + 1) % stops.length];
     const leg = route(stop.node, next.node);
+    stopCentrelineIndex.push(centreline.length);
     leg.slice(0, -1).forEach((point, legIndex) => {
       centreline.push(point);
       stopPauses.push(legIndex === 0 ? stop.pause : 0);
@@ -124,27 +133,45 @@ export function loopThrough(stops: readonly { node: string; pause: number }[]): 
     length += Math.hypot(next.x - point.x, next.z - point.z);
   });
   const duration = length / WALK_SPEED + pauses.reduce((sum, pause) => sum + pause, 0);
-  return { points, pauses, length, duration };
+  return { points, pauses, length, duration, stopPoints: stopCentrelineIndex.map((index) => lane.firstOf[index]) };
 }
 
 /** Where a looping walker is at `seconds`, and which way they face. */
-export function positionOnLoop(loop: Loop, seconds: number): { x: number; z: number; heading: number; isWalking: boolean } {
+export type LoopPose = {
+  readonly x: number;
+  readonly z: number;
+  readonly heading: number;
+  readonly isWalking: boolean;
+  /** The stop most recently reached (paused at, or walking away from), as an index into the loop's stops. */
+  readonly lastStop: number;
+};
+
+export function positionOnLoop(loop: Loop, seconds: number): LoopPose {
   let remaining = ((seconds % loop.duration) + loop.duration) % loop.duration;
   for (let index = 0; index < loop.points.length; index += 1) {
     const from = loop.points[index];
     const to = loop.points[(index + 1) % loop.points.length];
     const heading = Math.atan2(to.x - from.x, to.z - from.z);
-    if (remaining < loop.pauses[index]) return { x: from.x, z: from.z, heading, isWalking: false };
+    if (remaining < loop.pauses[index]) return { x: from.x, z: from.z, heading, isWalking: false, lastStop: stopReached(loop, index) };
     remaining -= loop.pauses[index];
     const legTime = Math.hypot(to.x - from.x, to.z - from.z) / WALK_SPEED;
     if (remaining < legTime) {
       const ratio = remaining / legTime;
-      return { x: from.x + (to.x - from.x) * ratio, z: from.z + (to.z - from.z) * ratio, heading, isWalking: true };
+      return { x: from.x + (to.x - from.x) * ratio, z: from.z + (to.z - from.z) * ratio, heading, isWalking: true, lastStop: stopReached(loop, index) };
     }
     remaining -= legTime;
   }
   const last = loop.points[0];
-  return { x: last.x, z: last.z, heading: 0, isWalking: false };
+  return { x: last.x, z: last.z, heading: 0, isWalking: false, lastStop: 0 };
+}
+
+/** Which stop a walker on point `index` last left or is standing at. */
+function stopReached(loop: Loop, index: number): number {
+  let reached = loop.stopPoints.length - 1;
+  loop.stopPoints.forEach((point, stop) => {
+    if (point <= index) reached = stop;
+  });
+  return reached;
 }
 
 /** Walk a one-way path; returns the point reached after `seconds`, clamped at the end. */

@@ -5,6 +5,7 @@ import { tokenColor } from "../tokens.ts";
 import { COUNTER_TOP, machineFrame } from "./coffeeMachine.ts";
 import { FINISHES, type FinishMaterials, type FinishName } from "./finishes.ts";
 import { worldBox } from "./worldUv.ts";
+import { SnackShelf } from "../pantry/SnackShelf.tsx";
 
 const WORKTOP = 0.035;
 const LEG = 0.05;
@@ -77,6 +78,8 @@ function Fitting({ item, kit }: { item: Furniture; kit: Kit }) {
       );
     case "coffee":
       return <CoffeeMachine box={box} height={height} kit={kit} />;
+    case "snacks":
+      return <SnackShelf box={box} wood={kit.finishes.wood} metal={kit.aluminium} />;
   }
 }
 

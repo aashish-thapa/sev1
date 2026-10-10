@@ -1,4 +1,4 @@
-import type { z } from "zod";
+import { z } from "zod";
 import type { ApiError } from "../../src/storage/account-protocol.ts";
 
 /** Saved progress tops out well under this; anything bigger isn't ours. */
@@ -49,4 +49,13 @@ export function clearedSessionCookie(): string {
 export function isSameOrigin(request: Request): boolean {
   const origin = request.headers.get("origin");
   return origin === null || origin === new URL(request.url).origin;
+}
+
+const IDEMPOTENCY_HEADER = "idempotency-key";
+const IdempotencyKeySchema = z.string().regex(/^[A-Za-z0-9_-]{8,64}$/);
+
+/** The client's key for a write it may retry; a missing or malformed key just means no deduplication. */
+export function idempotencyKeyOf(request: Request): string | null {
+  const key = IdempotencyKeySchema.safeParse(request.headers.get(IDEMPOTENCY_HEADER));
+  return key.success ? key.data : null;
 }

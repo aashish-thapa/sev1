@@ -69,7 +69,7 @@ describe("wallet", () => {
   it("credits the balance, the per-reason totals and the ledger together", () => {
     const wallet = payMany(emptyWallet(), [salary(), ratedCard(), incident(80)]);
     expect(wallet.balanceCents).toBe(SALARY_CENTS_PER_MINUTE[2] + CARD_BONUS_CENTS[2] + 80 * INCIDENT_CENTS_PER_POINT_BY_TIER[5]);
-    expect(wallet.paidUnits).toEqual({ salary: 1, card: 1, incident: 1 });
+    expect(wallet.paidUnits).toEqual({ salary: 1, card: 1, incident: 1, payroll: 0, grant: 0 });
     expect(wallet.ledger.map((entry) => entry.reason)).toEqual(["salary", "card", "incident"]);
     expect(wallet.ledger.every((entry) => Number.isInteger(entry.amountCents))).toBe(true);
   });

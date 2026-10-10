@@ -2,7 +2,39 @@
 import { z } from "zod";
 import { ProgressSchema } from "../domain/progress.ts";
 
-export const API_ERRORS = ["invalid", "username_taken", "bad_credentials", "rate_limited", "signed_out", "rejected", "forbidden", "not_found", "billing_unavailable", "no_subscription", "already_subscribed", "payment_provider"] as const;
+/** Startup-mode refusals, one code per rule the server enforced (see worker/company/service.ts). */
+export const COMPANY_ERRORS = [
+  "not_in_company",
+  "not_founder",
+  "not_active",
+  "already_in_company",
+  "below_founding_minimum",
+  "below_minimum",
+  "no_free_desk",
+  "not_enough_funds",
+  "no_free_rack",
+  "unknown_user",
+  "self_invite",
+  "already_invited",
+  "invitation_not_found",
+  "already_settled_today",
+] as const;
+
+export const API_ERRORS = [
+  "invalid",
+  "username_taken",
+  "bad_credentials",
+  "rate_limited",
+  "signed_out",
+  "rejected",
+  "forbidden",
+  "not_found",
+  "billing_unavailable",
+  "no_subscription",
+  "already_subscribed",
+  "payment_provider",
+  ...COMPANY_ERRORS,
+] as const;
 export type ApiError = (typeof API_ERRORS)[number];
 
 /** `tags` are granted marks such as "creator"; older servers omit them. */
@@ -28,8 +60,16 @@ export const PRO_PLANS = ["pro-monthly", "pro-yearly"] as const;
 export type ProPlan = (typeof PRO_PLANS)[number];
 export const CheckoutRequestSchema = z.object({ plan: z.enum(PRO_PLANS) });
 
-/** `entitlements` is null for guests. */
-export const MeResponseSchema = z.object({ account: AccountSchema.nullable(), entitlements: EntitlementsSchema.nullable().default(null) });
+/** Money an admin granted this player, waiting for their game to claim it into the wallet. */
+export const PendingGrantSchema = z.object({ id: z.string().min(1), amountCents: z.int().positive(), note: z.string(), grantedAt: z.number() });
+export type PendingGrant = z.output<typeof PendingGrantSchema>;
+
+/** `entitlements` is null for guests; `pendingGrants` is empty for them and on older servers. */
+export const MeResponseSchema = z.object({
+  account: AccountSchema.nullable(),
+  entitlements: EntitlementsSchema.nullable().default(null),
+  pendingGrants: z.array(PendingGrantSchema).default([]),
+});
 export const SaveResponseSchema = z.object({ updatedAt: z.int().nonnegative() });
 /** A refused save carries what the server kept, so the client can adopt it. */
 export const RejectedSaveSchema = z.object({ error: z.literal("rejected"), current: SyncedProgressSchema.nullable() });

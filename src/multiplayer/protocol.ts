@@ -42,6 +42,8 @@ export const PositionSchema = z.object({
   stance: z.enum(["standing", "seated"]).default("standing"),
   /** Laptop open: teammates see them working on it. */
   isOnLaptop: z.boolean().default(false),
+  /** A coffee or a snack in hand, so teammates see the break; older clients send nothing. */
+  holding: z.enum(["cup", "snack"]).nullable().default(null),
 });
 export type Position = z.output<typeof PositionSchema>;
 

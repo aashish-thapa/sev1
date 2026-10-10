@@ -27,7 +27,10 @@ import type { Tier } from "./tier.ts";
 const TIME_SLACK = 1.25;
 const EVENT_ALLOWANCE = 2;
 const MAX_CARD_CENTS = Math.max(...Object.values(CARD_BONUS_CENTS));
-const EARN_REASONS = ["salary", "card", "incident"] as const satisfies readonly PayReason[];
+const EARN_REASONS = ["salary", "card", "incident", "payroll", "grant"] as const satisfies readonly PayReason[];
+/** Earnings the server issues and the save only claims: each new line must be one the server promised. */
+const SERVER_ISSUED = ["payroll", "grant"] as const satisfies readonly PayReason[];
+type ServerIssued = (typeof SERVER_ISSUED)[number];
 
 /** Looks up the tier of a scenario by id; the Worker answers from the scenario registry. */
 export type TierOf = (scenarioId: string) => Tier | undefined;
@@ -35,18 +38,30 @@ export type TierOf = (scenarioId: string) => Tier | undefined;
 /** With no registry, no incident payout or purchase can be priced — every such line is rejected. */
 const NO_TIERS: TierOf = () => undefined;
 
-/** Is an incident line paid no more than a perfect run of its scenario, at the tier the player's level pays? */
-type FairIncidentPay = (entry: LedgerEntry) => boolean;
-/** Is a purchase line charged at least the price for its scenario at the buyer's level? */
-type FairPrice = (entry: LedgerEntry) => boolean;
+/**
+ * Money the server has promised to move for this player, by wallet ref and exact amount: company
+ * fundings it is waiting for, payroll it booked, and admin grants it issued — none yet claimed.
+ * Loaded before the audit, so the audit itself stays pure.
+ */
+export type PromisedMoney = {
+  readonly fundings: ReadonlyMap<string, number>;
+  readonly payouts: ReadonlyMap<string, number>;
+  readonly grants: ReadonlyMap<string, number>;
+};
+
+export const NO_PROMISED_MONEY: PromisedMoney = { fundings: new Map(), payouts: new Map(), grants: new Map() };
+
+/** Does the server stand behind this new ledger line (incident pay within its tier's cap, a purchase it can price, or pay it booked)? */
+type Vouch = (entry: LedgerEntry) => boolean;
 
 export function isPlausibleWallet(
   previous: Wallet,
   next: Wallet,
   elapsedSeconds: number,
   topLevel: Level = 4,
-  isFairIncidentPay: FairIncidentPay = () => false,
-  isFairPrice: FairPrice = () => false,
+  isFairIncidentPay: Vouch = () => false,
+  isAllowedSpend: Vouch = () => false,
+  isBookedPay: Vouch = () => false,
 ): boolean {
   if (!(elapsedSeconds >= 0)) return false;
   const seconds = elapsedSeconds * TIME_SLACK;
@@ -81,7 +96,15 @@ export function isPlausibleWallet(
   const fresh = freshLines(previous, next);
   if (fresh.some((entry) => entry.reason === "incident" && !isFairIncidentPay(entry))) return false;
   const purchases = fresh.filter((entry) => (SPEND_REASONS as readonly string[]).includes(entry.reason));
-  if (purchases.some((entry) => entry.amountCents >= 0 || !isFairPrice(entry))) return false;
+  if (purchases.some((entry) => entry.amountCents >= 0 || !isAllowedSpend(entry))) return false;
+  // Payroll and grants come only from money the server issued, and each new cent of them must be one of those lines.
+  for (const reason of SERVER_ISSUED) {
+    const issued = fresh.filter((entry) => entry.reason === reason);
+    if (issued.some((entry) => entry.amountCents <= 0 || !isBookedPay(entry))) return false;
+    if (delta(reason, "earnedCents") !== issued.reduce((sum, entry) => sum + entry.amountCents, 0)) return false;
+  }
+  const companySpend = purchases.filter((entry) => entry.reason === "company").reduce((sum, entry) => sum - entry.amountCents, 0);
+  if (next.spentCents.company - previous.spentCents.company !== companySpend) return false;
 
   return isLedgerConsistent(previous, next);
 }
@@ -90,7 +113,13 @@ export function isPlausibleWallet(
  * Is `next` an honest successor of `previous` after `elapsedSeconds`? `tierOf` caps each incident
  * payout and prices each solution bought in between; without it, a save with either is refused.
  */
-export function isPlausibleProgress(previous: Progress, next: Progress, elapsedSeconds: number, tierOf: TierOf = NO_TIERS): boolean {
+export function isPlausibleProgress(
+  previous: Progress,
+  next: Progress,
+  elapsedSeconds: number,
+  tierOf: TierOf = NO_TIERS,
+  promised: PromisedMoney = NO_PROMISED_MONEY,
+): boolean {
   // Career level reads correctCards and passed War Rooms, so each may only grow by work that was also paid for.
   const newCorrect = next.correctCards - previous.correctCards;
   const newPaidCards = next.wallet.paidUnits.card - previous.wallet.paidUnits.card;
@@ -98,21 +127,25 @@ export function isPlausibleProgress(previous: Progress, next: Progress, elapsedS
   const lowestLevel = careerLevel(previous).level;
   const topLevel = careerLevel(next).level;
   const tierFrom = (scenarioId: string | null) => (scenarioId === null ? undefined : tierOf(scenarioId));
-  const isFairIncidentPay: FairIncidentPay = (entry) => {
+  const isFairIncidentPay: Vouch = (entry) => {
     const tier = tierFrom(scenarioOfIncident(entry.ref));
     // A promotion can land mid-sync, so the level the save reaches sets the cap.
     return tier !== undefined && entry.amountCents <= 100 * INCIDENT_CENTS_PER_POINT_BY_TIER[paidTier(tier, topLevel)];
   };
-  const isFairPrice: FairPrice = (entry) => {
+  const isAllowedSpend: Vouch = (entry) => {
+    // A company seed must be exactly what the server is waiting for, under the ref it issued.
+    if (entry.reason === "company") return promised.fundings.get(entry.ref) === -entry.amountCents;
     const tier = tierFrom(scenarioOfPurchase(entry.ref));
     // Price rises with level, so charging at the level the buyer started this sync from is the floor.
     return tier !== undefined && -entry.amountCents >= solutionPriceCents(tier, lowestLevel);
   };
+  const issuedBy: Readonly<Record<ServerIssued, ReadonlyMap<string, number>>> = { payroll: promised.payouts, grant: promised.grants };
+  const isBookedPay: Vouch = (entry) => (SERVER_ISSUED as readonly string[]).includes(entry.reason) && issuedBy[entry.reason as ServerIssued].get(entry.ref) === entry.amountCents;
   return (
     newCorrect >= 0 &&
     newCorrect <= newPaidCards &&
     improvedPassingWarRooms(previous, next) <= newPaidIncidents &&
-    isPlausibleWallet(previous.wallet, next.wallet, elapsedSeconds, topLevel, isFairIncidentPay, isFairPrice)
+    isPlausibleWallet(previous.wallet, next.wallet, elapsedSeconds, topLevel, isFairIncidentPay, isAllowedSpend, isBookedPay)
   );
 }
 

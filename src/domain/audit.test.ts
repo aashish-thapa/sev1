@@ -128,8 +128,8 @@ describe("incident payouts on sync", () => {
       wallet: {
         ...wallet,
         balanceCents: wallet.balanceCents - cents,
-        spentCents: { solution: wallet.spentCents.solution + cents },
-        boughtUnits: { solution: wallet.boughtUnits.solution + 1 },
+        spentCents: { ...wallet.spentCents, solution: wallet.spentCents.solution + cents },
+        boughtUnits: { ...wallet.boughtUnits, solution: wallet.boughtUnits.solution + 1 },
         nextSeq: wallet.nextSeq + 1,
         ledger: [...wallet.ledger, { seq: wallet.nextSeq, at: AT, reason: "card", ref: payRef.card("x", AT), amountCents: -cents, units: 1, note: "Correct call" }],
       },

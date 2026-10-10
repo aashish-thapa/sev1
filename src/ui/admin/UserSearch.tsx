@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { AdminUser } from "../../storage/admin-protocol.ts";
 import type { AdminApi, AdminRead } from "../../storage/admin-api.ts";
+import { GiveMoney } from "./GiveMoney.tsx";
 
 /** Pause after typing before searching, so each keystroke isn't a query. */
 const SEARCH_DELAY_MS = 300;
@@ -9,6 +10,7 @@ const SEARCH_DELAY_MS = 300;
 export function UserSearch({ api }: { api: AdminApi }) {
   const [query, setQuery] = useState("");
   const [result, setResult] = useState<AdminRead<readonly AdminUser[]> | null>(null);
+  const [givingTo, setGivingTo] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -48,10 +50,13 @@ export function UserSearch({ api }: { api: AdminApi }) {
               <th scope="col">Tags</th>
               <th scope="col">Joined</th>
               <th scope="col">Last played</th>
+              <th scope="col">
+                <span className="admin__dim">Money</span>
+              </th>
             </tr>
           </thead>
           <tbody>
-            {result.value.map((user) => (
+            {result.value.map((user) => [
               <tr key={user.username}>
                 <th scope="row">{user.username}</th>
                 <td>{user.title}</td>
@@ -59,8 +64,20 @@ export function UserSearch({ api }: { api: AdminApi }) {
                 <td>{user.tags.length > 0 ? user.tags.join(", ") : <span className="admin__dim">none</span>}</td>
                 <td>{when(user.createdAt)}</td>
                 <td>{when(user.lastActive)}</td>
-              </tr>
-            ))}
+                <td>
+                  <button type="button" className="admin__refresh" aria-expanded={givingTo === user.username} onClick={() => setGivingTo(givingTo === user.username ? null : user.username)}>
+                    Give money
+                  </button>
+                </td>
+              </tr>,
+              givingTo === user.username && (
+                <tr key={`${user.username}:give`}>
+                  <td colSpan={7}>
+                    <GiveMoney api={api} username={user.username} onClose={() => setGivingTo(null)} />
+                  </td>
+                </tr>
+              ),
+            ])}
           </tbody>
         </table>
       )}

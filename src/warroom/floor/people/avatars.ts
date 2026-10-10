@@ -1,4 +1,4 @@
-import { AnimationClip, type Object3D, type SkinnedMesh } from "three";
+import { AnimationClip, type Mesh, type Object3D, type SkinnedMesh } from "three";
 import { clone as cloneSkinned } from "three/examples/jsm/utils/SkeletonUtils.js";
 import { assetPath, AVATARS, CLIP_NAMES, type AvatarId, type ClipName, type Sex } from "../assets/catalog.ts";
 import { assetUrl } from "../assets/url.ts";
@@ -40,6 +40,19 @@ export function cloneAvatar(scene: Object3D): Object3D {
     node.castShadow = true;
   });
   return copy;
+}
+
+/** Rocketbox gives the head, and the hair with lashes, their own materials (`…_head`, `…_opacity`). */
+const HEAD_MATERIAL = /_(head|opacity)$/;
+
+/** Your own body in first person: the camera sits where the eyes are, so the head would fill the view. */
+export function hideHead(body: Object3D): void {
+  body.traverse((node) => {
+    const mesh = node as Mesh;
+    if (!mesh.isMesh) return;
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    if (materials.some((material) => HEAD_MATERIAL.test(material.name))) mesh.visible = false;
+  });
 }
 
 /** Rocketbox takes animate end-effector bones ("Nub", fingertips, toes) the avatars were exported without. */

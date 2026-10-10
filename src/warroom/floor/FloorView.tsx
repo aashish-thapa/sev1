@@ -24,6 +24,7 @@ type Usable = {
   readonly target: { readonly kind: "rack"; readonly rack: Rack } | { readonly kind: "screen"; readonly screen: WallScreen };
 };
 import { People, Teammates } from "./People.tsx";
+import { SelfBody } from "./people/SelfBody.tsx";
 import type { Teammate } from "../ui/feed.ts";
 import { facing, walk, type Intent, type Player } from "./player.ts";
 import { Beacon, RackModel } from "./Racks.tsx";
@@ -55,6 +56,8 @@ type Props = {
   teammates?: readonly Teammate[];
   /** Your own position, for teammates to see (the room client throttles it). */
   onPresence?: (position: { x: number; z: number; yaw: number }) => void;
+  /** Picks your own body; teammates derive the same avatar from the same seed. */
+  selfAvatarSeed: string;
 };
 
 const STRIDE_METRES = 0.72;
@@ -91,7 +94,7 @@ type Controls = {
 };
 
 /** Walkable server hall. Each rack is a live object in the same simulation as the terminal. */
-export default function FloorView({ cluster, scenario, role, selected, comms, isLaptopOpen, isOverlayOpen, panic, laptopScreenRef, onInspect, onUseScreen, onToggleLaptop, onWhereabouts, onStep, teammates = [], onPresence }: Props) {
+export default function FloorView({ cluster, scenario, role, selected, comms, isLaptopOpen, isOverlayOpen, panic, laptopScreenRef, onInspect, onUseScreen, onToggleLaptop, onWhereabouts, onStep, teammates = [], onPresence, selfAvatarSeed }: Props) {
   const wrapper = useRef<HTMLDivElement>(null);
   const [start] = useState(() => startFor(role));
   const isLaptopOpenRef = useRef(isLaptopOpen);
@@ -281,6 +284,7 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
         <Office panic={panic} reduceMotion={reduceMotion} hasShadows={settings.hasShadows} />
         <People comms={comms} now={cluster.t} getPlayer={getPlayer} reduceMotion={reduceMotion} panic={panic} />
         <Teammates teammates={teammates} reduceMotion={reduceMotion} />
+        <SelfBody seed={selfAvatarSeed} getPlayer={getPlayer} reduceMotion={reduceMotion} />
         {racks.map((rack) => (
           <RackModel
             key={rack.key}

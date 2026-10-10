@@ -61,16 +61,62 @@ export type Loop = { readonly points: readonly Point[]; readonly pauses: readonl
 
 export const WALK_SPEED = 1.25;
 
+/** How far right of a nav edge's centreline people walk, so oncoming traffic passes side by side. */
+export const LANE_OFFSET = 0.35;
+
+function rightOf(from: Point, to: Point): Point {
+  const length = Math.hypot(to.x - from.x, to.z - from.z) || 1;
+  return { x: -(to.z - from.z) / length, z: (to.x - from.x) / length };
+}
+
+/**
+ * Shifts a polyline into its keep-right lane. Each corner splits into the end of the
+ * incoming lane and the start of the outgoing one (a bevel), so U-turns stay finite.
+ * Returns, for every input point, the index of its first output point.
+ */
+function keepRight(points: readonly Point[], isClosed: boolean): { points: Point[]; firstOf: number[] } {
+  const out: Point[] = [];
+  const firstOf: number[] = [];
+  const count = points.length;
+  points.forEach((point, index) => {
+    firstOf.push(out.length);
+    const previous = isClosed ? points[(index - 1 + count) % count] : points[index - 1];
+    const next = isClosed ? points[(index + 1) % count] : points[index + 1];
+    if (!isClosed && (index === 0 || index === count - 1)) {
+      out.push(point);
+      return;
+    }
+    const incoming = rightOf(previous, point);
+    const outgoing = rightOf(point, next);
+    out.push({ x: point.x + incoming.x * LANE_OFFSET, z: point.z + incoming.z * LANE_OFFSET });
+    if (Math.hypot(incoming.x - outgoing.x, incoming.z - outgoing.z) > 1e-3) {
+      out.push({ x: point.x + outgoing.x * LANE_OFFSET, z: point.z + outgoing.z * LANE_OFFSET });
+    }
+  });
+  return { points: out, firstOf };
+}
+
+/** A one-way walk in the keep-right lane; the start and end stay exactly where asked. */
+export function walkingPath(path: readonly Point[]): Point[] {
+  return keepRight(path, false).points;
+}
+
 export function loopThrough(stops: readonly { node: string; pause: number }[]): Loop {
-  const points: Point[] = [];
-  const pauses: number[] = [];
+  const centreline: Point[] = [];
+  const stopPauses: number[] = [];
   stops.forEach((stop, index) => {
     const next = stops[(index + 1) % stops.length];
     const leg = route(stop.node, next.node);
     leg.slice(0, -1).forEach((point, legIndex) => {
-      points.push(point);
-      pauses.push(legIndex === 0 ? stop.pause : 0);
+      centreline.push(point);
+      stopPauses.push(legIndex === 0 ? stop.pause : 0);
     });
+  });
+  const lane = keepRight(centreline, true);
+  const points = lane.points;
+  const pauses = points.map(() => 0);
+  lane.firstOf.forEach((outIndex, index) => {
+    pauses[outIndex] = stopPauses[index];
   });
   let length = 0;
   points.forEach((point, index) => {

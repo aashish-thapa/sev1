@@ -3,7 +3,7 @@ import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import { AnimationMixer, Frustum, Matrix4, Sphere, Vector3, type AnimationAction, type Group } from "three";
 import type { AvatarId, ClipName } from "../assets/catalog.ts";
-import { avatarUrl, clipsFor, clipUrls, cloneAvatar, sexOf, STRIDE_SPEED } from "./avatars.ts";
+import { avatarUrl, clipsFor, clipUrls, cloneAvatar, hideHead, sexOf, STRIDE_SPEED } from "./avatars.ts";
 import type { Motion } from "./behaviour.ts";
 
 /** Draco is unused; meshopt decodes the geometry and animation buffers. */
@@ -21,13 +21,19 @@ type Props = {
   id: AvatarId;
   /** Read every frame; the avatar blends to whatever it returns. */
   motion: () => Motion;
+  /** The player's own body: no head, so the camera can sit at the eyes. */
+  isFirstPerson?: boolean;
 };
 
-export function Avatar({ id, motion }: Props) {
+export function Avatar({ id, motion, isFirstPerson = false }: Props) {
   const sex = sexOf(id);
   const avatar = useGLTF(avatarUrl(id), USE_DRACO, USE_MESHOPT);
   const takes = useGLTF(clipUrls(sex), USE_DRACO, USE_MESHOPT);
-  const body = useMemo(() => cloneAvatar(avatar.scene), [avatar.scene]);
+  const body = useMemo(() => {
+    const copy = cloneAvatar(avatar.scene);
+    if (isFirstPerson) hideHead(copy);
+    return copy;
+  }, [avatar.scene, isFirstPerson]);
   const clips = useMemo(() => clipsFor(takes.map((take) => take.animations), body), [takes, body]);
   const mixer = useMemo(() => new AnimationMixer(body), [body]);
   const group = useRef<Group>(null);

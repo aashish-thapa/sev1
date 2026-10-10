@@ -35,6 +35,8 @@ type Props = {
 
 export type TeamContext = {
   readonly code: string;
+  /** Your player id; teammates pick your avatar from it, so your own body must too. */
+  readonly selfId: string;
   readonly teammates: readonly Teammate[];
   readonly activity: readonly TeamActivity[];
   onPresence(position: { x: number; z: number; yaw: number }): void;
@@ -227,6 +229,7 @@ function Immersive({ scenario, incident, comms, hud, selected, onSelect, termina
           onWhereabouts={setWhere}
           onStep={onStep}
           teammates={team?.teammates ?? []}
+          selfAvatarSeed={team?.selfId ?? role}
           onPresence={team?.onPresence}
           onToggleLaptop={toggleLaptop}
         />

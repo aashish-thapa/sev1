@@ -1,5 +1,5 @@
 import { useFrame } from "@react-three/fiber";
-import { Suspense, useEffect, useMemo, useRef } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { Group } from "three";
 import type { CommsMessage } from "../scenario.ts";
 import type { Teammate } from "../ui/feed.ts";
@@ -9,8 +9,10 @@ import { Avatar } from "./people/Avatar.tsx";
 import { avatarFor, HEAD_HEIGHT } from "./people/avatars.ts";
 import { motionFor, type Situation } from "./people/behaviour.ts";
 import { bubbleTexture } from "./people/bubble.ts";
+import { easeSidestep, rightOf, sidestepFor, type Crowd } from "./people/crowd.ts";
 import { SpeechBubble } from "./people/SpeechBubble.tsx";
 import { StandIn } from "./people/StandIn.tsx";
+import { follow, STILL_SPEED, type Follower } from "./people/follow.ts";
 import { useVisit } from "./people/useVisit.ts";
 
 type Props = {
@@ -30,25 +32,31 @@ export function People({ comms, now, getPlayer, reduceMotion, panic }: Props) {
   useEffect(() => {
     panicLevel.current = panic;
   }, [panic]);
+  const crowd = useRef<Crowd>(new Map());
+  useFrame(() => {
+    crowd.current.set("player", getPlayer());
+  });
   return (
     <>
       {PEOPLE.map((person) => (
-        <PersonModel key={person.id} person={person} comms={comms} now={now} getPlayer={getPlayer} reduceMotion={reduceMotion} panic={panicLevel} />
+        <PersonModel key={person.id} person={person} comms={comms} now={now} getPlayer={getPlayer} reduceMotion={reduceMotion} panic={panicLevel} crowd={crowd} />
       ))}
     </>
   );
 }
 
-type PersonProps = Omit<Props, "panic"> & { person: Person; panic: Level };
+type PersonProps = Omit<Props, "panic"> & { person: Person; panic: Level; crowd: { readonly current: Crowd } };
 
-function PersonModel({ person, comms, now, getPlayer, reduceMotion, panic }: PersonProps) {
+function PersonModel({ person, comms, now, getPlayer, reduceMotion, panic, crowd }: PersonProps) {
   const body = useRef<Group>(null);
+  // Metres to the right of their lane they've stepped to let someone pass.
+  const sidestep = useRef(0);
   const situation = useRef<Situation>(person.kind === "seated" ? { state: "seated" } : { state: "standing", activity: "waiting" });
   const loop = useMemo(() => (person.kind === "walker" ? loopThrough(person.stops) : null), [person]);
   const visit = useVisit(person, comms, now, getPlayer);
   const motion = () => motionFor(situation.current, panic.current, reduceMotion);
 
-  useFrame(({ clock }) => {
+  useFrame(({ clock }, delta) => {
     const group = body.current;
     if (!group) return;
     const time = clock.elapsedTime;
@@ -73,7 +81,17 @@ function PersonModel({ person, comms, now, getPlayer, reduceMotion, panic }: Per
           : { state: "standing", activity: "waiting" };
     }
 
-    group.position.set(pose.x, 0, pose.z);
+    if (pose.isWalking) {
+      const right = rightOf(pose.heading);
+      const at = { x: pose.x + right.x * sidestep.current, z: pose.z + right.z * sidestep.current };
+      sidestep.current = easeSidestep(sidestep.current, sidestepFor(person.id, at, pose.heading, crowd.current), delta);
+    }
+    // Held while paused so nobody slides sideways on the spot; given back once walking clears.
+    const right = rightOf(pose.heading);
+    const x = pose.x + right.x * sidestep.current;
+    const z = pose.z + right.z * sidestep.current;
+    crowd.current.set(person.id, { x, z });
+    group.position.set(x, 0, z);
     group.rotation.y = pose.heading;
   });
 
@@ -97,34 +115,32 @@ export function Teammates({ teammates, reduceMotion }: { teammates: readonly Tea
   );
 }
 
-/** Below this ground speed (m/s) a teammate reads as standing, not shuffling. */
-const STILL_SPEED = 0.15;
-
 function TeammateModel({ teammate, reduceMotion }: { teammate: Teammate; reduceMotion: boolean }) {
   const body = useRef<Group>(null);
   const target = teammate.position;
-  const speed = useRef(0);
+  const follower = useRef<Follower>({ x: target?.x ?? 0, z: target?.z ?? 0, speed: 0 });
   const tag = useMemo(() => bubbleTexture(teammate.name, teammate.roleLabel), [teammate.name, teammate.roleLabel]);
   useEffect(() => () => tag.dispose(), [tag]);
-  const motion = () =>
-    motionFor(speed.current > STILL_SPEED ? { state: "walking", speed: speed.current } : { state: "standing", activity: "waiting" }, 0, reduceMotion);
+  const motion = () => {
+    const { speed } = follower.current;
+    return motionFor(speed > STILL_SPEED ? { state: "walking", speed } : { state: "standing", activity: "waiting" }, 0, reduceMotion);
+  };
 
   useFrame((_, delta) => {
     const group = body.current;
-    if (!group || !target || delta <= 0) return;
-    // Presence arrives ~10×/s; ease toward it so movement reads as walking, not teleporting.
-    const ease = 1 - Math.exp(-delta * 10);
-    const stepX = (target.x - group.position.x) * ease;
-    const stepZ = (target.z - group.position.z) * ease;
-    group.position.x += stepX;
-    group.position.z += stepZ;
+    if (!group || !target) return;
+    // Presence arrives ~10×/s; easing toward it makes movement read as walking, and gives the legs a real speed.
+    follower.current = follow(follower.current, target, delta);
+    group.position.x = follower.current.x;
+    group.position.z = follower.current.z;
     group.rotation.y = target.yaw + Math.PI;
-    speed.current += (Math.hypot(stepX, stepZ) / delta - speed.current) * Math.min(1, delta * 6);
   });
 
+  // Placed once on arrival; after that only the easing above moves the body, so its speed is real.
+  const [arrival] = useState(() => [target?.x ?? 0, 0, target?.z ?? 0] as const);
   const aspect = tag.image.width / tag.image.height;
   return (
-    <group ref={body} position={[target?.x ?? 0, 0, target?.z ?? 0]}>
+    <group ref={body} position={arrival}>
       <Suspense fallback={<StandIn isSeated={false} />}>
         <Avatar id={avatarFor(teammate.id)} motion={motion} />
       </Suspense>

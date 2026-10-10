@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { CommsMessage } from "../../scenario.ts";
-import { navNode, nearestNode, positionOnPath, route, type Point } from "../navigation.ts";
+import { navNode, nearestNode, positionOnPath, route, walkingPath, type Point } from "../navigation.ts";
 import type { Person } from "../office.ts";
 
 /** How long (simulated seconds) a colleague stays at your desk after their message. */
@@ -17,7 +17,8 @@ export function useVisit(person: Person, comms: readonly CommsMessage[], now: nu
   const home = person.kind === "messenger" ? navNode(person.home) : { x: 0, z: 0, id: "" };
   const message = name ? ([...comms].reverse().find((item) => item.from.startsWith(name)) ?? null) : null;
   const isVisiting = message !== null && now - message.at < VISIT_SECONDS;
-  const trip = useRef<{ key: string; path: Point[]; startedAt: number | null; direction: "going" | "returning" } | null>(null);
+  // `centreline` is kept so the walk back can take its own keep-right lane.
+  const trip = useRef<{ key: string; centreline: Point[]; path: Point[]; startedAt: number | null; direction: "going" | "returning" } | null>(null);
   const arrived = useRef(false);
 
   const key = message ? `${message.at}:${message.text}` : "";
@@ -30,10 +31,12 @@ export function useVisit(person: Person, comms: readonly CommsMessage[], now: nu
       const reach = Math.hypot(player.x - last.x, player.z - last.z);
       // Stop at conversational distance, on the side they arrived from.
       const stand = reach > 1.7 ? { x: player.x + ((last.x - player.x) / reach) * 1.6, z: player.z + ((last.z - player.z) / reach) * 1.6 } : last;
-      trip.current = { key, path: [...towardPlayer, stand], startedAt: null, direction: "going" };
+      const centreline = [...towardPlayer, stand];
+      trip.current = { key, centreline, path: walkingPath(centreline), startedAt: null, direction: "going" };
       arrived.current = false;
     } else if (trip.current?.direction === "going") {
-      trip.current = { ...trip.current, path: [...trip.current.path].reverse(), startedAt: null, direction: "returning" };
+      const centreline = [...trip.current.centreline].reverse();
+      trip.current = { ...trip.current, centreline, path: walkingPath(centreline), startedAt: null, direction: "returning" };
       arrived.current = false;
     }
   }, [getPlayer, isVisiting, key, name, person]);

@@ -27,6 +27,7 @@ export function TeamIncident({ room, scenario, role, overlay, onUseScreen, onClo
     if (!room.room) return null;
     return {
       code: room.room.code,
+      selfId: room.room.playerId,
       teammates: room.players
         .filter((player) => player.id !== me && player.isConnected)
         .map((player) => ({ id: player.id, name: player.name, roleLabel: ROLE_INFO[player.role].label, position: player.position })),

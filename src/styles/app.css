@@ -1059,6 +1059,29 @@ a {
   color: var(--color-ink-2);
 }
 
+/* Shown in place of the office when it fails to render. */
+.office-error {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-lg);
+  min-height: 100dvh;
+  padding-inline: var(--space-md);
+}
+
+.office-error__detail {
+  overflow-wrap: anywhere;
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.office-error__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
 .paged__rules {
   display: flex;
   flex-direction: column;

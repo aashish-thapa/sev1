@@ -2,6 +2,7 @@ import { useEffect, useMemo } from "react";
 import { careerLevel } from "../domain/career.ts";
 import { warRoomPlays } from "../domain/progress.ts";
 import { Briefing } from "../ui/Briefing.tsx";
+import { OfficeErrorBoundary } from "../ui/OfficeErrorBoundary.tsx";
 import { DiscussionOverlay } from "../ui/DiscussionOverlay.tsx";
 import { findScenario, soloScenarioFor, TEAM_SCENARIO } from "../warroom/scenarios/index.ts";
 import { preloadFloor } from "../warroom/ui/floorLoader.ts";
@@ -49,21 +50,23 @@ export function App({ shareUrl, ...services }: Props) {
     />
   ) : null;
 
+  const leaveOffice = () => {
+    if (isInRoom) room.leave();
+    game.leaveOffice();
+  };
+
   return (
     <WalletContext value={game.progress.wallet}>
       <CareerContext value={career}>
       {isInOffice ? (
-        <>
+        <OfficeErrorBoundary onLeave={leaveOffice}>
           <WarRoomView
             key={`${scenario.id}:${isInRoom ? room.room?.code : "solo"}`}
             scenario={scenario}
             role={role}
             onFinish={(result, startedAt) => game.recordWarRoom(scenario, result, { isTeam: isInRoom, startedAt })}
             onBuySolution={(startedAt) => game.buySolution(scenario, startedAt)}
-            onLeave={() => {
-              if (isInRoom) room.leave();
-              game.leaveOffice();
-            }}
+            onLeave={leaveOffice}
             room={isInRoom ? room : undefined}
             onUseScreen={(screen) => game.openDiscussion(screen.role)}
             onPaged={game.closeDiscussion}
@@ -71,7 +74,7 @@ export function App({ shareUrl, ...services }: Props) {
           />
           <PayoutToast />
           <PromotionToast />
-        </>
+        </OfficeErrorBoundary>
       ) : (
         <Briefing
           progress={game.progress}

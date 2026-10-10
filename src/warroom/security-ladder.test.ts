@@ -4,6 +4,7 @@ import { advance, debrief, declareResolved, openIncident, type Incident } from "
 import type { Scenario } from "./scenario.ts";
 import { botFloodSingleIp, FLOOD_IP } from "./scenarios/bot-flood-single-ip.ts";
 import { checkoutCommerce } from "./scenarios/checkout-commerce.ts";
+import { credentialStuffingHosting, SIGN_IN_ALERT } from "./scenarios/credential-stuffing-hosting.ts";
 import { unlockedWarRooms } from "./scenarios/index.ts";
 import { scaledToZero } from "./scenarios/scaled-to-zero.ts";
 import { runLine } from "./shell/shell.ts";
@@ -212,7 +213,7 @@ describe("siem resolve --contained-by", () => {
 
 // ── The security ladder ─────────────────────────────────────────────────────────
 
-const LADDER: readonly Scenario[] = [botFloodSingleIp];
+const LADDER: readonly Scenario[] = [botFloodSingleIp, credentialStuffingHosting];
 /** Paced like solutions.test.ts: first move 20 s in, a command every 8 s, then time for the edge to settle. */
 const FIRST_MOVE_AT = 20;
 const THINKING_SECONDS = 8;
@@ -377,5 +378,53 @@ describe("bot-flood-single-ip", () => {
     expect(refused).toBe(false);
     expect(securityObjective(result)?.isMet).toBe(false);
     expect(result.points).toBeLessThan(correct.points - 50);
+  });
+});
+
+describe("credential-stuffing-hosting", () => {
+  const scenario = credentialStuffingHosting;
+
+  it("puts 120 hosting addresses in two networks above every customer", () => {
+    const opened = openIncident(scenario);
+    const networks = shellText(scenario, "waf top --by asn", opened);
+    expect(networks).toMatch(/^AS14061\s+DIGITALOCEAN-ASN\s+hosting \/ datacenter\s+72\s/m);
+    expect(networks).toMatch(/^AS16276\s+OVH\s+hosting \/ datacenter\s+48\s/m);
+    expect(shellText(scenario, "siem search auth-summary", opened)).toMatch(/distinct usernames per source IP \(p99\)\s+1,500\s+3/);
+  });
+
+  it("a false-positive disposition closes the alert while the stuffing goes on, and the pager stays refused", () => {
+    const dismissed = trapped(scenario, `siem resolve ${SIGN_IN_ALERT} --disposition false-positive`);
+    expect(commerceOf(dismissed).alerts[0].resolution?.disposition).toBe("false-positive");
+    expect(customersBlocked(dismissed)).toBe(0);
+    expect(attackBlocked(dismissed)).toBe(0);
+    expect(dismissed.cluster.errorRate).toBeGreaterThan(0.2);
+    const { refused, result } = closeOut(scenario, dismissed);
+    expect(refused).toBe(true);
+    expect(result.objectives?.find((objective) => objective.label.startsWith(SIGN_IN_ALERT))?.isMet).toBe(false);
+  });
+
+  it("blocking the top 500 stops the stuffing but turns away 35% of customers", () => {
+    const blunt = trapped(scenario, "waf block --top 500");
+    expect(customersBlocked(blunt)).toBeCloseTo(0.353, 3);
+    expect(attackBlocked(blunt)).toBe(1);
+    expect(securityObjective(closeOut(scenario, blunt).result)?.isMet).toBe(false);
+  });
+
+  it("blocking both hosting ranges works as well as the rate limit", () => {
+    const blocked = trapped(
+      scenario,
+      "waf block 159.89.128.0/20",
+      "waf block 51.75.0.0/16",
+      `siem resolve ${SIGN_IN_ALERT} --disposition true-positive --contained-by r-0004`,
+    );
+    expect(attackBlocked(blocked)).toBe(1);
+    expect(customersBlocked(blocked)).toBe(0);
+    expect(["S", "A"]).toContain(closeOut(scenario, blocked).result.grade);
+  });
+
+  it("a rate limit too loose for the stuffing leaves the 5xx up", () => {
+    const loose = trapped(scenario, "waf ratelimit 60/1m");
+    expect(attackBlocked(loose)).toBeCloseTo(0.42, 2);
+    expect(loose.cluster.errorRate).toBeGreaterThan(0.05);
   });
 });

@@ -18,6 +18,8 @@ export function attackedCluster(seed: string, commerce: Commerce): ClusterState 
       { number: 12, tag: "v4.13.0", changeCause: "v4.13.0 order-status webhooks: retry with backoff", traits: [] },
     ],
     revision: 12,
+    // Nothing was deployed today: the pods have been up since yesterday.
+    podsStartedAgo: 26 * 3600,
     commerce,
   });
 }

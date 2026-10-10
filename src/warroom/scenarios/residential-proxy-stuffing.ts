@@ -86,7 +86,7 @@ export const residentialProxyStuffing: Scenario = {
     security:
       "SOC on-call: siem and waf. The stuffing comes from the same carriers and ISPs as our customers, slower per address than any shopper. The blocks that worked last time won't. Find what the bots can't hide, and stop them without turning customers away.",
   },
-  opensAtSecondOfDay: 23 * 3600 + 5 * 60,
+  opensAtSecondOfDay: 7 * 3600,
   seed: SEED,
   initialState: () => attackedCluster(SEED, checkoutCommerce({ attack: STUFFING, alerts: [ALERT] })),
   isRootCauseFixed: (state) => isAttackStopped(state, 0.99),

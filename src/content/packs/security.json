@@ -954,5 +954,970 @@
       "title": "oss-security: backdoor in upstream xz/liblzma leading to ssh server compromise",
       "url": "https://www.openwall.com/lists/oss-security/2024/03/29/4"
     }
+  },
+  {
+    "id": "sec-jwt-decode-skips-signature",
+    "kind": "find-line",
+    "topic": "security",
+    "difficulty": 1,
+    "alert": {
+      "service": "orders-api",
+      "title": "Audit: refunds approved as role=admin by a member account",
+      "severity": "SEV1",
+      "firedAt": "15:40"
+    },
+    "evidence": [
+      {
+        "type": "code",
+        "label": "middleware/requireUser.ts",
+        "language": "ts",
+        "startLine": 7,
+        "lines": [
+          "export function requireUser(req: Request, res: Response, next: NextFunction) {",
+          "  const header = req.get(\"authorization\") ?? \"\";",
+          "  const token = header.startsWith(\"Bearer \") ? header.slice(7) : \"\";",
+          "  if (!token) return res.status(401).json({ error: \"missing_token\" });",
+          "  const claims = jwt.decode(token) as JwtPayload | null;",
+          "  if (!claims?.sub || (claims.exp ?? 0) * 1000 < Date.now()) {",
+          "    return res.status(401).json({ error: \"invalid_token\" });",
+          "  }",
+          "  req.user = { id: claims.sub, role: claims.role ?? \"member\" };",
+          "  next();",
+          "}"
+        ]
+      },
+      {
+        "type": "log",
+        "label": "auth-svc issuance + orders-api audit",
+        "lines": [
+          {
+            "ts": "15:21:07",
+            "level": "INFO",
+            "source": "auth-svc",
+            "text": "token issued sub=u_8812 role=member jti=7c1e9a alg=RS256 kid=k2026-09 exp=16:21"
+          },
+          {
+            "ts": "15:29:44",
+            "level": "INFO",
+            "source": "orders-api",
+            "text": "POST /api/refunds/R-55102/approve 200 sub=u_8812 role=admin jti=7c1e9a"
+          },
+          {
+            "ts": "15:30:02",
+            "level": "INFO",
+            "source": "orders-api",
+            "text": "POST /api/refunds/R-55107/approve 200 sub=u_8812 role=admin jti=7c1e9a"
+          },
+          {
+            "ts": "15:33:18",
+            "level": "INFO",
+            "source": "orders-api",
+            "text": "GET /api/orders?mine=1 200 sub=u_4410 role=member jti=b204f1"
+          }
+        ]
+      }
+    ],
+    "question": "Tap the line that lets an edited token through.",
+    "answer": {
+      "evidence": 0,
+      "line": 4
+    },
+    "explanation": {
+      "cause": "jwt.decode() reads the token's claims but never checks its signature.",
+      "why": "jsonwebtoken's README warns that decode \"will not verify whether the signature is valid\". Anyone can edit the payload to role: admin and keep the old signature, and the exp check still passes. Fix: jwt.verify(token, publicKey, { algorithms: [\"RS256\"] }) and trust only the claims it returns.",
+      "tell": "auth-svc signed jti 7c1e9a with role=member, yet orders-api acted on that same jti as role=admin: the claims changed after signing and nothing checked."
+    },
+    "source": {
+      "title": "auth0/node-jsonwebtoken README: jwt.decode",
+      "url": "https://github.com/auth0/node-jsonwebtoken"
+    }
+  },
+  {
+    "id": "sec-dotgit-exposed-in-webroot",
+    "kind": "diagnose",
+    "topic": "security",
+    "difficulty": 1,
+    "alert": {
+      "service": "www",
+      "title": "Scanner burst on www: 2,310 probes from one IP, 4 answered 200",
+      "severity": "SEV2",
+      "firedAt": "04:12"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "nginx access log (www)",
+        "lines": [
+          {
+            "ts": "04:07:51",
+            "level": "INFO",
+            "source": "nginx",
+            "text": "GET /.env 404 153 \"python-requests/2.32.3\""
+          },
+          {
+            "ts": "04:07:51",
+            "level": "INFO",
+            "source": "nginx",
+            "text": "GET /wp-login.php 404 153 \"python-requests/2.32.3\""
+          },
+          {
+            "ts": "04:07:52",
+            "level": "INFO",
+            "source": "nginx",
+            "text": "GET /.git/HEAD 200 21 \"python-requests/2.32.3\""
+          },
+          {
+            "ts": "04:07:52",
+            "level": "INFO",
+            "source": "nginx",
+            "text": "GET /.git/config 200 262 \"python-requests/2.32.3\""
+          },
+          {
+            "ts": "04:07:53",
+            "level": "INFO",
+            "source": "nginx",
+            "text": "GET /.git/index 200 1184620 \"python-requests/2.32.3\""
+          },
+          {
+            "ts": "04:07:58",
+            "level": "INFO",
+            "source": "nginx",
+            "text": "GET /.git/objects/pack/pack-3f9c0e1d2a4b5c6d7e8f90a1b2c3d4e5f6a7b8c9.pack 200 48211960 \"python-requests/2.32.3\""
+          },
+          {
+            "ts": "04:08:10",
+            "level": "INFO",
+            "source": "nginx",
+            "text": "GET /phpinfo.php 404 153 \"python-requests/2.32.3\""
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "www deploy",
+        "items": [
+          {
+            "key": "Deploy step",
+            "value": "rsync -a ./ deploy@www:/var/www/site/ (from the CI checkout)"
+          },
+          {
+            "key": "nginx root",
+            "value": "/var/www/site, no rule for dotfiles"
+          },
+          {
+            "key": "Git history",
+            "value": "config/production.yml with SMTP and CMS keys until a 2025 commit"
+          }
+        ]
+      }
+    ],
+    "question": "What did the scanner get?",
+    "options": [
+      "Nothing: every sensitive probe 404'd, so this is just noise",
+      "The site's .env file, holding production environment secrets",
+      "A directory listing of the web root, exposing file names",
+      "The whole git repo, history included, from the web root"
+    ],
+    "answer": 3,
+    "explanation": {
+      "cause": "The deploy copied .git/ into the web root, so the repo can be downloaded.",
+      "why": "rsync -a ./ copies the checkout including .git/, and nginx serves dotfiles unless told not to. With HEAD, index and pack files anyone can rebuild the repo, secrets deleted in later commits included. Fix: deploy a build artifact, deny dotfile paths in nginx, and rotate every secret in the history.",
+      "tell": "/.git/HEAD returns 200 with 21 bytes (\"ref: refs/heads/main\"), then config, index and a 48 MB pack also return 200, while /.env and the other probes 404."
+    }
+  },
+  {
+    "id": "sec-cors-reflects-any-origin-with-creds",
+    "kind": "find-line",
+    "topic": "security",
+    "difficulty": 2,
+    "alert": {
+      "service": "account-api",
+      "title": "Bug bounty #6031: third-party page reads logged-in users' /api/me",
+      "severity": "SEV1",
+      "firedAt": "11:26"
+    },
+    "evidence": [
+      {
+        "type": "code",
+        "label": "server/cors.ts",
+        "language": "ts",
+        "startLine": 3,
+        "lines": [
+          "export function cors(req: Request, res: Response, next: NextFunction) {",
+          "  const origin = req.get(\"origin\");",
+          "  if (origin) {",
+          "    // '*' broke login: Chrome refuses a wildcard when credentials are included",
+          "    res.set(\"Access-Control-Allow-Origin\", origin);",
+          "    res.set(\"Access-Control-Allow-Credentials\", \"true\");",
+          "    res.set(\"Vary\", \"Origin\");",
+          "  }",
+          "  if (req.method === \"OPTIONS\") {",
+          "    res.set(\"Access-Control-Allow-Methods\", \"GET, POST, PATCH, DELETE\");",
+          "    res.set(\"Access-Control-Allow-Headers\", \"Content-Type, X-CSRF-Token\");",
+          "    return res.status(204).end();",
+          "  }",
+          "  next();",
+          "}"
+        ]
+      },
+      {
+        "type": "log",
+        "label": "Chrome console (QA, 09-19) + access log",
+        "lines": [
+          {
+            "ts": "09-19 14:02:10",
+            "level": "ERROR",
+            "source": "chrome",
+            "text": "The value of the 'Access-Control-Allow-Origin' header in the response must not be the wildcard '*' when the request's credentials mode is 'include'."
+          },
+          {
+            "ts": "10-10 11:02:41",
+            "level": "INFO",
+            "source": "account-api",
+            "text": "GET /api/me 200 origin=https://app.example.com acao=https://app.example.com acac=true user=u_1180"
+          },
+          {
+            "ts": "10-10 11:03:05",
+            "level": "INFO",
+            "source": "account-api",
+            "text": "GET /api/me 200 origin=https://free-gift-cards.example acao=https://free-gift-cards.example acac=true user=u_9071"
+          },
+          {
+            "ts": "10-10 11:03:09",
+            "level": "INFO",
+            "source": "account-api",
+            "text": "GET /api/me 200 origin=https://free-gift-cards.example acao=https://free-gift-cards.example acac=true user=u_3352"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "account-api",
+        "items": [
+          {
+            "key": "Front end",
+            "value": "SPA at https://app.example.com calls https://api.example.com"
+          },
+          {
+            "key": "SPA fetch",
+            "value": "credentials: 'include' (session cookie, required)"
+          },
+          {
+            "key": "Session cookie",
+            "value": "HttpOnly; Secure; SameSite=None"
+          }
+        ]
+      }
+    ],
+    "question": "Tap the line that lets any website read a user's /api/me.",
+    "answer": {
+      "evidence": 0,
+      "line": 4
+    },
+    "explanation": {
+      "cause": "The middleware echoes any request Origin back as allowed, with credentials on.",
+      "why": "The SPA needs Allow-Credentials, and browsers rightly refuse '*' with credentials. Echoing the request's Origin turns that into \"every origin, with cookies\", so any page a user visits can read their account data. Fix: echo the Origin only when it is on an allowlist (app.example.com); otherwise send no CORS headers.",
+      "tell": "A request from Origin https://free-gift-cards.example gets that exact origin back as Access-Control-Allow-Origin, with credentials, and a logged-in user's data."
+    },
+    "source": {
+      "title": "Chromium: CORS error strings (cors_error_string.cc)",
+      "url": "https://chromium.googlesource.com/chromium/src/+/main/third_party/blink/renderer/platform/loader/cors/cors_error_string.cc"
+    }
+  },
+  {
+    "id": "sec-session-fixation-sid-kept-on-login",
+    "kind": "diagnose",
+    "topic": "security",
+    "difficulty": 2,
+    "alert": {
+      "service": "shop-web",
+      "title": "Fraud: saved card used from a new IP minutes after owner's login",
+      "severity": "SEV2",
+      "firedAt": "10:12"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "shop-web session log (sid 7f3c…a1)",
+        "lines": [
+          {
+            "ts": "09:58:02",
+            "level": "INFO",
+            "source": "shop-web",
+            "text": "session created sid=7f3c…a1 user=- ip=198.51.100.40 ua=python-requests/2.32.3"
+          },
+          {
+            "ts": "10:04:15",
+            "level": "INFO",
+            "source": "shop-web",
+            "text": "GET /login?sid=7f3c…a1&next=/deals 200 sid=7f3c…a1 user=- ip=203.0.113.9"
+          },
+          {
+            "ts": "10:04:31",
+            "level": "INFO",
+            "source": "shop-web",
+            "text": "POST /login 302 user=u_4410 mfa=ok sid=7f3c…a1 ip=203.0.113.9"
+          },
+          {
+            "ts": "10:06:12",
+            "level": "INFO",
+            "source": "shop-web",
+            "text": "GET /account/cards 200 user=u_4410 sid=7f3c…a1 ip=198.51.100.40"
+          },
+          {
+            "ts": "10:07:40",
+            "level": "INFO",
+            "source": "shop-web",
+            "text": "POST /checkout 200 user=u_4410 card=****4242 sid=7f3c…a1 ip=198.51.100.40"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "shop-web",
+        "items": [
+          {
+            "key": "Session cookie",
+            "value": "HttpOnly; Secure; SameSite=Lax"
+          },
+          {
+            "key": "Session id source",
+            "value": "cookie, or ?sid= query param (legacy email links)"
+          },
+          {
+            "key": "Logins from 198.51.100.40",
+            "value": "none in 90 days"
+          },
+          {
+            "key": "u_4410 password",
+            "value": "unchanged; not in any known breach corpus"
+          }
+        ]
+      }
+    ],
+    "question": "How did 198.51.100.40 get into u_4410's account?",
+    "options": [
+      "XSS on a product page stole the logged-in session cookie",
+      "A phished password let the attacker log in as the user",
+      "Session id set before login was kept after authentication",
+      "Session ids are predictable and the attacker guessed one"
+    ],
+    "answer": 2,
+    "explanation": {
+      "cause": "Session fixation: the app keeps the pre-login session id when the user logs in.",
+      "why": "The attacker created an anonymous session, got the victim to open a link carrying ?sid=, and waited. Login attached u_4410 to that same id, so the attacker's copy became a logged-in session. HttpOnly can't help: nothing was stolen. Fix: issue a new session id at login and stop accepting ids from the URL.",
+      "tell": "sid 7f3c…a1 was created from 198.51.100.40 six minutes before the victim logged in with it, and that IP then uses it without ever logging in."
+    },
+    "source": {
+      "title": "OWASP Session Management Cheat Sheet",
+      "url": "https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html"
+    }
+  },
+  {
+    "id": "sec-waf-size-rule-false-positive",
+    "kind": "diagnose",
+    "topic": "security",
+    "difficulty": 2,
+    "alert": {
+      "service": "edge-waf",
+      "title": "AWS WAF: blocked requests 40x baseline on api-alb",
+      "severity": "SEV2",
+      "firedAt": "13:35"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "WAF blocked requests, api-alb",
+        "unit": "req/min",
+        "points": [
+          31,
+          28,
+          33,
+          30,
+          29,
+          64,
+          180,
+          410,
+          690,
+          980,
+          1150,
+          1240,
+          1290,
+          1310
+        ],
+        "markAt": 5
+      },
+      {
+        "type": "log",
+        "label": "AWS WAF log sample, api-alb",
+        "lines": [
+          {
+            "ts": "13:21:04",
+            "level": "WARN",
+            "source": "aws-waf",
+            "text": "action=BLOCK terminatingRuleId=AWS-AWSManagedRulesCommonRuleSet rule=SizeRestrictions_BODY POST /v2/listings ua=ShopApp/5.12 (iOS 18.6)"
+          },
+          {
+            "ts": "13:21:05",
+            "level": "WARN",
+            "source": "aws-waf",
+            "text": "action=BLOCK terminatingRuleId=AWS-AWSManagedRulesCommonRuleSet rule=SizeRestrictions_BODY POST /v2/listings ua=ShopApp/5.12 (Android 15)"
+          },
+          {
+            "ts": "13:21:05",
+            "level": "INFO",
+            "source": "aws-waf",
+            "text": "action=ALLOW terminatingRuleId=Default_Action POST /v2/listings ua=ShopApp/5.11 (iOS 18.6)"
+          },
+          {
+            "ts": "13:22:40",
+            "level": "WARN",
+            "source": "aws-waf",
+            "text": "action=BLOCK labels=awswaf:managed:aws:core-rule-set:SizeRestrictions_Body POST /v2/listings ua=ShopApp/5.12 (iOS 18.6)"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Since 13:00",
+        "items": [
+          {
+            "key": "Blocked senders",
+            "value": "18,402 distinct logged-in users, normal session ages"
+          },
+          {
+            "key": "Rules matched",
+            "value": "SizeRestrictions_BODY only, all on POST /v2/listings"
+          },
+          {
+            "key": "ShopApp 5.12",
+            "value": "store rollout began 13:00; listing photos now inline base64 in JSON"
+          },
+          {
+            "key": "Protected resource",
+            "value": "Application Load Balancer"
+          }
+        ]
+      }
+    ],
+    "question": "What is the WAF blocking?",
+    "options": [
+      "An attack campaign the WAF is correctly stopping at the edge",
+      "A bot network replaying stolen sessions against listings",
+      "False positive: app 5.12 bodies exceed the WAF's 8 KB rule",
+      "Origin 5xx errors miscounted as WAF blocks during the release"
+    ],
+    "answer": 2,
+    "explanation": {
+      "cause": "A false positive: app 5.12 sends listing bodies over 8 KB, which the CRS size rule blocks.",
+      "why": "SizeRestrictions_BODY blocks any body over 8 KB (8,192 bytes), and inline base64 photos push every 5.12 listing past it. Attacks vary payloads, rules and sources; this is one rule on one endpoint, hit by real users as the rollout grows. Fix: override that rule to Count for POST /v2/listings, or upload photos separately.",
+      "tell": "Every block is SizeRestrictions_BODY on POST /v2/listings from ShopApp 5.12, sent by 18k logged-in users and rising with the rollout, while 5.11 requests pass."
+    },
+    "source": {
+      "title": "AWS WAF: Core rule set (CRS) managed rule group",
+      "url": "https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html"
+    }
+  },
+  {
+    "id": "sec-gha-pull-request-target-head-checkout",
+    "kind": "find-line",
+    "topic": "security",
+    "difficulty": 3,
+    "alert": {
+      "service": "npm-registry",
+      "title": "npm: @acme/sdk 4.2.1 published with no release run or tag",
+      "severity": "SEV1",
+      "firedAt": "08:47"
+    },
+    "evidence": [
+      {
+        "type": "code",
+        "label": ".github/workflows/pr-check.yml",
+        "language": "yaml",
+        "startLine": 1,
+        "lines": [
+          "name: pr-check",
+          "on:",
+          "  pull_request_target:   # needs write access to label the PR",
+          "    types: [opened, synchronize]",
+          "permissions:",
+          "  contents: read",
+          "  pull-requests: write",
+          "jobs:",
+          "  test:",
+          "    runs-on: ubuntu-latest",
+          "    steps:",
+          "      - uses: actions/checkout@v4",
+          "        with:",
+          "          ref: ${{ github.event.pull_request.head.sha }}",
+          "      - uses: actions/setup-node@v4",
+          "        with: { node-version: 22 }",
+          "      - run: npm ci && npm test -- --coverage",
+          "        env:",
+          "          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}   # private @acme deps",
+          "      - uses: actions/github-script@v7",
+          "        with:",
+          "          script: |",
+          "            await github.rest.issues.addLabels({ ...context.repo,",
+          "              issue_number: context.issue.number, labels: ['tested'] })"
+        ]
+      },
+      {
+        "type": "log",
+        "label": "GitHub Actions + npm audit",
+        "lines": [
+          {
+            "ts": "08:31:02",
+            "level": "INFO",
+            "source": "github",
+            "text": "pr-check run #4821 event=pull_request_target PR #912 from fork ghost-dev-77/sdk (account 2 days old)"
+          },
+          {
+            "ts": "08:31:43",
+            "level": "INFO",
+            "source": "github",
+            "text": "run #4821 step \"npm ci && npm test -- --coverage\" exit 0 (41s)"
+          },
+          {
+            "ts": "08:32:15",
+            "level": "WARN",
+            "source": "npm",
+            "text": "publish @acme/sdk@4.2.1 token=ci-automation (NPM_TOKEN) from a GitHub-hosted runner IP"
+          },
+          {
+            "ts": "08:40:00",
+            "level": "INFO",
+            "source": "github",
+            "text": "release.yml: no runs since 4.2.0 (10-02)"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "PR #912",
+        "items": [
+          {
+            "key": "Files changed",
+            "value": "package.json only: the \"test\" script"
+          },
+          {
+            "key": "NPM_TOKEN",
+            "value": "automation token with publish rights on @acme/*"
+          }
+        ]
+      }
+    ],
+    "question": "Tap the line that brings the fork's code into this privileged job.",
+    "answer": {
+      "evidence": 0,
+      "line": 13
+    },
+    "explanation": {
+      "cause": "pull_request_target checks out the fork's head commit and runs it with repo secrets.",
+      "why": "pull_request_target runs with the base repo's secrets, which is safe while it runs base-branch code. Checking out head.sha swaps in the fork's package.json, so npm test ran the attacker's script with NPM_TOKEN in its env. Fix: test under pull_request (no secrets), keep pull_request_target for labeling only, and rotate NPM_TOKEN.",
+      "tell": "A 2-day-old account's fork PR changes only package.json's test script; the pull_request_target run passes, and the CI npm token publishes 4.2.1 with no release run."
+    },
+    "source": {
+      "title": "GitHub Security Lab: Preventing pwn requests",
+      "url": "https://securitylab.github.com/resources/github-actions-preventing-pwn-requests/"
+    }
+  },
+  {
+    "id": "sec-dependency-confusion-extra-index",
+    "kind": "diagnose",
+    "topic": "security",
+    "difficulty": 3,
+    "alert": {
+      "service": "ci-runners",
+      "title": "DNS egress: CI runner queried 3,100 random subdomains of one zone",
+      "severity": "SEV1",
+      "firedAt": "02:18"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "CI job ledger-svc #7731 + runner DNS",
+        "lines": [
+          {
+            "ts": "02:09:11",
+            "level": "INFO",
+            "source": "pip",
+            "text": "Looking in indexes: https://pypi.org/simple, https://pypi.acme.internal/simple"
+          },
+          {
+            "ts": "02:09:12",
+            "level": "INFO",
+            "source": "pip",
+            "text": "Collecting acme-ledger-client>=2.4 (from -r requirements.txt (line 7))"
+          },
+          {
+            "ts": "02:09:12",
+            "level": "INFO",
+            "source": "pip",
+            "text": "Downloading acme_ledger_client-99.0.0-py3-none-any.whl (2.3 kB)"
+          },
+          {
+            "ts": "02:09:14",
+            "level": "INFO",
+            "source": "pip",
+            "text": "Successfully installed acme-ledger-client-99.0.0"
+          },
+          {
+            "ts": "02:09:20",
+            "level": "WARN",
+            "source": "dns",
+            "text": "runner-14 query 9f2c41….d.x7-metrics.example A NXDOMAIN (3,100 unique names in 4 min)"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "ledger-svc build",
+        "items": [
+          {
+            "key": "requirements.txt",
+            "value": "acme-ledger-client>=2.4 (no pin, no hashes)"
+          },
+          {
+            "key": "pip.conf on runners",
+            "value": "extra-index-url = https://pypi.acme.internal/simple"
+          },
+          {
+            "key": "Internal index",
+            "value": "acme-ledger-client 2.4.1 is the newest; never had 99.x"
+          },
+          {
+            "key": "pypi.org",
+            "value": "project acme-ledger-client created 3 days ago, one release"
+          }
+        ]
+      }
+    ],
+    "question": "How did the runner end up running someone else's code?",
+    "options": [
+      "Typosquat: a misspelled package name in requirements.txt",
+      "Internal package index breached and a release swapped out",
+      "Public package with the internal name won on version number",
+      "Maintainer of a transitive dependency shipped a bad release"
+    ],
+    "answer": 2,
+    "explanation": {
+      "cause": "Dependency confusion: pip found the internal name on PyPI too and took the higher version.",
+      "why": "extra-index-url adds an index; it doesn't rank them. pip takes candidates from both and installs the highest version, so 99.0.0 on PyPI beats internal 2.4.1 (PyTorch's torchtriton incident worked the same way). Fix: one internal index that proxies PyPI, hash-pinned installs, and register the name on PyPI.",
+      "tell": "Both indexes are searched, the name is spelled right, and pip installs 99.0.0: a version the internal index never had, from a PyPI project created 3 days ago."
+    },
+    "source": {
+      "title": "PyTorch: Compromised PyTorch-nightly dependency chain (Dec 2022)",
+      "url": "https://pytorch.org/blog/compromised-nightly-dependency/"
+    }
+  },
+  {
+    "id": "sec-iam-createpolicyversion-self-escalation",
+    "kind": "find-line",
+    "topic": "security",
+    "difficulty": 3,
+    "alert": {
+      "service": "aws-security",
+      "title": "IAM user svc-backup2 created by role ci-deploy (a deploy-only role)",
+      "severity": "SEV1",
+      "firedAt": "23:20"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "CloudTrail (iam.amazonaws.com), ci-deploy",
+        "lines": [
+          {
+            "ts": "23:04:51",
+            "level": "INFO",
+            "source": "cloudtrail",
+            "text": "GetCallerIdentity user=AssumedRole/ci-deploy/gha-8812"
+          },
+          {
+            "ts": "23:05:30",
+            "level": "WARN",
+            "source": "cloudtrail",
+            "text": "AttachRolePolicy user=AssumedRole/ci-deploy/gha-8812 role=ci-deploy policy=AdministratorAccess errorCode=AccessDenied \"…because no identity-based policy allows the iam:AttachRolePolicy action\""
+          },
+          {
+            "ts": "23:06:02",
+            "level": "INFO",
+            "source": "cloudtrail",
+            "text": "ListPolicyVersions user=AssumedRole/ci-deploy/gha-8812 policy=ci-deploy-perms"
+          },
+          {
+            "ts": "23:06:40",
+            "level": "INFO",
+            "source": "cloudtrail",
+            "text": "CreatePolicyVersion user=AssumedRole/ci-deploy/gha-8812 policy=ci-deploy-perms setAsDefault=true Allow Action:* Resource:*"
+          },
+          {
+            "ts": "23:07:15",
+            "level": "INFO",
+            "source": "cloudtrail",
+            "text": "CreateUser user=AssumedRole/ci-deploy/gha-8812 userName=svc-backup2"
+          },
+          {
+            "ts": "23:07:16",
+            "level": "INFO",
+            "source": "cloudtrail",
+            "text": "AttachUserPolicy user=AssumedRole/ci-deploy/gha-8812 userName=svc-backup2 policy=AdministratorAccess"
+          },
+          {
+            "ts": "23:07:18",
+            "level": "INFO",
+            "source": "cloudtrail",
+            "text": "CreateAccessKey user=AssumedRole/ci-deploy/gha-8812 userName=svc-backup2"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "ci-deploy-perms v3 (default until 23:06)",
+        "items": [
+          {
+            "key": "Attached to",
+            "value": "role ci-deploy only"
+          },
+          {
+            "key": "Allows",
+            "value": "ecs:*, ecr:*, iam:PassRole on role/app-task-*"
+          },
+          {
+            "key": "Also allows",
+            "value": "iam:CreatePolicyVersion, iam:ListPolicyVersions on policy/ci-deploy-*"
+          },
+          {
+            "key": "Ticket",
+            "value": "\"Let the pipeline update its own deploy policy\""
+          }
+        ]
+      }
+    ],
+    "question": "Tap the event where ci-deploy gained the power it lacked.",
+    "answer": {
+      "evidence": 0,
+      "line": 3
+    },
+    "explanation": {
+      "cause": "ci-deploy may write new versions of its own policy, so it rewrote it to admin.",
+      "why": "The denied AttachRolePolicy shows the role was not admin. But iam:CreatePolicyVersion on its own policy lets it write any document, and setAsDefault makes it live: Action * on Resource *. Every later call just uses that power. Fix: never let a principal edit policies attached to itself; restore v3, delete the new version and svc-backup2.",
+      "tell": "AttachRolePolicy is denied at 23:05; the next write is CreatePolicyVersion with setAsDefault=true on the role's own policy, and every IAM write after it succeeds."
+    },
+    "source": {
+      "title": "AWS IAM API Reference: CreatePolicyVersion",
+      "url": "https://docs.aws.amazon.com/IAM/latest/APIReference/API_CreatePolicyVersion.html"
+    }
+  },
+  {
+    "id": "sec-csrf-samesite-none-for-widget",
+    "kind": "diagnose",
+    "topic": "security",
+    "difficulty": 3,
+    "alert": {
+      "service": "accounts-web",
+      "title": "ATO: 214 accounts changed email, then reset password within 2 h",
+      "severity": "SEV1",
+      "firedAt": "17:45"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "accounts-web deploys + requests",
+        "lines": [
+          {
+            "ts": "16:02:11",
+            "level": "INFO",
+            "source": "deploy",
+            "text": "accounts-web v8.14: session cookie SameSite=Lax -> SameSite=None; Secure (help-widget iframe on partner sites)"
+          },
+          {
+            "ts": "16:40:03",
+            "level": "INFO",
+            "source": "accounts-web",
+            "text": "POST /account/email 302 user=u_2291 ip=73.12.x.x origin=https://coupon-vault.example sec-fetch-site=cross-site"
+          },
+          {
+            "ts": "16:40:09",
+            "level": "INFO",
+            "source": "accounts-web",
+            "text": "POST /account/email 302 user=u_7714 ip=24.5.x.x origin=https://coupon-vault.example sec-fetch-site=cross-site"
+          },
+          {
+            "ts": "16:41:55",
+            "level": "INFO",
+            "source": "accounts-web",
+            "text": "POST /account/email 302 user=u_0388 ip=98.33.x.x origin=https://accounts.example.com sec-fetch-site=same-origin"
+          },
+          {
+            "ts": "16:52:30",
+            "level": "INFO",
+            "source": "accounts-web",
+            "text": "POST /password/reset/confirm 200 user=u_2291 ip=185.220.x.x"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "accounts-web",
+        "items": [
+          {
+            "key": "Session cookie",
+            "value": "HttpOnly; Secure; SameSite=None (since v8.14)"
+          },
+          {
+            "key": "Email-change form",
+            "value": "session cookie only; no CSRF token, no Origin check"
+          },
+          {
+            "key": "Victim requests",
+            "value": "each victim's usual home IP and browser"
+          },
+          {
+            "key": "Session ids",
+            "value": "rotated at login; unchanged during the attack"
+          }
+        ]
+      }
+    ],
+    "question": "How were the victims' emails changed?",
+    "options": [
+      "Stored XSS on the profile page stole cookies to change emails",
+      "Cross-site POSTs ride the cookie; the form has no CSRF token",
+      "CORS misconfiguration let another site call the account API",
+      "Session fixation: attackers planted session ids before login"
+    ],
+    "answer": 1,
+    "explanation": {
+      "cause": "CSRF: the email form trusts the cookie alone, and SameSite=None now sends it cross-site.",
+      "why": "SameSite=Lax was the only thing stopping cross-site form POSTs, and it is a defense-in-depth layer, not a CSRF defense. Switching to None for the widget let any page submit the form with the victim's cookie. CORS only governs reading responses; nothing here needs one. Fix: CSRF tokens or an Origin / Sec-Fetch-Site check on state changes.",
+      "tell": "The email changes come from victims' own IPs and browsers, but with sec-fetch-site=cross-site and a foreign Origin, starting after v8.14 set SameSite=None."
+    },
+    "source": {
+      "title": "OWASP Cross-Site Request Forgery Prevention Cheat Sheet",
+      "url": "https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html"
+    }
+  },
+  {
+    "id": "sec-xxe-legacy-content-type-parser",
+    "kind": "find-line",
+    "topic": "security",
+    "difficulty": 3,
+    "alert": {
+      "service": "invoice-import",
+      "title": "Egress: invoice-import fetched files from a never-seen external host",
+      "severity": "SEV1",
+      "firedAt": "12:05"
+    },
+    "evidence": [
+      {
+        "type": "code",
+        "label": "InvoiceParser.java",
+        "language": "java",
+        "startLine": 18,
+        "lines": [
+          "private static final DocumentBuilderFactory SAFE = hardened();",
+          "",
+          "private static DocumentBuilderFactory hardened() {",
+          "    DocumentBuilderFactory f = DocumentBuilderFactory.newInstance();",
+          "    try {",
+          "        f.setFeature(\"http://apache.org/xml/features/disallow-doctype-decl\", true);",
+          "    } catch (ParserConfigurationException e) {",
+          "        throw new IllegalStateException(e);",
+          "    }",
+          "    return f;",
+          "}",
+          "",
+          "public Invoice parse(InputStream body, String contentType) throws Exception {",
+          "    if (contentType.startsWith(\"application/xml\")) {",
+          "        return toInvoice(SAFE.newDocumentBuilder().parse(body));",
+          "    }",
+          "    // text/xml: legacy EDI partner feed",
+          "    DocumentBuilder db = DocumentBuilderFactory.newInstance().newDocumentBuilder();",
+          "    return toInvoice(db.parse(body));",
+          "}"
+        ]
+      },
+      {
+        "type": "log",
+        "label": "invoice-import + egress proxy",
+        "lines": [
+          {
+            "ts": "11:48:20",
+            "level": "INFO",
+            "source": "invoice-import",
+            "text": "POST /import 201 ct=application/xml partner=p_118 bytes=4120"
+          },
+          {
+            "ts": "11:52:03",
+            "level": "ERROR",
+            "source": "invoice-import",
+            "text": "POST /import 400 ct=application/xml partner=p_ext91"
+          },
+          {
+            "ts": "11:52:03",
+            "level": "ERROR",
+            "source": "invoice-import",
+            "text": "org.xml.sax.SAXParseException; lineNumber: 2; columnNumber: 10; DOCTYPE is disallowed when the feature \"http://apache.org/xml/features/disallow-doctype-decl\" set to true."
+          },
+          {
+            "ts": "11:52:41",
+            "level": "INFO",
+            "source": "invoice-import",
+            "text": "POST /import 201 ct=text/xml partner=p_ext91 bytes=388"
+          },
+          {
+            "ts": "11:52:41",
+            "level": "WARN",
+            "source": "egress-proxy",
+            "text": "invoice-import-7d9 GET http://203.0.113.50/inv.dtd 200 (first contact with host)"
+          },
+          {
+            "ts": "11:53:10",
+            "level": "INFO",
+            "source": "invoice-import",
+            "text": "POST /import 201 ct=text/xml partner=p_ext91 bytes=402"
+          },
+          {
+            "ts": "11:53:10",
+            "level": "WARN",
+            "source": "egress-proxy",
+            "text": "invoice-import-7d9 GET http://203.0.113.50/inv.dtd 200"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "invoice-import",
+        "items": [
+          {
+            "key": "Runtime",
+            "value": "JDK 25, default JAXP settings (no jaxp.properties overrides)"
+          },
+          {
+            "key": "Partner p_ext91",
+            "value": "self-service signup at 11:40 today"
+          },
+          {
+            "key": "text/xml path",
+            "value": "kept for one legacy EDI partner (p_022)"
+          }
+        ]
+      }
+    ],
+    "question": "Tap the line that builds the parser behind the DTD fetches.",
+    "answer": {
+      "evidence": 0,
+      "line": 17
+    },
+    "explanation": {
+      "cause": "The text/xml branch builds a default DocumentBuilderFactory without the DOCTYPE ban.",
+      "why": "Only the application/xml path uses the hardened factory. Rejected there, the sender resent as text/xml, which gets a fresh default factory, and the JDK's default is to fetch the external resources a document names. Fix: route both branches through SAFE (one shared hardened builder) and block egress from the importer.",
+      "tell": "p_ext91's upload is refused with the disallow-doctype-decl error as application/xml but gets a 201 as text/xml, and each text/xml import is followed by a .dtd fetch."
+    },
+    "source": {
+      "title": "OWASP XML External Entity Prevention Cheat Sheet",
+      "url": "https://cheatsheetseries.owasp.org/cheatsheets/XML_External_Entity_Prevention_Cheat_Sheet.html"
+    }
   }
 ]

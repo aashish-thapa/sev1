@@ -1,4 +1,4 @@
-import { useContext } from "react";
+import { useContext, useRef, useState } from "react";
 import { AccountContext } from "../app/useAccount.ts";
 import { featuredBadge } from "../domain/achievements.ts";
 import { careerLevel, passedWarRooms } from "../domain/career.ts";
@@ -7,15 +7,20 @@ import type { Progress } from "../domain/progress.ts";
 import { AccountPanel } from "./AccountPanel.tsx";
 import { BadgeMark, BadgeShelf } from "./Badges.tsx";
 import { CareerLadder } from "./Career.tsx";
+import { ProPanel, type ProSale } from "./ProPanel.tsx";
 
 type Props = {
   progress: Progress;
   onFeatureBadge: (badgeId: string | null) => void;
+  proSale: ProSale;
 };
 
 /** Everything about you: who you are, how far you've come, and what you've earned. */
-export function Profile({ progress, onFeatureBadge }: Props) {
+export function Profile({ progress, onFeatureBadge, proSale }: Props) {
   const session = useContext(AccountContext);
+  const account = useRef<HTMLDivElement>(null);
+  // Whether Pro is active only needs checking as of when the profile opened.
+  const [openedAt] = useState(() => Date.now());
   const shown = featuredBadge(progress);
   const career = careerLevel(progress);
   const earnedCents = Object.values(progress.wallet.earnedCents).reduce((sum, cents) => sum + cents, 0);
@@ -40,7 +45,7 @@ export function Profile({ progress, onFeatureBadge }: Props) {
         <p className="profile__title">{career.title}</p>
       </header>
 
-      <div className="profile__account">
+      <div ref={account} className="profile__account">
         <AccountPanel />
       </div>
 
@@ -56,6 +61,14 @@ export function Profile({ progress, onFeatureBadge }: Props) {
       </dl>
 
       <BadgeShelf progress={progress} featured={shown?.id ?? null} onFeature={onFeatureBadge} />
+
+      <ProPanel
+        sale={proSale}
+        entitlements={session?.entitlements ?? null}
+        isSignedIn={session?.status === "signed-in"}
+        now={openedAt}
+        onSignUp={() => account.current?.querySelector("input")?.focus()}
+      />
     </section>
   );
 }

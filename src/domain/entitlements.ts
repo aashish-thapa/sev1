@@ -23,7 +23,7 @@ export type Perk = { readonly id: string; readonly title: string; readonly descr
 /** The Pro perks, as the profile lists them. */
 export const PRO_PERKS: readonly Perk[] = [
   { id: "practice-any", title: "Practice every War Room", description: "Play incidents above your level for practice. They don't pay or count toward promotions." },
-  { id: "practice-unlimited", title: "Unlimited practice", description: `As many practice rounds as you like; free players get ${FREE_PRACTICE_ROUNDS_PER_DAY} a day.` },
+  { id: "practice-unlimited", title: "Unlimited practice", description: "No daily limit on practice rounds at the wall screens." },
   { id: "hints", title: `${PRO_DAILY_FREE_HINTS} free hints a day`, description: "At any level. Worked solutions still cost earned money, for everyone." },
   { id: "early-access", title: "Early access", description: "New incidents open to Pro a week before everyone, as practice." },
   { id: "supporter", title: "Supporter look", description: "A Pro mark by your name, and Pro-only name colours." },

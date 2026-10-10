@@ -868,7 +868,13 @@
 .pro__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-xs);
+  align-items: center;
+  gap: var(--space-xs) var(--space-md);
+}
+
+.pro__price {
+  color: var(--color-ink-2);
+  font-size: var(--text-sm);
 }
 
 @media (min-width: 40rem) {

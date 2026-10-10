@@ -11,6 +11,7 @@ import { AccountPanel } from "./AccountPanel.tsx";
 import { BadgeMark } from "./Badges.tsx";
 import { LeaderboardPanel } from "./LeaderboardPanel.tsx";
 import { Profile } from "./Profile.tsx";
+import type { ProSale } from "./ProPanel.tsx";
 import { WalletChip } from "./WalletChip.tsx";
 
 type Props = {
@@ -19,6 +20,7 @@ type Props = {
   onEnterOffice: () => void;
   onFeatureBadge: (badgeId: string | null) => void;
   fetchLeaderboard: FetchLeaderboard;
+  proSale: ProSale;
   rooms: {
     status: string;
     error: string | null;
@@ -51,7 +53,7 @@ const SCREENS = [
 ] as const;
 
 /** The lobby: what the game is, who you are in it, the three ways to start, and the board. Your profile opens in its place. */
-export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, fetchLeaderboard, rooms }: Props) {
+export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, fetchLeaderboard, rooms, proSale }: Props) {
   const session = useContext(AccountContext);
   const role = roles.chosen ?? "infrastructure";
   // Until the player types, rooms use their account name, which may arrive after the first render.
@@ -110,7 +112,7 @@ export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, fetch
       )}
 
       {isProfileOpen ? (
-        <Profile progress={progress} onFeatureBadge={onFeatureBadge} />
+        <Profile progress={progress} onFeatureBadge={onFeatureBadge} proSale={proSale} />
       ) : (
         <>
           <section className="home__intro" aria-labelledby="home-title">

@@ -21,10 +21,14 @@ describe("billing client", () => {
   it("explains each refusal the server can give", async () => {
     answer(401, { error: "signed_out" });
     expect(await billing.checkout("pro-yearly")).toEqual({ ok: false, problem: "signed_out" });
-    answer(503, { error: "billing_not_configured" });
+    answer(503, { error: "billing_unavailable" });
     expect(await billing.checkout("pro-yearly")).toEqual({ ok: false, problem: "not_configured" });
-    answer(409, { error: "no_subscription" });
+    answer(409, { error: "already_subscribed" });
+    expect(await billing.checkout("pro-monthly")).toEqual({ ok: false, problem: "already_pro" });
+    answer(404, { error: "no_subscription" });
     expect(await billing.portal()).toEqual({ ok: false, problem: "never_subscribed" });
+    answer(502, { error: "payment_provider" });
+    expect(await billing.portal()).toEqual({ ok: false, problem: "provider_down" });
   });
 
   it("treats a network failure or a malformed answer as unreachable", async () => {

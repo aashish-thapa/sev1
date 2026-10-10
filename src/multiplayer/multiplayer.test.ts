@@ -357,7 +357,7 @@ describe("war room server", () => {
     await guest.next("welcome");
     guest.close();
     await host.next("players", (message) => message.players.some((player) => player.name === "Sam" && !player.isConnected));
-    await host.next("comms", saidBy(JONAS));
+    await host.next("state", (message) => message.frame.cluster.t >= 60);
     expect(await postedBy(welcome.roomCode)).not.toContain(PRIYA);
   });
 

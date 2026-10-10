@@ -1431,7 +1431,7 @@
       "Bundles went cross-origin with no crossorigin/CORS setup",
       "Source maps for release 9.4.0 were never uploaded",
       "A new third-party tag throws on every page view",
-      "Collector truncates error fields above its size limit"
+      "Collector truncates error fields above its payload size limit"
     ],
     "answer": 0,
     "explanation": {
@@ -1991,7 +1991,7 @@
     "question": "Why did JS transfer size more than triple?",
     "options": [
       "Bundle grew 3.5x after this week’s dependency upgrade",
-      "Asset requests now miss cache and all go to the origin",
+      "Asset requests now miss the edge cache and all go to the origin",
       "Origin sends no Content-Length; CloudFront won’t compress",
       "CloudFront doesn’t compress the text/javascript type"
     ],

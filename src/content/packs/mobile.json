@@ -1400,7 +1400,7 @@
     "difficulty": 2,
     "alert": {
       "service": "notify-worker",
-      "title": "ShopApp iOS push delivery 31% (was 99.6%) since 10:05",
+      "title": "ShopApp iOS push delivery 31% over the last 30 min (was 99.6%)",
       "severity": "SEV2",
       "firedAt": "10:20"
     },
@@ -1599,7 +1599,7 @@
     ],
     "question": "Why are these users stuck in a launch crash loop?",
     "options": [
-      "An OS update wiped the device's Android Keystore keys",
+      "An OS update wiped the device's hardware-backed Keystore keys",
       "Auto Backup restored the token to a device without its key",
       "The key's validity end date passed, so Keystore rejects it",
       "A new fingerprint permanently invalidated the auth-bound key"
@@ -1829,7 +1829,7 @@
           },
           {
             "key": "Who is affected",
-            "value": "Android 14 and lower users who installed or updated since Tuesday"
+            "value": "users who installed or updated since Tuesday"
           }
         ]
       }
@@ -1844,7 +1844,7 @@
     "answer": 2,
     "explanation": {
       "cause": "assetlinks.json lists the upload key's fingerprint, but Play installs carry Play's key",
-      "why": "With Play App Signing, Google re-signs the app, so Play installs carry the app signing key, not the upload key in the CI keystore. Only builds signed with a listed key verify. Android 14 and lower re-verify only on install or update, so failures grew with 7.3.0 updates and made the release look guilty.",
+      "why": "With Play App Signing, Google re-signs the app, so Play installs carry the app signing key, not the upload key in the CI keystore. Only builds signed with a listed key verify. Android re-verifies only on install or update, so failures grew with 7.3.0 updates and made the release look guilty.",
       "tell": "The same 7.3.0 verifies when installed from CI and fails when installed from Play, and the assetlinks.json fingerprint differs from Play Console's app signing key."
     },
     "source": {
@@ -2163,7 +2163,7 @@
     "options": [
       "A released AnyCancellable is cancelling every API request",
       "The renewed chain omits its intermediate, failing iOS trust",
-      "Renewal made a new key, so the iOS leaf pin no longer matches",
+      "A new key at renewal; the iOS leaf pin no longer matches",
       "Device clocks lag, so the new cert isn't yet valid on iOS"
     ],
     "answer": 2,

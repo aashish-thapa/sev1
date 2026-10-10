@@ -1178,7 +1178,7 @@
     ],
     "question": "Why do single-image requests fail since v2.4?",
     "options": [
-      "Checkpoint head dimension doesn't match the backbone",
+      "Checkpoint head dimension doesn't match the backbone's output",
       "Model served in training mode; BatchNorm needs >1 item",
       "Single images not resized to the model's input shape",
       "GPU out of memory on large single-image uploads"
@@ -1355,7 +1355,7 @@
     ],
     "question": "Why does YARN keep killing stage 6's executors?",
     "options": [
-      "Executor heap too small; raise spark.executor.memory",
+      "Executor heap too small; raise spark.executor.memory to 16g",
       "One skewed key overloading a single task",
       "Python workers outgrowing the off-heap memory overhead",
       "YARN's virtual-memory check misfiring on the JVM"
@@ -1519,7 +1519,7 @@
     ],
     "question": "Why can't Spark read the Oct 9 POS file?",
     "options": [
-      "Corrupt Parquet file from an interrupted S3 upload",
+      "Corrupt Parquet footer from an interrupted multipart S3 upload",
       "Someone altered the Glue table's quantity type",
       "NULL quantities made pandas write the column as float",
       "A vectorized-reader bug; disable it and rerun"
@@ -1627,7 +1627,7 @@
         ]
       }
     ],
-    "question": "Tap the line that loses an hour of orders.",
+    "question": "Tap the line that maps two hours to one partition.",
     "answer": {
       "evidence": 2,
       "line": 9
@@ -1739,7 +1739,7 @@
         ]
       }
     ],
-    "question": "Tap the line that hangs all eight ranks.",
+    "question": "Tap the line that leaves seven ranks out of the collective.",
     "answer": {
       "evidence": 2,
       "line": 16

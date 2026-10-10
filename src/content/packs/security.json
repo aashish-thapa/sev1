@@ -1297,7 +1297,7 @@
     ],
     "question": "How did 198.51.100.40 get into u_4410's account?",
     "options": [
-      "XSS on a product page stole the logged-in session cookie",
+      "Stored XSS on a product page stole the logged-in session cookie",
       "A phished password let the attacker log in as the user",
       "Session id set before login was kept after authentication",
       "Session ids are predictable and the attacker guessed one"
@@ -1479,7 +1479,7 @@
             "text": "run #4821 step \"npm ci && npm test -- --coverage\" exit 0 (41s)"
           },
           {
-            "ts": "08:32:15",
+            "ts": "08:31:28",
             "level": "WARN",
             "source": "npm",
             "text": "publish @acme/sdk@4.2.1 token=ci-automation (NPM_TOKEN) from a GitHub-hosted runner IP"
@@ -1507,7 +1507,7 @@
         ]
       }
     ],
-    "question": "Tap the line that brings the fork's code into this privileged job.",
+    "question": "Tap the line that picks the fork's commit for this privileged job.",
     "answer": {
       "evidence": 0,
       "line": 13

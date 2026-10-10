@@ -12,6 +12,8 @@ import {
   TOP_COMPANIES_PATH,
   WORK_PATH,
   OFFERS_PATH,
+  DEALS_PATH,
+  MeetingResponseSchema,
   AcceptOfferResponseSchema,
   WorkBoardSchema,
   WorkItemSchema,
@@ -30,6 +32,7 @@ import {
   type AcceptOfferResponse,
   type OfferRequest,
   type ProposalRequest,
+  type DealTerms,
   type WorkBoard,
   type WorkItem,
   type MyCompany,
@@ -81,6 +84,13 @@ export interface CompanyApi {
   fire(username: string): Promise<CompanyOutcome<unknown>>;
   /** Any member but the founder. */
   leave(): Promise<CompanyOutcome<unknown>>;
+  /** The office room where a deal is negotiated; either party gets in while it's open. */
+  dealMeeting(dealId: string): Promise<CompanyOutcome<{ code: string }>>;
+  /** New terms on the table; both agreements clear. */
+  tableTerms(dealId: string, terms: DealTerms): Promise<CompanyOutcome<unknown>>;
+  /** Agree to the terms exactly as read; refused if they changed or you're not both in the meeting. */
+  agreeDeal(dealId: string, terms: DealTerms): Promise<CompanyOutcome<unknown>>;
+  walkAway(dealId: string): Promise<CompanyOutcome<unknown>>;
 }
 
 const ErrorSchema = z.object({ error: z.enum(API_ERRORS), message: z.string().optional() });
@@ -170,6 +180,18 @@ export class HttpCompanyApi implements CompanyApi {
   }
   leave() {
     return call(`${COMPANY_PATH}/leave`, "POST", {}, Anything);
+  }
+  dealMeeting(dealId: string) {
+    return call(`${DEALS_PATH}/${encodeURIComponent(dealId)}/meeting`, "POST", {}, MeetingResponseSchema);
+  }
+  tableTerms(dealId: string, terms: DealTerms) {
+    return call(`${DEALS_PATH}/${encodeURIComponent(dealId)}/terms`, "POST", terms, Anything);
+  }
+  agreeDeal(dealId: string, terms: DealTerms) {
+    return call(`${DEALS_PATH}/${encodeURIComponent(dealId)}/agree`, "POST", terms, Anything);
+  }
+  walkAway(dealId: string) {
+    return call(`${DEALS_PATH}/${encodeURIComponent(dealId)}/walk-away`, "POST", {}, Anything);
   }
 }
 

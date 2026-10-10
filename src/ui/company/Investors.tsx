@@ -76,9 +76,9 @@ export function Investors({ api, capTable, offers, proposals, isFounder, isBusy,
                       type="button"
                       className="button button--primary"
                       disabled={isBusy}
-                      onClick={() => void act(() => api.answerProposal(proposal.id, "accept"), () => `Accepted. ${proposal.investor} can now pay in.`)}
+                      onClick={() => void act(() => api.answerProposal(proposal.id, "accept"), () => `Deal opened. Meet ${proposal.investor} in the office to agree terms.`)}
                     >
-                      Accept
+                      Invite to meet
                     </button>
                     <button type="button" className="button button--quiet" disabled={isBusy} onClick={() => void act(() => api.answerProposal(proposal.id, "decline"), () => `Declined ${proposal.investor}.`)}>
                       Decline
@@ -111,7 +111,7 @@ export function Investors({ api, capTable, offers, proposals, isFounder, isBusy,
             open={offers}
             isBusy={isBusy}
             onOffer={(investor, amountCents, equityBps) =>
-              void act(() => api.makeOffer({ investor, amountCents, equityBps }), () => `Offer sent to ${investor}. It shows on their company page.`)
+              void act(() => api.makeOffer({ investor, amountCents, equityBps }), () => `Deal opened with ${investor}. Meet in the office to agree terms.`)
             }
           />
         </>
@@ -152,7 +152,7 @@ function OfferForm({ capTable, open, isBusy, onOffer }: { capTable: CapTableWire
         <input type="number" inputMode="decimal" min={0.01} max={MAX_OFFER_BPS / 100} step={0.01} value={share} onChange={(event) => setShare(Number(event.target.value) || 0)} />
       </label>
       <button type="submit" className="button button--ghost" disabled={isBusy || problem !== null || !investor.trim()}>
-        Send offer
+        Invite to meet
       </button>
       <p className="company__note">
         {problem

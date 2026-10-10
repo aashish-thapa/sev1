@@ -40,6 +40,8 @@ type Props = {
     invest: (investRef: string, cents: number) => boolean;
     /** Earns a booked dividend into the wallet; claiming twice does nothing. */
     claimDividend: (dividend: PendingDividend) => void;
+    /** Joins a company's office for an investment meeting, as member or visitor. */
+    enterMeeting: (code: string, companyId: string) => void;
   };
   rooms: {
     status: string;
@@ -160,6 +162,7 @@ export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, fetch
           enterOffice={company.enterOffice}
           invest={company.invest}
           claimDividend={company.claimDividend}
+          enterMeeting={company.enterMeeting}
         />
       ) : view === "admin" ? (
         canAdmin ? <AdminDashboard api={adminApi} /> : <p className="admin__note">The dashboard is for admins.</p>

@@ -519,3 +519,42 @@
   white-space: nowrap;
   pointer-events: none;
 }
+
+.directory__round {
+  color: var(--color-ink-2);
+  font-size: var(--text-xs);
+}
+
+/* An investment's term sheet on the meeting laptop. */
+
+.deal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-sm);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
+}
+
+.deal[data-stage="agreed"] {
+  border-color: var(--color-good);
+}
+
+.deal__title {
+  color: var(--color-ink);
+  font-weight: 600;
+}
+
+.deal__parties {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--color-muted);
+}
+
+.deal__parties [data-agreed="true"] {
+  color: var(--color-good);
+}

@@ -107,7 +107,14 @@ export function CompanyDirectory({ api, onApply, myApplications, investing }: Pr
                     <>
                       <Sparkline points={company.valuationHistory} label={`${company.name}’s valuation`} />
                       <span className="directory__valuation">
-                        <span className="directory__worth">{formatCents(company.valuationCents)}</span>
+                        {company.lastRound && (
+                          <span className="directory__round">
+                            Last round {formatCents(company.lastRound.valuationCents)} <span className="admin__dim">· day {company.lastRound.workDay}</span>
+                          </span>
+                        )}
+                        <span className="directory__worth">
+                          {formatCents(company.valuationCents)} <span className="admin__dim">now</span>
+                        </span>
                         <WeekChange bps={company.weekChangeBps} />
                       </span>
                     </>

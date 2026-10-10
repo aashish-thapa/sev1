@@ -24,7 +24,7 @@ import { AccountContext } from "./useAccount.ts";
 import { CompanyOfficeContext } from "../warroom/floor/company-office/context.ts";
 import { LaptopAppsContext } from "../warroom/ui/laptop-apps.ts";
 import { useCompanyLaptopApps } from "../ui/company/desk/useCompanyLaptopApps.tsx";
-import type { Company } from "../storage/company-protocol.ts";
+import type { Company, DealWire } from "../storage/company-protocol.ts";
 import { useClaimGrants } from "./useClaimGrants.ts";
 import { WellbeingContext } from "./wellbeing-context.ts";
 
@@ -89,13 +89,34 @@ export function App({ shareUrl, proSale, adminApi, companyApi, ...services }: Pr
     },
     [badge, companyApi, role, room, username],
   );
+  // A meeting in your own company's office is just going to work; a visitor walks in on the deal's pass.
+  const enterCompanyMeeting = useCallback(
+    async (code: string, companyId: string) => {
+      const mine = await companyApi.mine();
+      if (mine.ok && mine.value.company?.id === companyId) return enterCompanyOffice(code);
+      room.join(code, { name: username ?? "", role, badge });
+    },
+    [badge, companyApi, enterCompanyOffice, role, room, username],
+  );
   const officeVisit = useMemo(
     () => (companyOffice && isInRoom && room.room?.code === companyOffice.code ? { company: companyOffice.company, me: username } : null),
     [companyOffice, isInRoom, room.room?.code, username],
   );
 
   const refreshOffice = useCallback((company: Company) => setCompanyOffice((office) => (office && office.company.id === company.id ? { ...office, company } : office)), []);
-  const companyApps = useCompanyLaptopApps(companyApi, username, officeVisit !== null, refreshOffice);
+  const { invest } = game;
+  const payForDeal = useCallback(
+    (deal: DealWire) => {
+      // Repeating a ref is a no-op, so seeing the agreed deal on every refetch pays once.
+      if (deal.investRef) invest(deal.investRef, deal.terms.amountCents);
+    },
+    [invest],
+  );
+  const companyApps = useCompanyLaptopApps(companyApi, username, {
+    officeCompanyId: officeVisit ? (companyOffice?.company.id ?? null) : null,
+    onCompany: refreshOffice,
+    onAgreed: payForDeal,
+  });
 
   const leaveOffice = () => {
     if (isInRoom) room.leave();
@@ -144,6 +165,7 @@ export function App({ shareUrl, proSale, adminApi, companyApi, ...services }: Pr
             enterOffice: enterCompanyOffice,
             invest: game.invest,
             claimDividend: game.claimDividend,
+            enterMeeting: enterCompanyMeeting,
           }}
           fetchLeaderboard={fetchLeaderboard}
           rooms={{

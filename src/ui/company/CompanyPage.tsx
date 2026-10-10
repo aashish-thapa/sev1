@@ -12,6 +12,7 @@ import { MyApplications } from "./MyApplications.tsx";
 import { companyErrorText } from "./errors.ts";
 import { FoundCompany } from "./FoundCompany.tsx";
 import { CompanyCard } from "./CompanyCard.tsx";
+import { Deals } from "./Deals.tsx";
 import { Invitations } from "./Invitations.tsx";
 
 export type CompanyPageProps = {
@@ -28,6 +29,8 @@ export type CompanyPageProps = {
   /** Joins the company's office room at `code`. */
   enterOffice: (code: string) => void;
   invest: (investRef: string, cents: number) => boolean;
+  /** Walk into a company's office for an investment meeting (yours or theirs). */
+  enterMeeting: (code: string, companyId: string) => void;
   claimDividend: (dividend: PendingDividend) => void;
 };
 
@@ -175,6 +178,7 @@ export function CompanyPage(props: CompanyPageProps) {
       ) : (
         <CompanyCard api={api} company={company} username={props.username} enterOffice={props.enterOffice} onLeft={refresh} />
       )}
+      <Deals api={api} deals={mine.value.deals} username={props.username} enterMeeting={props.enterMeeting} />
       <InvestorPanel
         api={api}
         offers={mine.value.investmentOffers}

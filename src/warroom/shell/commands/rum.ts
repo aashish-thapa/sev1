@@ -99,8 +99,11 @@ function errors(context: ShellContext, commerce: Commerce): ShellResult {
     add(taps * (1 - retrying) * reached * late, "error", `[checkout] POST /checkout timed out after ${timeout}; showing "Payment is taking longer than usual"`);
     add(posts * blocked, "error", "[checkout] POST /checkout 403 Forbidden — rendering generic error page");
     add(posts * reached * rejected, "error", CHROME_500);
+    // A checkout two defects would both fail is reported once, by the first in the build's list.
+    const spared = { server: 1, client: 1 };
     for (const defect of segment.defects) {
-      const firing = defect.failShare * triggerShare(defect.trigger, commerce, t);
+      const firing = spared[defect.where] * defect.failShare * triggerShare(defect.trigger, commerce, t);
+      spared[defect.where] -= firing;
       add((defect.where === "server" ? posts * reached : taps) * firing, "error", defect.message);
     }
   }

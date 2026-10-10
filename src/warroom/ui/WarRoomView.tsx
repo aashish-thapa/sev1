@@ -29,6 +29,7 @@ type Props = {
   onFinish: (result: Debrief, startedAt: number) => void;
   /** Buys this run's worked solution (identified by its `startedAt`). */
   onBuySolution: (startedAt: number) => SpendOutcome;
+  hints: { readonly usedToday: number; spend(): void };
   onLeave: () => void;
   onUseScreen: (screen: WallScreen) => void;
   /** Called when the pager goes off, so whatever the player was doing can be interrupted. */
@@ -44,14 +45,17 @@ const countFormat = new Intl.NumberFormat("en");
 const AUTO_PAGE_MS = { min: 60_000, spread: 60_000 } as const;
 
 /** The office: quiet until the pager goes off, then the live incident, postmortem and debrief. */
-export function WarRoomView({ scenario, role, onFinish, onBuySolution, onLeave, onUseScreen, onPaged, overlay, room }: Props) {
+export function WarRoomView({ scenario, role, onFinish, onBuySolution, hints, onLeave, onUseScreen, onPaged, overlay, room }: Props) {
   const wallet = useWallet();
   const [stage, setStage] = useState<Stage>(() => ({ name: "office", isPaged: false, run: 0, visit: { startedAt: Date.now(), paidFromSeq: wallet.nextSeq } }));
   const onClosed = useCallback((incident: Incident) => setStage((current) => ({ name: "postmortem", incident, picked: null, visit: current.visit })), []);
   const isQuiet = stage.name === "office" && !stage.isPaged;
   const run = stage.name === "office" ? stage.run : 0;
   const runStartedAt = stage.visit.startedAt;
-  const help = useMemo<IncidentHelp>(() => ({ scenario, role, runStartedAt, buy: () => onBuySolution(runStartedAt) }), [onBuySolution, role, runStartedAt, scenario]);
+  const help = useMemo<IncidentHelp>(
+    () => ({ scenario, role, runStartedAt, buy: () => onBuySolution(runStartedAt), hintsUsedToday: hints.usedToday, spendHint: hints.spend }),
+    [hints.spend, hints.usedToday, onBuySolution, role, runStartedAt, scenario],
+  );
 
   const page = useCallback(() => {
     setStage((current) => (current.name === "office" ? { ...current, isPaged: true } : current));

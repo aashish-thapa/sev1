@@ -10,6 +10,9 @@ export type IncidentHelp = {
   /** Epoch ms this run began; one purchase per run. */
   readonly runStartedAt: number;
   buy(): SpendOutcome;
+  /** Allowance hints already opened today, and how to open one more (Pro's daily free hints). */
+  readonly hintsUsedToday: number;
+  spendHint(): void;
 };
 
 export const IncidentHelpContext = createContext<IncidentHelp | null>(null);

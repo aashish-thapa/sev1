@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useContext, useState } from "react";
+import { AccountContext } from "../../app/useAccount.ts";
 import { useCareer } from "../../app/career-context.ts";
 import { useWallet } from "../../app/wallet-context.ts";
 import { formatCents } from "../../domain/economy.ts";
+import { freeHintsLeft, PRO_DAILY_FREE_HINTS } from "../../domain/entitlements.ts";
 import { hasBoughtSolution, solutionPriceCents } from "../../domain/purchases.ts";
 import type { IncidentHelp } from "./incident-help.ts";
 
@@ -25,31 +27,56 @@ export function HelpPanel({ help, onSuggest }: Props) {
 
 function Hints({ help }: { help: IncidentHelp }) {
   const [shown, setShown] = useState(0);
+  const account = useContext(AccountContext);
   const { hints, tier } = help.scenario;
-  if (tier > FREE_HINT_TIER) {
+  const isFree = tier <= FREE_HINT_TIER;
+  // Pro status is checked as of opening the panel; a subscription lapsing mid-incident can wait.
+  const [openedAt] = useState(() => Date.now());
+  const allowanceLeft = freeHintsLeft(account?.entitlements ?? null, openedAt, help.hintsUsedToday);
+  const revealed = (
+    <ol className="help__hints">
+      {hints.slice(0, shown).map((hint) => (
+        <li key={hint}>{hint}</li>
+      ))}
+    </ol>
+  );
+  const hasMore = shown < hints.length;
+
+  if (isFree) {
     return (
       <section className="help__section" aria-labelledby="help-hints">
         <h3 id="help-hints" className="help__heading">
-          Hints
+          Hints <span className="help__tag">free on guided incidents</span>
         </h3>
-        <p className="help__note">Free hints are for guided incidents. At this level you’re paid to diagnose — or you can buy the worked solution.</p>
+        {revealed}
+        {hasMore && (
+          <button type="button" className="button button--ghost" onClick={() => setShown((count) => count + 1)}>
+            {shown === 0 ? "Show a hint" : "Another hint"}
+          </button>
+        )}
       </section>
     );
   }
+
   return (
     <section className="help__section" aria-labelledby="help-hints">
       <h3 id="help-hints" className="help__heading">
-        Hints <span className="help__tag">free on guided incidents</span>
+        Hints {allowanceLeft > 0 && <span className="help__tag">Pro · {allowanceLeft} free today</span>}
       </h3>
-      <ol className="help__hints">
-        {hints.slice(0, shown).map((hint) => (
-          <li key={hint}>{hint}</li>
-        ))}
-      </ol>
-      {shown < hints.length && (
-        <button type="button" className="button button--ghost" onClick={() => setShown((count) => count + 1)}>
-          {shown === 0 ? "Show a hint" : "Another hint"}
+      {revealed}
+      {hasMore && allowanceLeft > 0 ? (
+        <button
+          type="button"
+          className="button button--ghost"
+          onClick={() => {
+            help.spendHint();
+            setShown((count) => count + 1);
+          }}
+        >
+          Use a free hint
         </button>
+      ) : (
+        hasMore && <p className="help__note">At this level you’re paid to diagnose, or you can buy the worked solution. Pro includes {PRO_DAILY_FREE_HINTS} free hints a day.</p>
       )}
     </section>
   );

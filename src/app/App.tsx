@@ -71,6 +71,7 @@ export function App({ shareUrl, ...services }: Props) {
             role={role}
             onFinish={(result, startedAt) => game.recordWarRoom(scenario, result, { isTeam: isInRoom, startedAt })}
             onBuySolution={(startedAt) => game.buySolution(scenario, startedAt)}
+            hints={{ usedToday: game.hintsUsedToday, spend: game.spendHint }}
             onLeave={leaveOffice}
             room={isInRoom ? room : undefined}
             onUseScreen={(screen) => game.openDiscussion(screen.role)}

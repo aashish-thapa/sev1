@@ -18,6 +18,10 @@ import { failure, idempotencyKeyOf, isSameOrigin, json, readBody, sessionTokenOf
 import { CATEGORY_IDS, type CategoryId } from "../../src/domain/company/catalog.ts";
 import type { CompanyDirectory } from "./directory.ts";
 import type { HiringService } from "./hiring.ts";
+import type { CompanyOffice } from "./office.ts";
+
+/** The company's private multiplayer room: returns `{ code }` to join it like any room. */
+export const OFFICE_PATH = "/api/company/office";
 import type { CompanyProblem, CompanyService, Outcome } from "./service.ts";
 
 export const INVITATIONS_PATH = "/api/invitations";
@@ -93,7 +97,7 @@ function respond<Value>(outcome: Outcome<Value>, status = 200): Response {
 }
 
 /** HTTP for startup mode: parse, check who's asking, hand to the service. Accounts only. */
-export async function handleCompany(request: Request, accounts: Pick<AccountService, "userFor">, companies: CompanyService, hiring: HiringService): Promise<Response> {
+export async function handleCompany(request: Request, accounts: Pick<AccountService, "userFor">, companies: CompanyService, hiring: HiringService, office: CompanyOffice): Promise<Response> {
   const url = new URL(request.url);
   const route = `${request.method} ${url.pathname}`;
   if (request.method !== "GET" && !isSameOrigin(request)) return failure("forbidden", "Cross-site requests are not allowed.", 403);
@@ -126,6 +130,10 @@ export async function handleCompany(request: Request, accounts: Pick<AccountServ
     case `POST ${COMPANY_PATH}`: {
       const body = await readBody(request, FoundRequestSchema);
       return body.ok ? respond(await companies.found(user, body.data), 201) : body.response;
+    }
+    case `POST ${OFFICE_PATH}`: {
+      const entered = await office.enter(user.id);
+      return entered ? json(entered) : failure("not_in_company", "Only members of an active company have an office.", 404);
     }
     case `POST ${COMPANY_PATH}/rooms`: {
       const body = await readBody(request, BuyRoomRequestSchema);

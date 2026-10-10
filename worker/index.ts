@@ -28,6 +28,9 @@ import { D1GrantStore } from "./grants/d1-store.ts";
 import { GrantDesk } from "./grants/service.ts";
 import { shownTags } from "../src/domain/tags.ts";
 import { sessionTokenOf } from "./api/http.ts";
+import { CompanyOffice } from "./company/office.ts";
+import { D1OfficeRoomStore } from "./company/office-d1-store.ts";
+import { TEAM_SCENARIO } from "../src/warroom/scenarios/index.ts";
 
 /** Billing exists only once every Stripe value is configured; until then its routes answer 503. */
 function billingFor(env: Env, store: D1EntitlementStore): BillingService | null {
@@ -57,13 +60,27 @@ async function savedProgressOf(store: Pick<AccountStore, "loadProgress">, userId
   }
 }
 
+/** A company's private room: codes live in D1 and are held in the room host when first assigned. */
+function officeFor(env: Env): CompanyOffice {
+  return new CompanyOffice(new D1OfficeRoomStore(env.DB), (code) => env.ROOMS.getByName(code).claim(code), Math.random);
+}
+
 /** Composition root: rooms, the account API, and everything else from the built site. */
 export default {
   async fetch(request, env) {
     const { pathname } = new URL(request.url);
     if (pathname === "/rooms") {
       const accounts = new AccountService(new D1AccountStore(env.DB), Date.now);
-      return routeRoomSocket(request, env, Math.random, async (socket) => shownTags((await accounts.userFor(sessionTokenOf(socket)))?.tags ?? []));
+      const user = await accounts.userFor(sessionTokenOf(request));
+      const office = officeFor(env);
+      return routeRoomSocket(
+        request,
+        env,
+        Math.random,
+        async () => shownTags(user?.tags ?? []),
+        (_socket, code) => office.access(code, user?.id ?? null),
+        TEAM_SCENARIO.id,
+      );
     }
     if (pathname === PUBLIC_ROOMS_PATH && request.method === "GET") {
       const list: PublicRoomList = { rooms: await env.DIRECTORY.getByName(DIRECTORY_NAME).list() };
@@ -99,7 +116,7 @@ export default {
           newId: () => crypto.randomUUID(),
           isOverLimit: isOverLimit(COMPANY_WRITES_PER_WINDOW),
         });
-        return handleCompany(request, accounts, companies, hiring);
+        return handleCompany(request, accounts, companies, hiring, officeFor(env));
       }
       if (pathname.startsWith(ADMIN_PREFIX)) {
         const store = new D1AccountStore(env.DB);

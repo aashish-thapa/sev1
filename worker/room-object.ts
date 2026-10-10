@@ -5,7 +5,7 @@ import { publicListing, type RoomListing } from "../server/listing.ts";
 import { DEFAULT_ROOM_TIMING, Room, type Connection } from "../server/room.ts";
 import { findScenario } from "../server/scenarios.ts";
 import { openSession, type RoomDirectory } from "../server/session.ts";
-import { IDENTITY_TAGS_HEADER } from "./rooms.ts";
+import { IDENTITY_TAGS_HEADER, OFFICE_SCENARIO_HEADER } from "./rooms.ts";
 import { DIRECTORY_NAME } from "./directory-object.ts";
 import type { Env } from "./env.ts";
 import { workerLogger } from "./log.ts";
@@ -45,7 +45,8 @@ export class RoomObject extends DurableObject<Env> {
       },
       close: (closeCode, reason) => socket.close(closeCode, reason),
     };
-    const session = openSession({ connection, rooms: this.directory(code), findScenario, logger: workerLogger, identity: { tags: tagsOf(request) } });
+    const officeScenario = request.headers.get(OFFICE_SCENARIO_HEADER);
+    const session = openSession({ connection, rooms: this.directory(code, officeScenario), findScenario, logger: workerLogger, identity: { tags: tagsOf(request) } });
     const bytes = new TextEncoder();
     socket.addEventListener("message", (event) => {
       if (typeof event.data !== "string") {
@@ -59,8 +60,11 @@ export class RoomObject extends DurableObject<Env> {
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  /** This object holds at most one room: the one it was claimed for. */
-  private directory(code: string): RoomDirectory {
+  /**
+   * This object holds at most one room: the one it was claimed for. A company office (the worker vouches with
+   * `officeScenario`) opens on the first member's join, and again after it empties out and closes.
+   */
+  private directory(code: string, officeScenario: string | null): RoomDirectory {
     return {
       create: (scenario, visibility) => {
         if (this.room !== null || this.claimedCode !== code) return null;
@@ -69,7 +73,15 @@ export class RoomObject extends DurableObject<Env> {
         workerLogger("info", "room_created", { room: code, scenario: scenario.id, visibility });
         return this.room;
       },
-      find: (candidate) => (this.room?.code === candidate ? this.room : undefined),
+      find: (candidate) => {
+        if (this.room?.code === candidate) return this.room;
+        const scenario = officeScenario && candidate === code && this.room === null ? findScenario(officeScenario) : undefined;
+        if (!scenario) return undefined;
+        this.listing = { visibility: "private", openedAt: Date.now() };
+        this.room = new Room(code, scenario, DEFAULT_ROOM_TIMING, workerLogger, (room) => this.occupancyChanged(room));
+        workerLogger("info", "office_opened", { room: code, scenario: scenario.id });
+        return this.room;
+      },
     };
   }
 

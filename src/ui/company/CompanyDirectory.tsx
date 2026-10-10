@@ -6,6 +6,19 @@ import { ROLE_INFO } from "../../domain/roles.ts";
 import type { CompanyApi, CompanyOutcome } from "../../storage/company-api.ts";
 import type { CompanySummary, MyApplication, MyProposal, Posting } from "../../storage/company-protocol.ts";
 import { ProposeForm } from "./ProposeForm.tsx";
+import { Sparkline } from "./Sparkline.tsx";
+
+/** The week's move, with an arrow and a sign so it never rests on colour alone. */
+function WeekChange({ bps }: { bps: number | null }) {
+  if (bps === null) return <span className="admin__dim">new</span>;
+  const direction = bps > 0 ? "up" : bps < 0 ? "down" : "flat";
+  return (
+    <span className="directory__change" data-direction={direction}>
+      {direction === "up" ? "▲" : direction === "down" ? "▼" : "■"} {bps > 0 ? "+" : ""}
+      {(bps / 100).toFixed(1)}% <span className="admin__dim">7d</span>
+    </span>
+  );
+}
 import { companyErrorText } from "./errors.ts";
 
 /** Pause after typing before searching, so each keystroke isn't a query. */
@@ -89,10 +102,21 @@ export function CompanyDirectory({ api, onApply, myApplications, investing }: Pr
                     {categoryById(company.category).title} · {company.levelTitle} · {company.members} {company.members === 1 ? "person" : "people"} · founded by {company.founder}
                   </p>
                 </div>
-                <p className="directory__revenue">
-                  {formatCents(company.revenue7dCents)}
-                  <span className="admin__dim"> in 7 days</span>
-                </p>
+                <div className="directory__market">
+                  {company.valuationCents > 0 && (
+                    <>
+                      <Sparkline points={company.valuationHistory} label={`${company.name}’s valuation`} />
+                      <span className="directory__valuation">
+                        <span className="directory__worth">{formatCents(company.valuationCents)}</span>
+                        <WeekChange bps={company.weekChangeBps} />
+                      </span>
+                    </>
+                  )}
+                  <span className="directory__revenue">
+                    {formatCents(company.revenue7dCents)}
+                    <span className="admin__dim"> revenue, 7d</span>
+                  </span>
+                </div>
               </div>
               {investing && company.id !== investing.ownCompanyId && (
                 <div className="directory__invest">

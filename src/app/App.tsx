@@ -81,8 +81,11 @@ export function App({ shareUrl, proSale, adminApi, companyApi, tasks, ...service
     async (code: string) => {
       // Know the office's layout before stepping in, so you start at your desk, not behind a shut door.
       const mine = await companyApi.mine();
-      if (mine.ok && mine.value.company) setCompanyOffice({ code, company: mine.value.company });
-      room.join(code, { name: username ?? "", role, badge });
+      const company = mine.ok ? mine.value.company : null;
+      if (company) setCompanyOffice({ code, company });
+      // In the office you're who the company hired you as, not your lobby role.
+      const companyRole = company?.members.find((member) => member.username === username)?.role ?? role;
+      room.join(code, { name: username ?? "", role: companyRole, badge });
     },
     [badge, companyApi, role, room, username],
   );

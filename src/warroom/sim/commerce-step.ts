@@ -11,6 +11,10 @@ export type Load = {
   readonly gatewayFailShare: number;
   /** Multiplier on dependency-timeout traits relative to the traffic they were measured at. */
   readonly leakPressure: number;
+  /** Share of checkouts a client defect makes checkout-api answer with a 5xx before it calls the gateway. */
+  readonly rejectedCheckoutShare: number;
+  /** Share of checkouts declined as fraud: a 402 before the gateway, so a lost order but not a failed request. */
+  readonly declinedCheckoutShare: number;
 };
 
 export type CommerceDemand = Load & {
@@ -37,7 +41,14 @@ const TIMEOUT_ONSET_SECONDS = 2.2;
 const TIMEOUT_SPREAD_SECONDS = 1.6;
 
 export function plainLoad(traffic: Traffic): Load {
-  return { requestsPerSecond: traffic.requestsPerSecond, checkoutShare: traffic.checkoutShare, gatewayFailShare: 0, leakPressure: 1 };
+  return {
+    requestsPerSecond: traffic.requestsPerSecond,
+    checkoutShare: traffic.checkoutShare,
+    gatewayFailShare: 0,
+    leakPressure: 1,
+    rejectedCheckoutShare: 0,
+    declinedCheckoutShare: 0,
+  };
 }
 
 function gatewayTimeoutTotal(gateway: PaymentGateway): number {
@@ -60,6 +71,8 @@ export function commerceDemand(state: ClusterState, commerce: Commerce): Commerc
     checkoutShare: share,
     gatewayFailShare: gateway.timeoutShare,
     leakPressure: (share / checkoutShare) * (gatewayTimeoutTotal(gateway) / gateway.baselineTimeoutShare),
+    rejectedCheckoutShare: 0,
+    declinedCheckoutShare: 0,
     segments,
     clientFailureRate: failure,
     organicCheckoutsPerSecond: organicCheckouts,

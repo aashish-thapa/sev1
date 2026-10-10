@@ -118,6 +118,14 @@ describe("checkout meltdown", () => {
     expect(left.cluster).toEqual(right.cluster);
   });
 
+  // Exact to the last bit: rejection and decline shares this scenario never sets must not move the storm.
+  it("plays out the same storm whatever share seams other scenarios use", () => {
+    const correct = playTo(900, teamPlay());
+    expect(correct.cluster.failedCheckouts).toBe(18454.943714687633);
+    expect(commerceOf(correct).ledger.orphanedCaptures).toBe(39042.050289087696);
+    expect(commerceOf(correct).ledger.paidOrders).toBe(50334.856835737286);
+  });
+
   it("blocking the top talkers looks good on the 5xx graph but turns customers away", () => {
     const correct = playTo(900, teamPlay());
 

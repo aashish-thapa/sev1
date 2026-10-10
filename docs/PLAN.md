@@ -98,8 +98,9 @@ The code is built and pushed, but it isn't switched on. We'll finish this later.
      - `checkout.session.completed`
      - `customer.subscription.created`, `customer.subscription.updated` and `customer.subscription.deleted`
    - Enter the secrets with `wrangler secret put`: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_PRO_MONTHLY` and `STRIPE_PRICE_PRO_YEARLY`.
-2. **Show the Pro panel and legal pages.**
-   - Mount ProPanel in the profile.
+2. **Open Pro for sale.**
+   - The profile already shows Pro as "Coming soon": the perks, the prices, and a disabled button.
+   - To open it, set `IS_PRO_ON_SALE = true` in `src/storage/billing-api.ts`, and only after step 1 is done.
    - Add the Terms, Privacy and Refund pages, which Stripe requires.
    - Show an "Activating Pro…" state when the player lands on `/?billing=success`.
 3. **Practice War Rooms.** Add the lobby picker and record practice runs with no experience or pay.

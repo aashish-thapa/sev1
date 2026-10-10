@@ -45,6 +45,10 @@ const ProgressFieldsSchema = z.object({
   wallet: WalletSchema.default(emptyWallet),
   /** Lifetime correct rated answers; `history` is capped, so career experience can't come from it. */
   correctCards: z.int().nonnegative(),
+  /** Longest run of consecutive daily shifts; `streak.count` resets, this never drops. */
+  bestStreak: z.int().nonnegative(),
+  /** The earned badge shown next to your name in rooms and on the leaderboard (an achievements catalog id). */
+  featuredBadge: z.string().min(1).max(40).nullable().default(null),
 });
 
 /** Saves from before `correctCards` existed: count what history and today's shift still remember. */
@@ -57,7 +61,14 @@ function backfillCorrectCards(raw: unknown): unknown {
   return { ...raw, correctCards: fromHistory + fromToday };
 }
 
-export const ProgressSchema = z.preprocess(backfillCorrectCards, ProgressFieldsSchema);
+/** Saves from before `bestStreak` existed: the current streak is the best one we can still prove. */
+function backfillBestStreak(raw: unknown): unknown {
+  if (typeof raw !== "object" || raw === null || "bestStreak" in raw) return raw;
+  const count = (raw as { streak?: { count?: unknown } }).streak?.count;
+  return { ...raw, bestStreak: typeof count === "number" && count > 0 ? Math.floor(count) : 0 };
+}
+
+export const ProgressSchema = z.preprocess((raw) => backfillBestStreak(backfillCorrectCards(raw)), ProgressFieldsSchema);
 
 export type Attempt = z.infer<typeof AttemptSchema>;
 export type ActiveShift = z.output<typeof ActiveShiftSchema>;
@@ -70,6 +81,8 @@ export function emptyProgress(): Progress {
     ratings: {},
     seenIds: [],
     streak: { count: 0, lastShiftDay: null },
+    bestStreak: 0,
+    featuredBadge: null,
     history: [],
     activeShift: null,
     warRoom: {},
@@ -120,6 +133,11 @@ export function warRoomPlays(progress: Progress): number {
   return Object.values(progress.warRoom).reduce((sum, record) => sum + record.plays, 0);
 }
 
+/** Shows an earned badge next to your name, or none. Whether it's earned is checked where badges live (achievements.ts). */
+export function featureBadge(progress: Progress, badgeId: string | null): Progress {
+  return progress.featuredBadge === badgeId ? progress : { ...progress, featuredBadge: badgeId };
+}
+
 export function hasFinishedShift(progress: Progress, day: LocalDate): boolean {
   return progress.history.some((entry) => entry.day === day);
 }
@@ -147,9 +165,11 @@ export function recordAttempt(progress: Progress, attempt: Attempt): Progress {
 function closeShift(progress: Progress, day: LocalDate, attempts: readonly Attempt[]): Progress {
   const correct = attempts.filter((attempt) => attempt.isCorrect).length;
   const continuesStreak = progress.streak.lastShiftDay === previousDay(day);
+  const count = continuesStreak ? progress.streak.count + 1 : 1;
   return {
     ...progress,
-    streak: { count: continuesStreak ? progress.streak.count + 1 : 1, lastShiftDay: day },
+    streak: { count, lastShiftDay: day },
+    bestStreak: Math.max(progress.bestStreak, count),
     history: [{ day, correct, total: attempts.length }, ...progress.history].slice(0, HISTORY_LIMIT),
     activeShift: null,
   };

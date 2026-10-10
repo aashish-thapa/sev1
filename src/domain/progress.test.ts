@@ -69,3 +69,23 @@ describe("recordAssistedRun", () => {
     expect(recordAssistedRun(emptyProgress(), "x").warRoom.x?.bestPoints).toBe(0);
   });
 });
+
+describe("bestStreak", () => {
+  it("keeps the longest streak after the current one resets", () => {
+    let progress = emptyProgress();
+    for (const day of ["2026-10-01", "2026-10-02", "2026-10-03", "2026-10-07"]) {
+      progress = recordAttempt(startShift(progress, parseLocalDate(day), ["a"]), attempt("a", true));
+    }
+    expect(progress.streak.count).toBe(1);
+    expect(progress.bestStreak).toBe(3);
+  });
+
+  it("backfills older saves from the current streak", () => {
+    const legacy = JSON.parse(JSON.stringify({ ...emptyProgress(), streak: { count: 4, lastShiftDay: "2026-10-09" } }));
+    delete legacy.bestStreak;
+    delete legacy.featuredBadge;
+    const parsed = ProgressSchema.parse(legacy);
+    expect(parsed.bestStreak).toBe(4);
+    expect(parsed.featuredBadge).toBeNull();
+  });
+});

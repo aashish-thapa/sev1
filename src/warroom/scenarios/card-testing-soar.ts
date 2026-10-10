@@ -113,8 +113,9 @@ export const cardTestingSoar: Scenario = {
       { command: `waf block ${TESTER_RANGE}`, why: "Stops every tester; the preview shows 0% of checkout customers." },
       {
         command: `siem resolve ${CARD_TESTING_ALERT} --disposition true-positive --contained-by r-0003 --note "card testing from AS213230, blocked by range"`,
-        why: "Closes it as the true positive it is, naming our rule as the containment, so the playbook's top-500 block never runs.",
+        why: "Closes it as the true positive it is, naming our rule as the containment (r-0003 is the id `waf rules` gave your block), so the playbook's top-500 block never runs.",
       },
+      { command: "waf rules", why: "The new rule is matching the testers and 0% of checkout; the 5xx drain within seconds." },
     ],
   },
   postmortem: {

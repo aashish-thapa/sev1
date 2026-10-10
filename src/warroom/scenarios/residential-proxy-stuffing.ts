@@ -51,7 +51,7 @@ function authSummary(state: ClusterState): string[] {
 function tlsFingerprints(state: ClusterState): string[] {
   const { commerce } = state;
   if (!commerce) return [];
-  const { perMinute } = attackAtEdge(commerce, state.t);
+  const { perMinute, passed } = attackAtEdge(commerce, state.t);
   const browsers = BROWSER_JA4.map((entry) => [
     entry.ja4,
     entry.client,
@@ -64,8 +64,8 @@ function tlsFingerprints(state: ClusterState): string[] {
   return [
     "POST /session by JA4 · last 15 min (fingerprint names: FoxIO JA4 database)",
     ...table([
-      ["JA4", "KNOWN AS", "TOP USER-AGENT", "SIGN-INS/MIN", "ClientIP (distinct)", "SUCCESS"],
-      [BOT_JA4, "Python", "Chrome/114.0.0.0 (Windows)", count(perMinute), count(PROXIES), percent(COMBO_HIT_RATE)],
+      ["JA4", "KNOWN AS", "TOP USER-AGENT", "SIGN-INS/MIN PAST WAF", "ClientIP (distinct)", "SUCCESS"],
+      [BOT_JA4, "Python", "Chrome/114.0.0.0 (Windows)", count(perMinute * passed), count(PROXIES), percent(COMBO_HIT_RATE)],
       ...browsers,
       ["(other: Marlow apps, unlisted)", "—", "Marlow/7.3.0 (com.marlow.shop; …)", count(CUSTOMER_SIGN_INS * (1 - listed)), count(DISTINCT_SOURCE_IPS * (1 - listed)), "97.4%"],
     ]),
@@ -121,8 +121,9 @@ export const residentialProxyStuffing: Scenario = {
       { command: `waf block --ja4 ${BOT_JA4}`, why: "Blocks the one TLS client every bot shares; no browser our customers use presents it." },
       {
         command: `siem resolve ${PROXY_ALERT} --disposition true-positive --contained-by r-0003 --note "residential-proxy stuffing, blocked by JA4"`,
-        why: "Closes it as the true positive it is, contained by the fingerprint block.",
+        why: "Closes it as the true positive it is, contained by the fingerprint block (r-0003 is the id `waf rules` gave your block).",
       },
+      { command: "waf rules", why: "The new rule is matching the stuffing and 0% of checkout; the 5xx drain within seconds." },
     ],
   },
   postmortem: {

@@ -76,7 +76,9 @@ export type ClientBuild = {
 
 export type Rollout =
   | { readonly kind: "instant" }
-  | { readonly kind: "phased"; readonly day: number; readonly isPaused: boolean; readonly adoptionPerSecond: number };
+  | { readonly kind: "phased"; readonly day: number; readonly isPaused: boolean; readonly adoptionPerSecond: number }
+  /** A web build a service worker keeps serving from its precache; tabs move to `current` only while the kill-switch flag is on. */
+  | { readonly kind: "service-worker"; readonly killSwitchFlag: string; readonly adoptionPerSecond: number };
 
 export type Platform = {
   readonly id: PlatformId;

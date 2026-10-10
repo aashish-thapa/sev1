@@ -153,6 +153,7 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
   const seating = useSeating(getPlayer);
   const readStance = seating.readStance;
   const hands = useHands();
+  const readHolding = hands.holding;
   const lookScale = hands.lookScale;
   useBodyCues(hands.wellbeing, true);
   const smallTalk = useSmallTalk(panic);
@@ -232,7 +233,7 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
         rememberControlsLearned();
         setKnowsControls(true);
       }
-      const presence = presenceOf(player, readStance(), isOnLaptopRef.current);
+      const presence = presenceOf(player, readStance(), isOnLaptopRef.current, readHolding());
       if (hasPresenceChanged(lastPresence.current, presence)) {
         lastPresence.current = presence;
         onPresence?.(presence);
@@ -243,7 +244,7 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
         onStep?.(where.surface);
       }
     },
-    [onPresence, onStep, onWhereabouts, readStance],
+    [onPresence, onStep, onWhereabouts, readStance, readHolding],
   );
   const moveStick = useCallback((x: number, y: number) => {
     controls.current.stick = { x, y };

@@ -7,6 +7,7 @@ import { useCoffee } from "./useCoffee.ts";
 import { useLeftovers } from "./useLeftovers.ts";
 import { useSnack } from "./useSnack.ts";
 import type { Usable } from "./usable.ts";
+import type { Carried } from "../office.ts";
 
 /**
  * What's in your hand: one coffee or one snack at a time, from the kitchen to your mouth, with
@@ -49,6 +50,11 @@ export function useHands() {
 
   const pace = useCallback(() => coffee.pace() * walkScaleOf(wellbeingNow.current), [coffee]);
   const lookScale = useCallback(() => lookScaleOf(wellbeingNow.current), []);
+  /** What's in your hand right now, for teammates to see. */
+  const holding = useCallback((): Carried | null => {
+    if (coffeeNow.current.cup.kind === "holding") return "cup";
+    return snackNow.current.kind === "holding" ? "snack" : null;
+  }, []);
 
-  return { coffee: coffee.coffee, snack: snack.snack, machine: coffee.machine, usables, consume, pace, lookScale, leftovers, wellbeing };
+  return { coffee: coffee.coffee, snack: snack.snack, machine: coffee.machine, usables, consume, pace, lookScale, holding, leftovers, wellbeing };
 }

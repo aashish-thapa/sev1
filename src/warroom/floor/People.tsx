@@ -220,7 +220,7 @@ function TeammateModel({ teammate, reduceMotion }: { teammate: Teammate; reduceM
   return (
     <group ref={body} position={arrival}>
       <Suspense fallback={<StandIn isSeated={false} />}>
-        <Avatar id={avatarFor(teammate.id)} motion={motion} />
+        <Avatar id={avatarFor(teammate.id)} motion={motion} carried={() => target?.holding ?? null} />
       </Suspense>
       <SpeakingRing level={() => levelsRef.current.get(teammate.id) ?? 0} />
       {isOnLaptop && <HeldLaptop position={isSeated ? LAPTOP_ON_DESK : LAPTOP_IN_HANDS} />}

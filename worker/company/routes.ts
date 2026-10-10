@@ -1,19 +1,39 @@
+import { z } from "zod";
 import {
   BuyRoomRequestSchema,
   BuyServerRequestSchema,
+  COMPANIES_PATH,
   COMPANY_PATH,
   FoundRequestSchema,
+  InterviewAnswersSchema,
+  OpenPostingRequestSchema,
+  POSTINGS_PATH,
+  TOP_COMPANIES_PATH,
   InviteRequestSchema,
   SetMemberRequestSchema,
   SettleRequestSchema,
 } from "../../src/storage/company-protocol.ts";
 import type { AccountService } from "../api/accounts.ts";
 import { failure, idempotencyKeyOf, isSameOrigin, json, readBody, sessionTokenOf } from "../api/http.ts";
+import { CATEGORY_IDS, type CategoryId } from "../../src/domain/company/catalog.ts";
+import type { CompanyDirectory } from "./directory.ts";
+import type { HiringService } from "./hiring.ts";
 import type { CompanyProblem, CompanyService, Outcome } from "./service.ts";
 
 export const INVITATIONS_PATH = "/api/invitations";
-const INVITATION_ACTION = /^\/api\/invitations\/([A-Za-z0-9-]{1,64})\/(accept|decline)$/;
-/** A client retrying a purchase sends the same key, so the second attempt books nothing new. */
+/** Applying to a posting, answering its interview, and deciding on an application live outside /api/company: the caller needn't be in one. */
+export const APPLY_PATH = "/api/postings";
+export const INTERVIEWS_PATH = "/api/interviews";
+export const APPLICATIONS_PATH = "/api/applications";
+const ID = "([A-Za-z0-9-]{1,64})";
+const INVITATION_ACTION = new RegExp(`^${INVITATIONS_PATH}/${ID}/(accept|decline)$`);
+const POSTING_CLOSE = new RegExp(`^${POSTINGS_PATH}/${ID}/close$`);
+const POSTING_APPLY = new RegExp(`^${APPLY_PATH}/${ID}/apply$`);
+const INTERVIEW_ANSWERS = new RegExp(`^${INTERVIEWS_PATH}/${ID}/answers$`);
+const APPLICATION_DECISION = new RegExp(`^${APPLICATIONS_PATH}/${ID}/(hire|reject)$`);
+/** Public lists change once a work day; a minute of caching spares the database on every page view. */
+const PUBLIC_CACHE = { "cache-control": "public, max-age=60" } as const;
+const CategorySchema = z.enum(CATEGORY_IDS);
 
 
 const STATUS: Readonly<Record<CompanyProblem, number>> = {
@@ -32,6 +52,14 @@ const STATUS: Readonly<Record<CompanyProblem, number>> = {
   already_invited: 409,
   already_settled_today: 409,
   rate_limited: 429,
+  not_hiring: 403,
+  posting_closed: 409,
+  already_applied: 409,
+  below_level: 403,
+  interview_expired: 410,
+  interview_not_found: 404,
+  application_not_found: 404,
+  no_questions: 409,
 };
 
 const MESSAGE: Readonly<Record<CompanyProblem, string>> = {
@@ -50,6 +78,14 @@ const MESSAGE: Readonly<Record<CompanyProblem, string>> = {
   already_invited: "They already have an offer from you.",
   already_settled_today: "Today's work day is already settled.",
   rate_limited: "Too many changes in a row. Try again in a few minutes.",
+  not_hiring: "Only the founder or a hiring manager can do that.",
+  posting_closed: "That posting isn't open any more.",
+  already_applied: "You've already applied for that posting.",
+  below_level: "Your career level is below what that posting asks for.",
+  interview_expired: "The interview's time ran out.",
+  interview_not_found: "That interview isn't yours or doesn't exist.",
+  application_not_found: "That application isn't open.",
+  no_questions: "There are no interview questions for that role yet.",
 };
 
 function respond<Value>(outcome: Outcome<Value>, status = 200): Response {
@@ -57,7 +93,7 @@ function respond<Value>(outcome: Outcome<Value>, status = 200): Response {
 }
 
 /** HTTP for startup mode: parse, check who's asking, hand to the service. Accounts only. */
-export async function handleCompany(request: Request, accounts: Pick<AccountService, "userFor">, companies: CompanyService): Promise<Response> {
+export async function handleCompany(request: Request, accounts: Pick<AccountService, "userFor">, companies: CompanyService, hiring: HiringService): Promise<Response> {
   const url = new URL(request.url);
   const route = `${request.method} ${url.pathname}`;
   if (request.method !== "GET" && !isSameOrigin(request)) return failure("forbidden", "Cross-site requests are not allowed.", 403);
@@ -65,10 +101,23 @@ export async function handleCompany(request: Request, accounts: Pick<AccountServ
   if (!user) return failure("signed_out", "Sign in to run a company.", 401);
   const requestKey = idempotencyKeyOf(request);
 
-  const invitationAction = request.method === "POST" ? INVITATION_ACTION.exec(url.pathname) : null;
-  if (invitationAction) {
-    const [, id, action] = invitationAction;
-    return respond(action === "accept" ? await companies.accept(user, id) : await companies.decline(user, id));
+  if (request.method === "POST") {
+    const invitationAction = INVITATION_ACTION.exec(url.pathname);
+    if (invitationAction) {
+      const [, id, action] = invitationAction;
+      return respond(action === "accept" ? await companies.accept(user, id) : await companies.decline(user, id));
+    }
+    const closing = POSTING_CLOSE.exec(url.pathname);
+    if (closing) return respond(await hiring.closePosting(user, closing[1]));
+    const applying = POSTING_APPLY.exec(url.pathname);
+    if (applying) return respond(await hiring.apply(user, applying[1]));
+    const answering = INTERVIEW_ANSWERS.exec(url.pathname);
+    if (answering) {
+      const body = await readBody(request, InterviewAnswersSchema);
+      return body.ok ? respond(await hiring.answer(user, answering[1], body.data.answers)) : body.response;
+    }
+    const deciding = APPLICATION_DECISION.exec(url.pathname);
+    if (deciding) return respond(deciding[2] === "hire" ? await hiring.hire(user, deciding[1]) : await hiring.reject(user, deciding[1]));
   }
 
   switch (route) {
@@ -94,6 +143,10 @@ export async function handleCompany(request: Request, accounts: Pick<AccountServ
       const body = await readBody(request, SetMemberRequestSchema);
       return body.ok ? respond(await companies.setMember(user, body.data)) : body.response;
     }
+    case `POST ${POSTINGS_PATH}`: {
+      const body = await readBody(request, OpenPostingRequestSchema);
+      return body.ok ? respond(await hiring.openPosting(user, body.data), 201) : body.response;
+    }
     case `POST ${COMPANY_PATH}/workday`: {
       const body = await readBody(request, SettleRequestSchema);
       return body.ok ? respond(await companies.settle(user, body.data)) : body.response;
@@ -101,4 +154,15 @@ export async function handleCompany(request: Request, accounts: Pick<AccountServ
     default:
       return failure("not_found", `No route for ${route}.`, 404);
   }
+}
+
+/** The public company list: anyone may search it or see the leaderboard. */
+export async function handleDirectory(request: Request, directory: CompanyDirectory): Promise<Response> {
+  if (request.method !== "GET") return failure("not_found", "The company list is read-only.", 404);
+  const url = new URL(request.url);
+  if (url.pathname === TOP_COMPANIES_PATH) return json({ companies: await directory.top() }, 200, PUBLIC_CACHE);
+  if (url.pathname !== COMPANIES_PATH) return failure("not_found", "No such list.", 404);
+  const category = CategorySchema.safeParse(url.searchParams.get("category"));
+  const chosen: CategoryId | null = category.success ? category.data : null;
+  return json({ companies: await directory.search(url.searchParams.get("query") ?? "", chosen) }, 200, PUBLIC_CACHE);
 }

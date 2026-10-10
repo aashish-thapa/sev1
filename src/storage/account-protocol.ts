@@ -18,6 +18,15 @@ export const COMPANY_ERRORS = [
   "already_invited",
   "invitation_not_found",
   "already_settled_today",
+  // Hiring.
+  "not_hiring",
+  "posting_closed",
+  "already_applied",
+  "below_level",
+  "interview_expired",
+  "interview_not_found",
+  "application_not_found",
+  "no_questions",
 ] as const;
 
 export const API_ERRORS = [

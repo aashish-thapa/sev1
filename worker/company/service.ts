@@ -4,8 +4,10 @@
  */
 import { ROLE_MINIMUM_PAY_CENTS, roomKindById, serverTierById, type RoomKindId, type ServerTierId } from "../../src/domain/company/catalog.ts";
 import { checkOffer, checkRoomPurchase, checkServerPurchase, FOUNDING_MINIMUM_CENTS, settleWorkDay, type CompanyBook } from "../../src/domain/company/rules.ts";
+import { companyLevel } from "../../src/domain/company/levels.ts";
 import type { Role } from "../../src/domain/incident.ts";
-import type { Company, FoundRequest, MyCompany, WorkDaySettlement } from "../../src/storage/company-protocol.ts";
+import type { Application, Company, FoundRequest, MyCompany, Posting, WorkDaySettlement } from "../../src/storage/company-protocol.ts";
+import type { ApplicationRow, HiringStore, PostingRow } from "./hiring-store.ts";
 import type { CompanyStore, CompanyView } from "./store.ts";
 
 /** How long a founder has to put the seed in before the company is dropped. */
@@ -30,7 +32,15 @@ export type CompanyProblem =
   | "already_invited"
   | "invitation_not_found"
   | "already_settled_today"
-  | "rate_limited";
+  | "rate_limited"
+  | "not_hiring"
+  | "posting_closed"
+  | "already_applied"
+  | "below_level"
+  | "interview_expired"
+  | "interview_not_found"
+  | "application_not_found"
+  | "no_questions";
 
 export type Outcome<Value> = { readonly ok: true; readonly value: Value } | { readonly ok: false; readonly problem: CompanyProblem };
 
@@ -49,6 +59,8 @@ export type CompanyDeps = {
   readonly newId: () => string;
   /** True when this caller has made too many company writes recently. */
   readonly isOverLimit: (key: string) => Promise<boolean>;
+  /** Postings and applications to show in the HQ; without it the HQ lists none. */
+  readonly hiring?: Pick<HiringStore, "postingsOf" | "applicationsOf" | "myApplications">;
 };
 
 const fail = (problem: CompanyProblem) => ({ ok: false as const, problem });
@@ -56,7 +68,7 @@ const ok = <Value>(value: Value) => ({ ok: true as const, value });
 
 const utcDay = (at: number) => new Date(at).toISOString().slice(0, 10);
 
-function bookOf(view: CompanyView): CompanyBook {
+export function bookOf(view: CompanyView): CompanyBook {
   return {
     category: view.company.category,
     fundsCents: view.fundsCents,
@@ -66,8 +78,28 @@ function bookOf(view: CompanyView): CompanyBook {
   };
 }
 
-function companyOf(view: CompanyView): Company {
+/** The company's level, from lifetime revenue and work days survived — never from its bank balance. */
+export function levelOf(view: Pick<CompanyView, "lifetimeRevenueCents" | "company">) {
+  return companyLevel({ lifetimeRevenueCents: view.lifetimeRevenueCents, workDays: view.company.workDay });
+}
+
+export function postingOf(row: PostingRow): Posting {
+  return { id: row.id, companyId: row.companyId, role: row.role, payCents: row.payCents, minCareerLevel: row.minCareerLevel, minScore: row.minScore, isOpen: row.isOpen, createdAt: row.createdAt };
+}
+
+export function applicationOf(row: ApplicationRow): Application {
+  return { id: row.id, postingId: row.postingId, username: row.username, careerTitle: row.careerTitle, score: row.score, status: row.status, appliedAt: row.appliedAt };
+}
+
+/** Whether this member may open postings and hire: the founder always, others when granted. */
+export function canHire(view: CompanyView, userId: string): boolean {
+  const member = view.members.find((candidate) => candidate.userId === userId);
+  return member !== undefined && (member.isFounder || member.canHire);
+}
+
+function companyOf(view: CompanyView, postings: readonly PostingRow[], applications: readonly ApplicationRow[]): Company {
   const { company } = view;
+  const level = levelOf(view);
   return {
     id: company.id,
     name: company.name,
@@ -77,10 +109,22 @@ function companyOf(view: CompanyView): Company {
     workDay: company.workDay,
     rooms: [...view.rooms],
     servers: [...view.servers],
-    members: view.members.map((member) => ({ username: member.username, role: member.role, payCents: member.payCents, isFounder: member.isFounder, joinedAt: member.joinedAt })),
+    members: view.members.map((member) => ({
+      username: member.username,
+      role: member.role,
+      payCents: member.payCents,
+      isFounder: member.isFounder,
+      joinedAt: member.joinedAt,
+      canHire: member.isFounder || member.canHire,
+    })),
     pendingInvitations: view.pendingInvitations.map((invitation) => ({ id: invitation.id, username: invitation.username, role: invitation.role, payCents: invitation.payCents })),
     ledger: view.ledger.slice(-LEDGER_SHOWN).map((line) => ({ ...line })),
     funding: company.state === "unfunded" ? { ref: company.fundingRef, seedCents: company.fundingCents, expiresAt: company.fundingExpiresAt } : null,
+    level: level.level,
+    levelTitle: level.title,
+    lifetimeRevenueCents: view.lifetimeRevenueCents,
+    postings: postings.map(postingOf),
+    applications: applications.map(applicationOf),
   };
 }
 
@@ -94,14 +138,19 @@ export class CompanyService {
   /** Your company (with any expired, never-funded one dropped), the offers waiting for you and pay to claim. */
   async mine(caller: Caller): Promise<MyCompany> {
     const { store } = this.deps;
-    const [view, invitations, payouts] = await Promise.all([this.liveCompanyOf(caller.id), store.receivedInvitations(caller.id), store.pendingPayouts(caller.id)]);
-    return { company: view ? companyOf(view) : null, invitations, payouts };
+    const [view, invitations, payouts, applications] = await Promise.all([
+      this.companyFor(caller.id),
+      store.receivedInvitations(caller.id),
+      store.pendingPayouts(caller.id),
+      this.deps.hiring?.myApplications(caller.id) ?? [],
+    ]);
+    return { company: view ? await this.present(view, caller.id) : null, invitations, payouts, applications };
   }
 
   async found(caller: Caller, request: FoundRequest): Promise<Outcome<{ companyId: string; fundingRef: string; seedCents: number }>> {
     const { store, now, newId } = this.deps;
     if (await this.deps.isOverLimit(`company:${caller.id}`)) return fail("rate_limited");
-    if (await this.liveCompanyOf(caller.id)) return fail("already_in_company");
+    if (await this.companyFor(caller.id)) return fail("already_in_company");
     if (!Number.isInteger(request.seedCents) || request.seedCents < FOUNDING_MINIMUM_CENTS) return fail("below_founding_minimum");
     const id = newId();
     const fundingRef = `company:fund:${id}:${newId()}`;
@@ -150,10 +199,11 @@ export class CompanyService {
     const problem = checkOffer(bookOf(view), request.role, request.payCents, view.pendingInvitations.length);
     if (problem) return fail(problem);
     const sent = await this.deps.store.invite({ id: this.deps.newId(), companyId: view.company.id, userId: invitee.id, role: request.role, payCents: request.payCents, at: this.deps.now() });
-    return sent ? this.reloaded(view.company.id) : fail("already_invited");
+    return sent ? this.reloaded(view.company.id, caller.id) : fail("already_invited");
   }
 
-  async setMember(caller: Caller, request: { username: string; role: Role; payCents: number }): Promise<Outcome<Company>> {
+  /** Only the founder may change a member's role, pay or hiring permission. */
+  async setMember(caller: Caller, request: { username: string; role: Role; payCents: number; canHire?: boolean }): Promise<Outcome<Company>> {
     const founded = await this.foundersCompany(caller);
     if (!founded.ok) return founded;
     const view = founded.value;
@@ -163,17 +213,17 @@ export class CompanyService {
     const others = { ...bookOf(view), members: bookOf(view).members.filter((candidate) => candidate.userId !== member.userId) };
     const problem = checkOffer(others, request.role, request.payCents, view.pendingInvitations.length);
     if (problem) return fail(problem);
-    await this.deps.store.setMember(view.company.id, member.userId, request.role, request.payCents);
-    return this.reloaded(view.company.id);
+    await this.deps.store.setMember(view.company.id, member.userId, request.role, request.payCents, member.isFounder ? undefined : request.canHire);
+    return this.reloaded(view.company.id, caller.id);
   }
 
   async accept(caller: Caller, invitationId: string): Promise<Outcome<Company>> {
     const { store } = this.deps;
     const invitation = await store.invitation(invitationId);
     if (!invitation || invitation.userId !== caller.id || invitation.status !== "pending") return fail("invitation_not_found");
-    if (await this.liveCompanyOf(caller.id)) return fail("already_in_company");
+    if (await this.companyFor(caller.id)) return fail("already_in_company");
     const joined = await store.accept(invitation, this.deps.now());
-    return joined ? this.reloaded(invitation.companyId) : fail("already_in_company");
+    return joined ? this.reloaded(invitation.companyId, caller.id) : fail("already_in_company");
   }
 
   async decline(caller: Caller, invitationId: string): Promise<Outcome<null>> {
@@ -187,7 +237,7 @@ export class CompanyService {
   async settle(caller: Caller, report: DayReport): Promise<Outcome<WorkDaySettlement>> {
     const { store, now } = this.deps;
     if (await this.deps.isOverLimit(`company:${caller.id}`)) return fail("rate_limited");
-    const view = await this.liveCompanyOf(caller.id);
+    const view = await this.companyFor(caller.id);
     if (!view) return fail("not_in_company");
     if (view.company.state !== "active") return fail("not_active");
     const at = now();
@@ -224,7 +274,7 @@ export class CompanyService {
   }
 
   /** The caller's company, unless it's an unfunded one whose window closed — that one is dropped. */
-  private async liveCompanyOf(userId: string): Promise<CompanyView | null> {
+  async companyFor(userId: string): Promise<CompanyView | null> {
     const view = await this.deps.store.companyOf(userId);
     if (view && view.company.state === "unfunded" && view.company.fundingExpiresAt <= this.deps.now()) {
       await this.deps.store.dropUnfunded(view.company.id);
@@ -235,7 +285,7 @@ export class CompanyService {
 
   private async foundersCompany(caller: Caller): Promise<Outcome<CompanyView>> {
     if (await this.deps.isOverLimit(`company:${caller.id}`)) return fail("rate_limited");
-    const view = await this.liveCompanyOf(caller.id);
+    const view = await this.companyFor(caller.id);
     if (!view) return fail("not_in_company");
     if (view.company.founderId !== caller.id) return fail("not_founder");
     if (view.company.state !== "active") return fail("not_active");
@@ -254,17 +304,25 @@ export class CompanyService {
     // A retried request carries the same key and ref: recognise it before re-checking funds it already spent.
     const key = requestKey ?? this.deps.newId();
     const ref = `${kind}:${key}`;
-    if (requestKey !== null && (await this.deps.store.isBooked(view.company.id, ref))) return this.reloaded(view.company.id);
+    if (requestKey !== null && (await this.deps.store.isBooked(view.company.id, ref))) return this.reloaded(view.company.id, caller.id);
     const choice = choose(view);
     if (typeof choice === "string") return fail(choice);
     const common = { id: `${view.company.id}:${kind}:${key}`, ref, costCents: choice.costCents, at: this.deps.now(), workDay: view.company.workDay };
     const purchase = choice.kind === "room" ? { ...common, kind: "room" as const, item: choice.item } : { ...common, kind: "server" as const, item: choice.item };
     const result = await this.deps.store.buy(view.company.id, purchase);
-    return result === "short" ? fail("not_enough_funds") : this.reloaded(view.company.id);
+    return result === "short" ? fail("not_enough_funds") : this.reloaded(view.company.id, caller.id);
   }
 
-  private async reloaded(companyId: string): Promise<Outcome<Company>> {
+  /** The company as `viewerId` may see it: postings and applicants only for the founder and hiring managers. */
+  async present(view: CompanyView, viewerId: string): Promise<Company> {
+    const { hiring } = this.deps;
+    if (!hiring || !canHire(view, viewerId)) return companyOf(view, [], []);
+    const [postings, applications] = await Promise.all([hiring.postingsOf(view.company.id), hiring.applicationsOf(view.company.id)]);
+    return companyOf(view, postings, applications);
+  }
+
+  async reloaded(companyId: string, viewerId: string): Promise<Outcome<Company>> {
     const view = await this.deps.store.companyById(companyId);
-    return view ? ok(companyOf(view)) : fail("not_in_company");
+    return view ? ok(await this.present(view, viewerId)) : fail("not_in_company");
   }
 }

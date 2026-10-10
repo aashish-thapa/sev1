@@ -22,7 +22,16 @@ export type CompanyRow = {
   readonly createdAt: number;
 };
 
-export type MemberRow = { readonly userId: string; readonly username: string; readonly role: Role; readonly payCents: number; readonly isFounder: boolean; readonly joinedAt: number };
+export type MemberRow = {
+  readonly userId: string;
+  readonly username: string;
+  readonly role: Role;
+  readonly payCents: number;
+  readonly isFounder: boolean;
+  readonly joinedAt: number;
+  /** May open postings and hire; the founder always may. */
+  readonly canHire: boolean;
+};
 
 export type InvitationRow = {
   readonly id: string;
@@ -46,6 +55,8 @@ export type CompanyView = {
   readonly pendingInvitations: readonly InvitationRow[];
   /** Newest last. */
   readonly ledger: readonly BookLine[];
+  /** Every revenue line ever booked; with work days, it sets the company's level. */
+  readonly lifetimeRevenueCents: number;
 };
 
 /** Something bought from company funds: booked only if the funds still cover it when written. */
@@ -84,7 +95,8 @@ export interface CompanyStore {
   /** Joins the company and closes the offer; false when the player already belongs to a company. */
   accept(invitation: InvitationRow, at: number): Promise<boolean>;
   decline(invitationId: string): Promise<void>;
-  setMember(companyId: string, userId: string, role: Role, payCents: number): Promise<void>;
+  /** `canHire` undefined leaves the member's hiring permission as it is. */
+  setMember(companyId: string, userId: string, role: Role, payCents: number, canHire?: boolean): Promise<void>;
   /** False when another settlement got there first. */
   settle(day: SettledDay): Promise<boolean>;
 }

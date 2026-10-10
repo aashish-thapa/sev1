@@ -69,13 +69,14 @@ export class MemoryCompanyStore implements CompanyStore, CompanyBank {
       servers: this.servers.filter((server) => server.companyId === companyId).map((server) => server.tier),
       pendingInvitations: [...this.invitations.values()].filter((invitation) => invitation.companyId === companyId && invitation.status === "pending"),
       ledger: lines.map(({ at, workDay, reason, amountCents, note }) => ({ at, workDay, reason, amountCents, note })),
+      lifetimeRevenueCents: lines.filter((line) => line.reason === "revenue").reduce((sum, line) => sum + line.amountCents, 0),
     };
   }
 
   async found(company: CompanyRow, founder: { role: Role; payCents: number }): Promise<boolean> {
     if (this.members.some((member) => member.userId === company.founderId)) return false;
     this.companies.set(company.id, company);
-    this.members.push({ companyId: company.id, userId: company.founderId, username: this.usernames.get(company.founderId) ?? "", role: founder.role, payCents: founder.payCents, isFounder: true, joinedAt: company.createdAt });
+    this.members.push({ companyId: company.id, userId: company.founderId, username: this.usernames.get(company.founderId) ?? "", role: founder.role, payCents: founder.payCents, isFounder: true, joinedAt: company.createdAt, canHire: false });
     return true;
   }
 
@@ -133,7 +134,7 @@ export class MemoryCompanyStore implements CompanyStore, CompanyBank {
 
   async accept(invitation: InvitationRow, at: number): Promise<boolean> {
     if (this.members.some((member) => member.userId === invitation.userId)) return false;
-    this.members.push({ companyId: invitation.companyId, userId: invitation.userId, username: invitation.username, role: invitation.role, payCents: invitation.payCents, isFounder: false, joinedAt: at });
+    this.members.push({ companyId: invitation.companyId, userId: invitation.userId, username: invitation.username, role: invitation.role, payCents: invitation.payCents, isFounder: false, joinedAt: at, canHire: false });
     const stored = this.invitations.get(invitation.id);
     if (stored) this.invitations.set(invitation.id, { ...stored, status: "accepted" });
     return true;
@@ -144,9 +145,14 @@ export class MemoryCompanyStore implements CompanyStore, CompanyBank {
     if (stored?.status === "pending") this.invitations.set(invitationId, { ...stored, status: "declined" });
   }
 
-  async setMember(companyId: string, userId: string, role: Role, payCents: number): Promise<void> {
+  async setMember(companyId: string, userId: string, role: Role, payCents: number, canHire?: boolean): Promise<void> {
     const index = this.members.findIndex((member) => member.companyId === companyId && member.userId === userId);
-    if (index >= 0) this.members[index] = { ...this.members[index], role, payCents };
+    if (index >= 0) this.members[index] = { ...this.members[index], role, payCents, canHire: canHire ?? this.members[index].canHire };
+  }
+
+  /** Revenue lines, for the directory's ranking. */
+  revenueLines(companyId: string): readonly BookLine[] {
+    return this.ledger.filter((line) => line.companyId === companyId && line.reason === "revenue");
   }
 
   async settle(day: SettledDay): Promise<boolean> {

@@ -11,9 +11,16 @@ import { DIRECTORY_NAME } from "./directory-object.ts";
 import type { Env } from "./env.ts";
 import { routeRoomSocket } from "./rooms.ts";
 import { D1CompanyStore } from "./company/d1-store.ts";
-import { handleCompany, INVITATIONS_PATH } from "./company/routes.ts";
+import { APPLICATIONS_PATH, APPLY_PATH, handleCompany, handleDirectory, INTERVIEWS_PATH, INVITATIONS_PATH } from "./company/routes.ts";
+import { CompanyDirectory } from "./company/directory.ts";
+import { HiringService } from "./company/hiring.ts";
+import { D1CompanyDirectory, D1HiringStore } from "./company/hiring-d1-store.ts";
+import { TASKS } from "./company/tasks.ts";
 import { CompanyService } from "./company/service.ts";
-import { COMPANY_PATH } from "../src/storage/company-protocol.ts";
+import { COMPANIES_PATH, COMPANY_PATH, TOP_COMPANIES_PATH } from "../src/storage/company-protocol.ts";
+import { careerLevel } from "../src/domain/career.ts";
+import { emptyProgress, ProgressSchema, type Progress } from "../src/domain/progress.ts";
+import type { AccountStore } from "./api/store.ts";
 import { D1AdminStore } from "./admin/d1-store.ts";
 import { ADMIN_PREFIX, handleAdmin } from "./admin/routes.ts";
 import { AdminService } from "./admin/service.ts";
@@ -37,6 +44,19 @@ const COMPANY_WRITES_PER_WINDOW = 60;
 /** Grants one admin may issue per attempt window: plenty for testing, a ceiling on a stuck retry loop. */
 const GRANTS_PER_WINDOW = 30;
 
+/** The progress the server last accepted for a player; a player with none (or an unreadable save) starts as an intern. */
+async function savedProgressOf(store: Pick<AccountStore, "loadProgress">, userId: string): Promise<Progress> {
+  const saved = await store.loadProgress(userId);
+  if (!saved) return emptyProgress();
+  try {
+    const parsed = ProgressSchema.safeParse(JSON.parse(saved.body));
+    return parsed.success ? parsed.data : emptyProgress();
+  } catch (error) {
+    if (error instanceof SyntaxError) return emptyProgress();
+    throw error;
+  }
+}
+
 /** Composition root: rooms, the account API, and everything else from the built site. */
 export default {
   async fetch(request, env) {
@@ -59,14 +79,27 @@ export default {
       };
       const accounts = new AccountService(accountStore, Date.now, (id) => findScenario(id)?.tier, companyStore, grantStore);
       const entitlements = new D1EntitlementStore(env.DB);
-      if (pathname === COMPANY_PATH || pathname.startsWith(`${COMPANY_PATH}/`) || pathname.startsWith(`${INVITATIONS_PATH}/`)) {
+      if (pathname === COMPANIES_PATH || pathname === TOP_COMPANIES_PATH) return handleDirectory(request, new CompanyDirectory(new D1CompanyDirectory(env.DB)));
+      if (pathname === COMPANY_PATH || [COMPANY_PATH, INVITATIONS_PATH, APPLY_PATH, INTERVIEWS_PATH, APPLICATIONS_PATH].some((prefix) => pathname.startsWith(`${prefix}/`))) {
+        const hiringStore = new D1HiringStore(env.DB);
         const companies = new CompanyService({
           store: companyStore,
           now: Date.now,
           newId: () => crypto.randomUUID(),
           isOverLimit: isOverLimit(COMPANY_WRITES_PER_WINDOW),
+          hiring: hiringStore,
         });
-        return handleCompany(request, accounts, companies);
+        const hiring = new HiringService({
+          store: hiringStore,
+          companies: companyStore,
+          company: companies,
+          tasks: TASKS,
+          careerOf: async (userId) => careerLevel(await savedProgressOf(accountStore, userId)),
+          now: Date.now,
+          newId: () => crypto.randomUUID(),
+          isOverLimit: isOverLimit(COMPANY_WRITES_PER_WINDOW),
+        });
+        return handleCompany(request, accounts, companies, hiring);
       }
       if (pathname.startsWith(ADMIN_PREFIX)) {
         const store = new D1AccountStore(env.DB);

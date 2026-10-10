@@ -101,12 +101,12 @@ export class D1CompanyStore implements CompanyStore, CompanyBank {
   }
 
   async companyById(companyId: string): Promise<CompanyView | null> {
-    const [company, funds, members, rooms, servers, invitations, ledger] = await this.db.batch([
+    const [company, funds, members, rooms, servers, invitations, ledger, revenue] = await this.db.batch([
       this.db.prepare("SELECT * FROM companies WHERE id = ?").bind(companyId),
       this.db.prepare("SELECT COALESCE(SUM(amount_cents), 0) AS funds FROM company_ledger WHERE company_id = ?").bind(companyId),
       this.db
         .prepare(
-          "SELECT company_members.user_id, users.username, company_members.role, company_members.pay_cents, company_members.is_founder, company_members.joined_at " +
+          "SELECT company_members.user_id, users.username, company_members.role, company_members.pay_cents, company_members.is_founder, company_members.joined_at, company_members.can_hire " +
             "FROM company_members JOIN users ON users.id = company_members.user_id WHERE company_id = ? ORDER BY company_members.joined_at",
         )
         .bind(companyId),
@@ -121,14 +121,23 @@ export class D1CompanyStore implements CompanyStore, CompanyBank {
       this.db
         .prepare("SELECT created_at, work_day, reason, amount_cents, note FROM company_ledger WHERE company_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 60")
         .bind(companyId),
+      this.db.prepare("SELECT COALESCE(SUM(amount_cents), 0) AS revenue FROM company_ledger WHERE company_id = ? AND reason = 'revenue'").bind(companyId),
     ]);
     const record = company.results[0] as CompanyRecord | undefined;
     if (!record) return null;
     return {
       company: toCompany(record),
       fundsCents: (funds.results[0] as { funds: number }).funds,
-      members: (members.results as { user_id: string; username: string; role: Role; pay_cents: number; is_founder: number; joined_at: number }[]).map(
-        (row): MemberRow => ({ userId: row.user_id, username: row.username, role: row.role, payCents: row.pay_cents, isFounder: row.is_founder === 1, joinedAt: row.joined_at }),
+      members: (members.results as { user_id: string; username: string; role: Role; pay_cents: number; is_founder: number; joined_at: number; can_hire: number }[]).map(
+        (row): MemberRow => ({
+          userId: row.user_id,
+          username: row.username,
+          role: row.role,
+          payCents: row.pay_cents,
+          isFounder: row.is_founder === 1,
+          joinedAt: row.joined_at,
+          canHire: row.can_hire === 1,
+        }),
       ),
       rooms: (rooms.results as { kind: RoomKindId }[]).map((row) => row.kind),
       servers: (servers.results as { tier: ServerTierId }[]).map((row) => row.tier),
@@ -138,6 +147,7 @@ export class D1CompanyStore implements CompanyStore, CompanyBank {
       ledger: (ledger.results as { created_at: number; work_day: number; reason: BookReason; amount_cents: number; note: string | null }[])
         .map((row): BookLine => ({ at: row.created_at, workDay: row.work_day, reason: row.reason, amountCents: row.amount_cents, note: row.note }))
         .reverse(),
+      lifetimeRevenueCents: (revenue.results[0] as { revenue: number }).revenue,
     };
   }
 
@@ -258,8 +268,11 @@ export class D1CompanyStore implements CompanyStore, CompanyBank {
     await this.db.prepare("UPDATE company_invitations SET status = 'declined' WHERE id = ? AND status = 'pending'").bind(invitationId).run();
   }
 
-  async setMember(companyId: string, userId: string, role: Role, payCents: number): Promise<void> {
-    await this.db.prepare("UPDATE company_members SET role = ?, pay_cents = ? WHERE company_id = ? AND user_id = ?").bind(role, payCents, companyId, userId).run();
+  async setMember(companyId: string, userId: string, role: Role, payCents: number, canHire?: boolean): Promise<void> {
+    await this.db
+      .prepare("UPDATE company_members SET role = ?, pay_cents = ?, can_hire = COALESCE(?, can_hire) WHERE company_id = ? AND user_id = ?")
+      .bind(role, payCents, canHire === undefined ? null : canHire ? 1 : 0, companyId, userId)
+      .run();
   }
 
   async settle(day: SettledDay): Promise<boolean> {

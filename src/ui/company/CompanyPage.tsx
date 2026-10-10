@@ -11,7 +11,7 @@ import { CompanyDirectory } from "./CompanyDirectory.tsx";
 import { MyApplications } from "./MyApplications.tsx";
 import { companyErrorText } from "./errors.ts";
 import { FoundCompany } from "./FoundCompany.tsx";
-import { Headquarters } from "./Headquarters.tsx";
+import { CompanyCard } from "./CompanyCard.tsx";
 import { Invitations } from "./Invitations.tsx";
 
 export type CompanyPageProps = {
@@ -130,15 +130,6 @@ export function CompanyPage(props: CompanyPageProps) {
         </p>
       )}
       {company === null && <MyApplications applications={applications} />}
-      <InvestorPanel
-        api={api}
-        offers={mine.value.investmentOffers}
-        holdings={mine.value.holdings}
-        walletCents={props.walletCents}
-        invest={props.invest}
-        onMoved={() => setAwaitingSave(true)}
-        onChanged={refresh}
-      />
       {/* Without a company, joining one is the likelier first step: most players can't afford to found yet. */}
       {company === null && <CompanyDirectory api={api} onApply={(posting, name) => void apply(posting, name)} myApplications={applications} />}
       {invitations.length > 0 && <Invitations api={api} invitations={invitations} hasCompany={company !== null} onAnswered={refresh} />}
@@ -172,8 +163,17 @@ export function CompanyPage(props: CompanyPageProps) {
           </button>
         </section>
       ) : (
-        <Headquarters api={api} company={company} username={props.username} onChanged={refresh} enterOffice={props.enterOffice} />
+        <CompanyCard api={api} company={company} enterOffice={props.enterOffice} />
       )}
+      <InvestorPanel
+        api={api}
+        offers={mine.value.investmentOffers}
+        holdings={mine.value.holdings}
+        walletCents={props.walletCents}
+        invest={props.invest}
+        onMoved={() => setAwaitingSave(true)}
+        onChanged={refresh}
+      />
       {company !== null && <CompanyDirectory api={api} onApply={null} myApplications={applications} />}
     </section>
   );

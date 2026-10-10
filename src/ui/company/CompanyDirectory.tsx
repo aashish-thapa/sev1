@@ -46,7 +46,7 @@ export function CompanyDirectory({ api, onApply, myApplications }: Props) {
       <h2 id="directory-title" className="admin__heading">
         {isSearching ? "Companies" : "Top companies"}
       </h2>
-      <p className="company__note">{isSearching ? "Funded companies whose name starts with that." : "Ranked by revenue over each company’s last 7 work days."}</p>
+      <p className="company__note">{isSearching ? null : "By revenue, last 7 work days."}</p>
       <div className="directory__filters">
         <label className="home__name">
           <span>Find a company</span>

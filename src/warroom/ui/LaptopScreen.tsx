@@ -5,9 +5,11 @@ import { HelpPanel } from "./HelpPanel.tsx";
 import { useIncidentHelp } from "./incident-help.ts";
 import { InspectPanel } from "./InspectPanel.tsx";
 import { Terminal } from "./Terminal.tsx";
+import { useLaptopApps } from "./laptop-apps.ts";
 import type { TerminalLine } from "./useIncident.ts";
 
-export type LaptopTab = "terminal" | "inspect" | "help";
+/** The shell, what you last plugged into, help, or one of the place's apps. */
+export type LaptopTab = "terminal" | "inspect" | "help" | `app:${string}`;
 
 type Props = {
   tab: LaptopTab;
@@ -37,6 +39,8 @@ const inspectTitle = (node: NodeId) => (node.kind === "pod" ? `…${node.name.sl
 /** What's on your laptop: the bastion shell, and the last thing you plugged into. */
 export function LaptopScreen({ tab, onTab, inspected, cluster, scenario, terminal, focusSignal, notification, onClose }: Props) {
   const help = useIncidentHelp();
+  const apps = useLaptopApps();
+  const app = apps.find((candidate) => tab === `app:${candidate.id}`) ?? null;
   const suggest = (command: string) => {
     terminal.onDraftChange(command);
     onTab("terminal");
@@ -44,6 +48,11 @@ export function LaptopScreen({ tab, onTab, inspected, cluster, scenario, termina
   return (
     <div className="laptop">
       <div className="laptop__bar" role="tablist" aria-label="Laptop">
+        {apps.map((candidate) => (
+          <button key={candidate.id} type="button" role="tab" className="laptop__tab" aria-selected={app === candidate} onClick={() => onTab(`app:${candidate.id}`)}>
+            {candidate.title}
+          </button>
+        ))}
         <button type="button" role="tab" className="laptop__tab" aria-selected={tab === "terminal"} onClick={() => onTab("terminal")}>
           Terminal
         </button>
@@ -70,7 +79,9 @@ export function LaptopScreen({ tab, onTab, inspected, cluster, scenario, termina
         </p>
       )}
       <div className="laptop__body" role="tabpanel">
-        {tab === "help" && help ? (
+        {app ? (
+          app.render()
+        ) : tab === "help" && help ? (
           <HelpPanel help={help} onSuggest={suggest} />
         ) : tab === "inspect" && inspected ? (
           <InspectPanel

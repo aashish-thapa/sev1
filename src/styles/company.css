@@ -358,3 +358,75 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* Your company from outside: what it is and the door in. */
+
+.company-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-xs);
+  padding: var(--space-xl) 0;
+}
+
+.company-card__kicker {
+  color: var(--color-muted);
+  font-size: var(--text-sm);
+}
+
+.company-card__funds {
+  font: 600 var(--text-lg) / 1.2 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.company-card__door {
+  margin-top: var(--space-md);
+  min-height: 52px;
+  padding-inline: var(--space-xl);
+  font-size: var(--text-base);
+}
+
+/* The company's apps on your laptop. */
+
+.desk {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  padding: var(--space-sm);
+  font-size: var(--text-sm);
+}
+
+.desk__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: var(--space-xs);
+  margin: 0;
+}
+
+.desk__stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3xs);
+  padding: var(--space-sm);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
+}
+
+.desk__stat dt {
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+}
+
+.desk__stat dd {
+  margin: 0;
+  font: 600 var(--text-base) / 1.2 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.desk__primary {
+  align-self: flex-start;
+}
+
+.desk .admin__heading {
+  font-size: var(--text-base);
+}

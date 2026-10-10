@@ -53,13 +53,9 @@ export function WorkBoard({ api, roleLabel, version }: Props) {
   if (items.length === 0) return <p className="company__note">No {roleLabel} tasks for this company yet.</p>;
   const mineShipped = items.filter((item) => item.result?.isDone).length;
   return (
-    <section className="company__panel" aria-labelledby="work-title">
-      <h2 id="work-title" className="admin__heading">
-        Today’s work · {roleLabel}
-      </h2>
+    <section className="company__panel" aria-label={`Today’s work, ${roleLabel}`}>
       <p className="company__note">
-        You’ve shipped {mineShipped} of {items.length}; the team has shipped {shippedSinceClose} since the last close. One try per task, and shipped work raises the day’s
-        revenue.
+        {roleLabel} · {mineShipped}/{items.length} shipped · team {shippedSinceClose} · one try each
       </p>
       <ul className="work">
         {items.map((item) => {

@@ -21,16 +21,16 @@ export function Trackers({ trackers, itemTitle }: { trackers: TrackersWire; item
       <h2 id="trackers-title" className="admin__heading">
         Trackers
       </h2>
-      <dl className="admin__tiles">
-        <div className="admin__tile">
+      <dl className="desk__stats">
+        <div className="desk__stat">
           <dt>Invested</dt>
           <dd>{formatCents(trackers.investedCents)}</dd>
         </div>
-        <div className="admin__tile">
+        <div className="desk__stat">
           <dt>Inventory at cost</dt>
           <dd>{formatCents(trackers.inventoryCents)}</dd>
         </div>
-        <div className="admin__tile">
+        <div className="desk__stat">
           <dt>Net, last 7 days</dt>
           <dd>{net(trackers.last7) < 0 ? `−${formatCents(-net(trackers.last7))}` : formatCents(net(trackers.last7))}</dd>
         </div>

@@ -95,7 +95,7 @@ export function InvestorPanel({ api, offers, holdings, walletCents, invest, onMo
         </table>
       )}
       <p className="company__note" role="status">
-        {notice ?? "Dividends land in your wallet every 7th work day the company closes at a profit."}
+        {notice ?? "Dividends arrive every 7th profitable work day."}
       </p>
     </section>
   );

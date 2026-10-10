@@ -22,6 +22,8 @@ import { useShiftGame, type GameServices } from "./useShiftGame.ts";
 import { WalletContext } from "./wallet-context.ts";
 import { AccountContext } from "./useAccount.ts";
 import { CompanyOfficeContext } from "../warroom/floor/company-office/context.ts";
+import { LaptopAppsContext } from "../warroom/ui/laptop-apps.ts";
+import { useCompanyLaptopApps } from "../ui/company/desk/useCompanyLaptopApps.tsx";
 import type { Company } from "../storage/company-protocol.ts";
 import { useClaimGrants } from "./useClaimGrants.ts";
 import { WellbeingContext } from "./wellbeing-context.ts";
@@ -92,6 +94,8 @@ export function App({ shareUrl, proSale, adminApi, companyApi, ...services }: Pr
     [companyOffice, isInRoom, room.room?.code, username],
   );
 
+  const companyApps = useCompanyLaptopApps(companyApi, username, officeVisit !== null);
+
   const leaveOffice = () => {
     if (isInRoom) room.leave();
     game.leaveOffice();
@@ -104,6 +108,7 @@ export function App({ shareUrl, proSale, adminApi, companyApi, ...services }: Pr
       {isInOffice ? (
         <OfficeErrorBoundary onLeave={leaveOffice}>
           <CompanyOfficeContext value={officeVisit}>
+          <LaptopAppsContext value={companyApps}>
           <WarRoomView
             key={`${scenario.id}:${isInRoom ? room.room?.code : "solo"}`}
             scenario={scenario}
@@ -117,6 +122,7 @@ export function App({ shareUrl, proSale, adminApi, companyApi, ...services }: Pr
             onPaged={game.closeDiscussion}
             overlay={overlay}
           />
+          </LaptopAppsContext>
           </CompanyOfficeContext>
           <PayoutToast />
           <PromotionToast />

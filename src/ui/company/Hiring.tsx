@@ -29,9 +29,7 @@ export function Hiring({ api, company, isBusy, act }: Props) {
       <h2 id="hiring-title" className="admin__heading">
         Hiring
       </h2>
-      <p className="company__note">
-        Open a role and anyone can apply by taking a {INTERVIEW_LENGTH}-question interview for it, at {company.levelTitle} difficulty. You see their score and career level, then hire or pass.
-      </p>
+      <p className="company__note">Applicants take a {INTERVIEW_LENGTH}-question interview; you see the score.</p>
 
       {company.postings.length > 0 && (
         <ul className="shop">

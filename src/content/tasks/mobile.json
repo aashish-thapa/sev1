@@ -1,0 +1,195 @@
+[
+  {
+    "kind": "code-fix",
+    "id": "mobile-fix-kotlin-network-main-thread",
+    "role": "mobile",
+    "difficulty": 1,
+    "categories": [],
+    "title": "Android app crashes when opening order details",
+    "ticket": "Crash reports from 7.4.0: opening an order crashes the app on every Android device. Stack trace starts with android.os.NetworkOnMainThreadException.",
+    "file": {
+      "path": "app/src/main/java/shop/orders/OrderRepository.kt",
+      "language": "kotlin",
+      "lines": [
+        "class OrderRepository(private val client: OkHttpClient) {",
+        "",
+        "    suspend fun order(id: String): Order {",
+        "        val request = Request.Builder().url(\"$BASE_URL/orders/$id\").build()",
+        "        val response = client.newCall(request).execute()",
+        "        response.use {",
+        "            if (!it.isSuccessful) throw OrderLoadException(it.code)",
+        "            return OrderJson.decode(it.body!!.string())",
+        "        }",
+        "    }",
+        "}"
+      ]
+    },
+    "failing": {
+      "test": "OrderDetailsTest.opensWithoutBlockingTheMainThread (StrictMode on)",
+      "output": [
+        "android.os.NetworkOnMainThreadException",
+        "    at android.os.StrictMode$AndroidBlockGuardPolicy.onNetwork(StrictMode.java:1605)",
+        "    at shop.orders.OrderRepository.order(OrderRepository.kt:5)"
+      ]
+    },
+    "bugLine": 4,
+    "fixes": [
+      "        val response = withContext(Dispatchers.IO) { client.newCall(request).execute() }",
+      "        val response = runBlocking { client.newCall(request).execute() }",
+      "        val response = withContext(Dispatchers.Main) { client.newCall(request).execute() }",
+      "        val response = client.newCall(request).clone().execute()"
+    ],
+    "fixAnswer": 0,
+    "explanation": {
+      "cause": "execute() blocks, and a suspend function called from the UI still runs on the main thread unless it switches dispatcher.",
+      "why": "withContext(Dispatchers.IO) moves the blocking call to a background thread and suspends the caller instead of freezing it. runBlocking and Dispatchers.Main both keep the network call on the main thread."
+    }
+  },
+  {
+    "kind": "code-fix",
+    "id": "mobile-fix-swift-timer-retain-cycle",
+    "role": "mobile",
+    "difficulty": 2,
+    "categories": [],
+    "title": "Checkout screen keeps ticking after you leave it",
+    "ticket": "Memory graph after visiting checkout five times shows five CheckoutViewModel instances, and the payment-expiry timer keeps firing analytics events in the background.",
+    "file": {
+      "path": "Checkout/CheckoutViewModel.swift",
+      "language": "swift",
+      "lines": [
+        "final class CheckoutViewModel: ObservableObject {",
+        "    @Published private(set) var secondsLeft = 600",
+        "    private var timer: Timer?",
+        "",
+        "    func start() {",
+        "        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in self.tick() }",
+        "    }",
+        "",
+        "    private func tick() {",
+        "        secondsLeft -= 1",
+        "        if secondsLeft == 0 { timer?.invalidate() }",
+        "    }",
+        "",
+        "    deinit { timer?.invalidate() }",
+        "}"
+      ]
+    },
+    "failing": {
+      "test": "CheckoutViewModelTests.testIsReleasedWhenTheScreenCloses",
+      "output": [
+        "XCTAssertNil failed: weak reference to CheckoutViewModel is still alive",
+        "Leaked: CheckoutViewModel retained by Timer block"
+      ]
+    },
+    "bugLine": 5,
+    "fixes": [
+      "        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.tick() }",
+      "        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: false) { _ in self.tick() }",
+      "        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [unowned self] _ in self.tick() }",
+      "        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [self] _ in tick() }"
+    ],
+    "fixAnswer": 0,
+    "explanation": {
+      "cause": "The run loop keeps the repeating timer, the timer's closure keeps self strongly, so the view model can never be freed and deinit never runs.",
+      "why": "Capturing self weakly breaks the cycle: when the screen goes, the model is released and deinit stops the timer. unowned would crash on a tick after release, and [self] is still a strong capture."
+    }
+  },
+  {
+    "kind": "pr-review",
+    "id": "mobile-pr-immediate-retry-default",
+    "role": "mobile",
+    "difficulty": 2,
+    "categories": [
+      "ecommerce",
+      "fintech"
+    ],
+    "title": "Default checkout retries to immediate on iOS 7.3",
+    "author": "Release bot (MOB-1184)",
+    "description": "The new networking layer supports retry policies. Setting the remote-config default so customers don't see transient failures on checkout.",
+    "path": "config/remote-config/checkout.json",
+    "language": "json",
+    "diff": [
+      {
+        "op": " ",
+        "text": "{"
+      },
+      {
+        "op": " ",
+        "text": "  \"checkout_request_timeout_ms\": 8000,"
+      },
+      {
+        "op": "-",
+        "text": "  \"checkout_retry_policy\": \"none\","
+      },
+      {
+        "op": "+",
+        "text": "  \"checkout_retry_policy\": \"immediate\","
+      },
+      {
+        "op": " ",
+        "text": "  \"checkout_retry_budget_percent\": 10"
+      },
+      {
+        "op": " ",
+        "text": "}"
+      }
+    ],
+    "verdict": "request-changes",
+    "flaw": 3,
+    "explanation": {
+      "cause": "'immediate' retries up to three times with no delay and no idempotency key.",
+      "why": "Under a slow backend every installed app multiplies its own load at once, and a charge that timed out after succeeding is made again. 'backoff', which adds jitter, a budget and an idempotency key, is the policy to ship."
+    }
+  },
+  {
+    "kind": "pr-review",
+    "id": "mobile-pr-decode-images-off-main",
+    "role": "mobile",
+    "difficulty": 1,
+    "categories": [
+      "social",
+      "ecommerce"
+    ],
+    "title": "Decode product images off the main thread",
+    "author": "Jonas Weber",
+    "description": "Scrolling the catalog drops frames because every image is decoded on the main thread as it appears. This decodes on a background queue and only hops back to set the image.",
+    "path": "Catalog/ProductImageView.swift",
+    "language": "swift",
+    "diff": [
+      {
+        "op": " ",
+        "text": "func show(_ data: Data) {"
+      },
+      {
+        "op": "-",
+        "text": "    imageView.image = UIImage(data: data)"
+      },
+      {
+        "op": "+",
+        "text": "    decodeQueue.async { [weak self] in"
+      },
+      {
+        "op": "+",
+        "text": "        let image = UIImage(data: data)?.preparingForDisplay()"
+      },
+      {
+        "op": "+",
+        "text": "        DispatchQueue.main.async { self?.imageView.image = image }"
+      },
+      {
+        "op": "+",
+        "text": "    }"
+      },
+      {
+        "op": " ",
+        "text": "}"
+      }
+    ],
+    "verdict": "approve",
+    "flaw": null,
+    "explanation": {
+      "cause": "Nothing wrong: decoding moves to a background queue and UIKit is only touched on main.",
+      "why": "preparingForDisplay() forces the decode early, the weak capture avoids keeping a reused cell alive, and the image view is set on the main queue as UIKit requires."
+    }
+  }
+]

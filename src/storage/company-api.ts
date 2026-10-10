@@ -11,6 +11,7 @@ import {
   WorkDaySettlementSchema,
   type FoundRequest,
   type MyCompany,
+  type SettleRequest,
   type WorkDaySettlement,
 } from "./company-protocol.ts";
 import { API_ERRORS, type ApiError } from "./account-protocol.ts";
@@ -25,7 +26,7 @@ export interface CompanyApi {
   invite(request: z.input<typeof InviteRequestSchema>): Promise<CompanyOutcome<unknown>>;
   setMember(request: z.input<typeof SetMemberRequestSchema>): Promise<CompanyOutcome<unknown>>;
   respond(invitationId: string, answer: "accept" | "decline"): Promise<CompanyOutcome<unknown>>;
-  settleWorkDay(): Promise<CompanyOutcome<WorkDaySettlement>>;
+  settleWorkDay(request: SettleRequest): Promise<CompanyOutcome<WorkDaySettlement>>;
 }
 
 const ErrorSchema = z.object({ error: z.enum(API_ERRORS), message: z.string().optional() });
@@ -53,8 +54,8 @@ export class HttpCompanyApi implements CompanyApi {
   respond(invitationId: string, answer: "accept" | "decline") {
     return call(`/api/invitations/${encodeURIComponent(invitationId)}/${answer}`, "POST", {}, Anything);
   }
-  settleWorkDay() {
-    return call(`${COMPANY_PATH}/workday`, "POST", {}, WorkDaySettlementSchema);
+  settleWorkDay(request: SettleRequest) {
+    return call(`${COMPANY_PATH}/workday`, "POST", request, WorkDaySettlementSchema);
   }
 }
 

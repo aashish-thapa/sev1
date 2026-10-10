@@ -97,6 +97,13 @@ export const BuyServerRequestSchema = z.object({ server: ServerTierIdSchema });
 export const InviteRequestSchema = z.object({ username: z.string().trim().min(1).max(24), role: RoleSchema, payCents: Cents });
 export const SetMemberRequestSchema = z.object({ username: z.string(), role: RoleSchema, payCents: Cents });
 
+/**
+ * POST /api/company/workday body: tasks the member shipped today. Phase 1 trusts it within a cap
+ * (the server clamps it); phase 2 records each finished task on the server instead.
+ */
+export const SettleRequestSchema = z.object({ tasksShipped: z.int().nonnegative().max(50) });
+export type SettleRequest = z.input<typeof SettleRequestSchema>;
+
 /** POST /api/company/workday: what the settled day booked. */
 export const WorkDaySettlementSchema = z.object({
   workDay: z.int().positive(),

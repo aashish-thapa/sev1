@@ -1,0 +1,225 @@
+[
+  {
+    "kind": "code-fix",
+    "id": "frontend-fix-stale-effect-deps",
+    "role": "frontend",
+    "difficulty": 1,
+    "categories": [],
+    "title": "Order history shows the previous account after switching",
+    "ticket": "Support: a customer switched to their business account and still saw their personal orders until they reloaded the page.",
+    "file": {
+      "path": "src/orders/OrderHistory.tsx",
+      "language": "tsx",
+      "lines": [
+        "export function OrderHistory({ userId }: { userId: string }) {",
+        "  const [orders, setOrders] = useState<Order[]>([]);",
+        "",
+        "  useEffect(() => {",
+        "    let isCurrent = true;",
+        "    fetchOrders(userId).then((next) => {",
+        "      if (isCurrent) setOrders(next);",
+        "    });",
+        "    return () => {",
+        "      isCurrent = false;",
+        "    };",
+        "  }, []);",
+        "",
+        "  return <OrderList orders={orders} />;",
+        "}"
+      ]
+    },
+    "failing": {
+      "test": "OrderHistory \u203a shows the new account's orders after userId changes",
+      "output": [
+        "expect(screen.getByText('Invoice B-2041')).toBeInTheDocument()",
+        "Unable to find an element with the text: Invoice B-2041",
+        "Rendered: Order #88213, Order #88140 (orders for u_personal)"
+      ]
+    },
+    "bugLine": 11,
+    "fixes": [
+      "  }, [userId]);",
+      "  });",
+      "  }, [orders]);",
+      "  }, [fetchOrders]);"
+    ],
+    "fixAnswer": 0,
+    "explanation": {
+      "cause": "The effect ran once on mount and never again: its dependency list left out userId.",
+      "why": "Listing userId re-fetches when the account changes, and the cleanup flag already discards the old request's late answer. No list at all refetches on every render, and [orders] loops forever."
+    }
+  },
+  {
+    "kind": "code-fix",
+    "id": "frontend-fix-float-money-total",
+    "role": "frontend",
+    "difficulty": 2,
+    "categories": [
+      "ecommerce",
+      "fintech",
+      "saas"
+    ],
+    "title": "Cart total shows $0.30000000000000004",
+    "ticket": "Screenshot from a customer: three 10-cent stickers, and the cart total reads $0.30000000000000004. Payments also rejected one order for an 'amount mismatch'.",
+    "file": {
+      "path": "src/cart/total.ts",
+      "language": "ts",
+      "lines": [
+        "type CartItem = { name: string; priceCents: number; price: number; quantity: number };",
+        "",
+        "/** The cart's total in dollars, for display and for the payment request. */",
+        "export function cartTotal(items: readonly CartItem[]): number {",
+        "  const total = items.reduce((sum, item) => sum + item.price * item.quantity, 0);",
+        "  return total;",
+        "}",
+        "",
+        "export function formatTotal(items: readonly CartItem[]): string {",
+        "  return `$${cartTotal(items)}`;",
+        "}"
+      ]
+    },
+    "failing": {
+      "test": "cartTotal \u203a adds 3 x $0.10 to exactly $0.30",
+      "output": [
+        "expect(cartTotal(stickers)).toBe(0.3)",
+        "Expected: 0.3",
+        "Received: 0.30000000000000004"
+      ]
+    },
+    "bugLine": 4,
+    "fixes": [
+      "  const total = items.reduce((sum, item) => sum + item.priceCents * item.quantity, 0) / 100;",
+      "  const total = Math.round(items.reduce((sum, item) => sum + item.price * item.quantity, 0));",
+      "  const total = Number(items.reduce((sum, item) => sum + item.price * item.quantity, 0).toFixed(1));",
+      "  const total = items.reduce((sum, item) => sum + item.price, 0) * items.length;"
+    ],
+    "fixAnswer": 0,
+    "explanation": {
+      "cause": "Binary floating point can't represent 0.10 exactly, so summing dollar floats drifts.",
+      "why": "Adding whole cents keeps every step exact and divides once at the end. Rounding to whole dollars or one decimal hides the drift by throwing money away, and the payment API would still see the wrong amount."
+    }
+  },
+  {
+    "kind": "pr-review",
+    "id": "frontend-pr-retry-without-backoff",
+    "role": "frontend",
+    "difficulty": 2,
+    "categories": [
+      "ecommerce",
+      "fintech"
+    ],
+    "title": "Retry checkout automatically when it times out",
+    "author": "Web release bot (FE-2291)",
+    "description": "Customers see 'Something went wrong' on transient timeouts. This retries the checkout request up to four times before showing the error, so most hiccups are invisible.",
+    "path": "src/checkout/submit.ts",
+    "language": "ts",
+    "diff": [
+      {
+        "op": " ",
+        "text": "export async function submitCheckout(cart: Cart): Promise<Order> {"
+      },
+      {
+        "op": "-",
+        "text": "  return postCheckout(cart);"
+      },
+      {
+        "op": "+",
+        "text": "  let lastError: unknown;"
+      },
+      {
+        "op": "+",
+        "text": "  for (let attempt = 0; attempt < 4; attempt++) {"
+      },
+      {
+        "op": "+",
+        "text": "    try {"
+      },
+      {
+        "op": "+",
+        "text": "      return await postCheckout(cart);"
+      },
+      {
+        "op": "+",
+        "text": "    } catch (error) {"
+      },
+      {
+        "op": "+",
+        "text": "      lastError = error;"
+      },
+      {
+        "op": "+",
+        "text": "    }"
+      },
+      {
+        "op": "+",
+        "text": "  }"
+      },
+      {
+        "op": "+",
+        "text": "  throw lastError;"
+      },
+      {
+        "op": " ",
+        "text": "}"
+      }
+    ],
+    "verdict": "request-changes",
+    "flaw": 5,
+    "explanation": {
+      "cause": "Each retry re-sends the charge immediately, with no backoff and no idempotency key.",
+      "why": "When checkout slows down, every client turns one request into four at once, which makes the slowdown worse, and a timed-out charge that actually went through gets made again. Retries need jittered backoff, a budget, and an idempotency key the server dedupes on."
+    }
+  },
+  {
+    "kind": "pr-review",
+    "id": "frontend-pr-lazy-load-route",
+    "role": "frontend",
+    "difficulty": 1,
+    "categories": [],
+    "title": "Lazy-load the analytics page",
+    "author": "Maya Okonkwo",
+    "description": "The analytics page pulls in a 400 KB charting library that every visitor downloads on the first load. Only staff open it, so this moves it into its own chunk.",
+    "path": "src/app/routes.tsx",
+    "language": "tsx",
+    "diff": [
+      {
+        "op": "-",
+        "text": "import { AnalyticsPage } from \"../analytics/AnalyticsPage\";"
+      },
+      {
+        "op": "+",
+        "text": "const AnalyticsPage = lazy(() => import(\"../analytics/AnalyticsPage\").then((m) => ({ default: m.AnalyticsPage })));"
+      },
+      {
+        "op": " ",
+        "text": ""
+      },
+      {
+        "op": " ",
+        "text": "export const routes = ["
+      },
+      {
+        "op": " ",
+        "text": "  { path: \"/\", element: <Home /> },"
+      },
+      {
+        "op": "-",
+        "text": "  { path: \"/analytics\", element: <AnalyticsPage /> },"
+      },
+      {
+        "op": "+",
+        "text": "  { path: \"/analytics\", element: <Suspense fallback={<Spinner />}><AnalyticsPage /></Suspense> },"
+      },
+      {
+        "op": " ",
+        "text": "];"
+      }
+    ],
+    "verdict": "approve",
+    "flaw": null,
+    "explanation": {
+      "cause": "Nothing wrong: the page is code-split and wrapped in Suspense with a fallback.",
+      "why": "lazy() wants a default export; mapping the named AnalyticsPage export to default keeps it working, and the Suspense fallback covers the load. Nobody else pays for the chart library."
+    }
+  }
+]

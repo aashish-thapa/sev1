@@ -6,12 +6,18 @@ import { ROLE_IDS, type Role } from "../../domain/incident.ts";
 import { ROLE_INFO } from "../../domain/roles.ts";
 import type { CompanyApi, CompanyOutcome } from "../../storage/company-api.ts";
 import type { Company, WorkDaySettlement } from "../../storage/company-protocol.ts";
+import type { Task } from "../../domain/work/task.ts";
+import { useWorkLog } from "../work/useWorkLog.ts";
+import { WorkBoard } from "../work/WorkBoard.tsx";
 
 type Props = {
   api: CompanyApi;
   company: Company;
   username: string | null;
   onChanged: () => void;
+  tasks: readonly Task[];
+  /** The local day, YYYY-MM-DD. */
+  day: string;
 };
 
 const REASON_LABEL: Readonly<Record<Company["ledger"][number]["reason"], string>> = {
@@ -31,7 +37,9 @@ const OFFER_PROBLEM: Readonly<Record<"below_minimum" | "no_free_desk", string>> 
 };
 
 /** The company's HQ: money, people, rooms, servers, the day's books. Only the founder buys, hires and sets pay. */
-export function Headquarters({ api, company, username, onChanged }: Props) {
+export function Headquarters({ api, company, username, onChanged, tasks, day }: Props) {
+  const work = useWorkLog(day);
+  const myRole = company.members.find((member) => member.username === username)?.role ?? null;
   const [notice, setNotice] = useState<string | null>(null);
   const [isBusy, setBusy] = useState(false);
   const isFounder = company.members.some((member) => member.isFounder && member.username === username);
@@ -93,10 +101,27 @@ export function Headquarters({ api, company, username, onChanged }: Props) {
           The work day
         </h2>
         <p className="company__note">Closing the day books revenue, upkeep and everyone’s pay. Any member can close it, once a day, after a shift.</p>
-        <button type="button" className="button button--primary hq__close" disabled={isBusy} onClick={() => void act(() => api.settleWorkDay(), settled)}>
+        <button
+          type="button"
+          className="button button--primary hq__close"
+          disabled={isBusy}
+          onClick={() => void act(() => api.settleWorkDay({ tasksShipped: work.shippedToday.size }), settled)}
+        >
           Close today’s work day
         </button>
       </section>
+
+      {myRole && (
+        <WorkBoard
+          tasks={tasks}
+          role={myRole}
+          category={company.category}
+          day={day}
+          finishedBefore={work.finishedBefore}
+          shippedToday={work.shippedToday}
+          onShipped={work.ship}
+        />
+      )}
 
       <section className="company__panel" aria-labelledby="staff-title">
         <h2 id="staff-title" className="admin__heading">

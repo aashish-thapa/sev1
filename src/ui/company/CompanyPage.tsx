@@ -4,6 +4,7 @@ import type { Role } from "../../domain/incident.ts";
 import { formatCents } from "../../domain/economy.ts";
 import type { CompanyApi, CompanyOutcome } from "../../storage/company-api.ts";
 import type { MyCompany, PendingPayout } from "../../storage/company-protocol.ts";
+import type { Task } from "../../domain/work/task.ts";
 import { FoundCompany } from "./FoundCompany.tsx";
 import { Headquarters } from "./Headquarters.tsx";
 import { Invitations } from "./Invitations.tsx";
@@ -19,6 +20,10 @@ export type CompanyPageProps = {
   /** Earns a booked salary into the wallet; claiming the same payout twice does nothing. */
   claimPayout: (payout: PendingPayout) => void;
   onSignUp: () => void;
+  /** Daily-work tasks for the HQ's board. */
+  tasks: readonly Task[];
+  /** The local day, YYYY-MM-DD. */
+  day: string;
 };
 
 /** Startup mode: found a company, answer offers, or run the one you're in. Accounts only. */
@@ -105,7 +110,7 @@ export function CompanyPage(props: CompanyPageProps) {
           </button>
         </section>
       ) : (
-        <Headquarters api={api} company={company} username={props.username} onChanged={refresh} />
+        <Headquarters api={api} company={company} username={props.username} onChanged={refresh} tasks={props.tasks} day={props.day} />
       )}
     </section>
   );

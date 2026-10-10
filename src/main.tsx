@@ -7,6 +7,7 @@ import "./styles/home.css";
 import "./styles/voice.css";
 import "./styles/admin.css";
 import "./styles/company.css";
+import "./styles/work.css";
 
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";

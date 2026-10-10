@@ -1,0 +1,180 @@
+[
+  {
+    "kind": "code-fix",
+    "id": "data-fix-join-double-counts",
+    "role": "data",
+    "difficulty": 2,
+    "categories": [
+      "ecommerce",
+      "saas"
+    ],
+    "title": "Daily revenue is triple what finance booked",
+    "ticket": "Finance: the dashboard says yesterday made $36,000; Stripe payouts say $12,000. The numbers diverge more on days with big baskets.",
+    "file": {
+      "path": "models/daily_revenue.sql",
+      "language": "sql",
+      "lines": [
+        "SELECT",
+        "  date_trunc('day', o.paid_at) AS day,",
+        "  SUM(o.total_cents) AS revenue_cents",
+        "FROM orders o",
+        "JOIN order_items oi ON oi.order_id = o.id",
+        "WHERE o.status = 'paid'",
+        "GROUP BY 1",
+        "ORDER BY 1"
+      ]
+    },
+    "failing": {
+      "test": "daily_revenue: one paid order of $120 with three items",
+      "output": [
+        "expected revenue_cents = 12000",
+        "     got revenue_cents = 36000"
+      ]
+    },
+    "bugLine": 2,
+    "fixes": [
+      "  SUM(oi.price_cents * oi.quantity) AS revenue_cents",
+      "  SUM(o.total_cents) / 3 AS revenue_cents",
+      "  COUNT(DISTINCT o.id) * AVG(o.total_cents) AS revenue_cents",
+      "  MAX(o.total_cents) AS revenue_cents"
+    ],
+    "fixAnswer": 0,
+    "explanation": {
+      "cause": "Joining to order_items repeats each order once per item, so the order total is summed once per line.",
+      "why": "Summing at the grain of the join, item price times quantity, counts each item once. Dividing by three only fixes this one order; the average trick still double counts, and MAX returns one order, not the day's total."
+    }
+  },
+  {
+    "kind": "code-fix",
+    "id": "data-fix-naive-datetime-partition",
+    "role": "data",
+    "difficulty": 2,
+    "categories": [],
+    "title": "Late-evening events land in the wrong day's partition",
+    "ticket": "Events from our New York customers after 7 pm keep showing up in the next day's table, and yesterday's totals change after midnight UTC.",
+    "file": {
+      "path": "pipelines/events/partition.py",
+      "language": "py",
+      "lines": [
+        "from datetime import datetime, timezone",
+        "",
+        "def partition_for(event_ts: float) -> str:",
+        "    \"\"\"The UTC day an event belongs to, as YYYY-MM-DD.\"\"\"",
+        "    moment = datetime.fromtimestamp(event_ts)",
+        "    return moment.strftime(\"%Y-%m-%d\")"
+      ]
+    },
+    "failing": {
+      "test": "test_partition_uses_utc_whatever_the_server_zone (TZ=America/New_York)",
+      "output": [
+        "partition_for(1791678600)  # 2026-10-11T00:30:00Z",
+        "expected '2026-10-11'",
+        "     got '2026-10-10'"
+      ]
+    },
+    "bugLine": 4,
+    "fixes": [
+      "    moment = datetime.fromtimestamp(event_ts, tz=timezone.utc)",
+      "    moment = datetime.utcnow()",
+      "    moment = datetime.fromtimestamp(event_ts).astimezone()",
+      "    moment = datetime.fromtimestamp(round(event_ts))"
+    ],
+    "fixAnswer": 0,
+    "explanation": {
+      "cause": "fromtimestamp without a tz converts to the server's local zone, so the date depends on where the job runs.",
+      "why": "Asking for UTC explicitly makes the partition the event's UTC day everywhere. utcnow() ignores the event's own time entirely, and astimezone() still lands in the local zone."
+    }
+  },
+  {
+    "kind": "pr-review",
+    "id": "data-pr-inner-join-refunds",
+    "role": "data",
+    "difficulty": 2,
+    "categories": [
+      "ecommerce",
+      "fintech",
+      "saas"
+    ],
+    "title": "Net revenue: subtract refunds",
+    "author": "Omar Haddad",
+    "description": "Finance wants net revenue, so this joins refunds and subtracts them from each order's total.",
+    "path": "models/net_revenue.sql",
+    "language": "sql",
+    "diff": [
+      {
+        "op": " ",
+        "text": "SELECT"
+      },
+      {
+        "op": " ",
+        "text": "  date_trunc('day', o.paid_at) AS day,"
+      },
+      {
+        "op": "-",
+        "text": "  SUM(o.total_cents) AS revenue_cents"
+      },
+      {
+        "op": "+",
+        "text": "  SUM(o.total_cents - r.amount_cents) AS net_revenue_cents"
+      },
+      {
+        "op": " ",
+        "text": "FROM orders o"
+      },
+      {
+        "op": "+",
+        "text": "JOIN refunds r ON r.order_id = o.id"
+      },
+      {
+        "op": " ",
+        "text": "WHERE o.status = 'paid'"
+      },
+      {
+        "op": " ",
+        "text": "GROUP BY 1"
+      }
+    ],
+    "verdict": "request-changes",
+    "flaw": 5,
+    "explanation": {
+      "cause": "An inner join keeps only orders that have a refund, so every order without one drops out of revenue.",
+      "why": "It needs a LEFT JOIN with refunds pre-aggregated per order and COALESCE(..., 0); otherwise net revenue is a small fraction of the real figure, and an order refunded twice still double counts."
+    }
+  },
+  {
+    "kind": "pr-review",
+    "id": "data-pr-composite-index",
+    "role": "data",
+    "difficulty": 1,
+    "categories": [],
+    "title": "Index events by user and time for the activity page",
+    "author": "Elena Ruiz",
+    "description": "The activity page filters events by user and sorts by time, and it's a sequential scan over 900M rows. Adding the index concurrently so writes keep flowing.",
+    "path": "migrations/0213_events_user_created_idx.sql",
+    "language": "sql",
+    "diff": [
+      {
+        "op": "+",
+        "text": "-- Runs outside a transaction: CREATE INDEX CONCURRENTLY can't run inside one."
+      },
+      {
+        "op": "+",
+        "text": "CREATE INDEX CONCURRENTLY IF NOT EXISTS events_user_created_idx"
+      },
+      {
+        "op": "+",
+        "text": "  ON events (user_id, created_at DESC);"
+      },
+      {
+        "op": "+",
+        "text": "-- If it fails, the index is left INVALID: drop it and run this again."
+      }
+    ],
+    "verdict": "approve",
+    "flaw": null,
+    "explanation": {
+      "cause": "Nothing wrong: the column order matches the query, and it's built concurrently.",
+      "why": "user_id first serves the filter and created_at DESC serves the sort. It runs outside a transaction as CONCURRENTLY requires, and the comment covers the invalid-index case, which is exactly what bit the orders migration."
+    }
+  }
+]

@@ -28,6 +28,7 @@ import { D1GrantStore } from "./grants/d1-store.ts";
 import { GrantDesk } from "./grants/service.ts";
 import { shownTags } from "../src/domain/tags.ts";
 import { sessionTokenOf } from "./api/http.ts";
+import { pantryCostOn } from "../src/domain/pantry.ts";
 import { CompanyOffice } from "./company/office.ts";
 import { D1OfficeRoomStore } from "./company/office-d1-store.ts";
 import { TEAM_SCENARIO } from "../src/warroom/scenarios/index.ts";
@@ -105,6 +106,7 @@ export default {
           newId: () => crypto.randomUUID(),
           isOverLimit: isOverLimit(COMPANY_WRITES_PER_WINDOW),
           hiring: hiringStore,
+          pantryOf: async (userId, day) => pantryCostOn((await savedProgressOf(accountStore, userId)).pantry, day),
         });
         const hiring = new HiringService({
           store: hiringStore,

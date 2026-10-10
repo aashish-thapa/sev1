@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EMPTY_PANTRY, PANTRY_DAYS, pantryCostCents, recordTaken, SNACKS } from "./pantry.ts";
+import { consumableById, EMPTY_PANTRY, PANTRY_DAYS, pantryCostCents, pantryCostOn, recordTaken, SNACKS } from "./pantry.ts";
 
 describe("pantry log", () => {
   it("counts servings per day and for life", () => {
@@ -24,5 +24,13 @@ describe("pantry log", () => {
   it("prices servings for startup mode's operating cost", () => {
     expect(pantryCostCents({ coffee: 2, apple: 1 })).toBe(2 * 85 + 60);
     expect(SNACKS).toEqual(["granola-bar", "apple", "chips"]);
+  });
+});
+
+describe("pantryCostOn", () => {
+  it("prices one day's servings and nothing for a day without any", () => {
+    const log = recordTaken(recordTaken(EMPTY_PANTRY, "coffee", "2026-10-10"), "apple", "2026-10-10");
+    expect(pantryCostOn(log, "2026-10-10")).toBe(consumableById("coffee").unitCostCents + consumableById("apple").unitCostCents);
+    expect(pantryCostOn(log, "2026-10-09")).toBe(0);
   });
 });

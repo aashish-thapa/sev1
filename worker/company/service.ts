@@ -56,6 +56,11 @@ export const HEALTHY_SHARE_DEFAULT = 1;
 export type CompanyDeps = {
   readonly store: CompanyStore;
   readonly now: () => number;
+  /**
+   * What a member's coffees and snacks cost on a UTC day (YYYY-MM-DD), read from their saved progress.
+   * Without it the pantry is free, as in job mode.
+   */
+  readonly pantryOf?: (userId: string, day: string) => Promise<number>;
   readonly newId: () => string;
   /** True when this caller has made too many company writes recently. */
   readonly isOverLimit: (key: string) => Promise<boolean>;
@@ -245,7 +250,10 @@ export class CompanyService {
     if (view.company.lastSettledOn === today) return fail("already_settled_today");
 
     const book = bookOf(view);
+    const pantryOf = this.deps.pantryOf;
+    const pantryCents = pantryOf ? (await Promise.all(book.members.map((member) => pantryOf(member.userId, today)))).reduce((sum, cents) => sum + cents, 0) : 0;
     const settlement = settleWorkDay(book, {
+      pantryCents,
       healthyShare: HEALTHY_SHARE_DEFAULT,
       tasksShipped: Math.min(TASKS_PER_MEMBER_CAP * book.members.length, Math.max(0, Math.floor(report.tasksShipped) || 0)),
       // Contractors are booked per issue once phase 2 records issues; a day settles without them until then.

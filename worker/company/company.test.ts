@@ -62,12 +62,12 @@ class MemoryAccounts implements AccountStore {
   }
 }
 
-function world() {
+function world(pantryOf?: (userId: string, day: string) => Promise<number>) {
   let now = START;
   let ids = 0;
   const store = new MemoryCompanyStore();
   const accounts = new AccountService(new MemoryAccounts(store), () => now, undefined, store);
-  const companies = new CompanyService({ store, now: () => now, newId: () => `id-${(ids += 1)}`, isOverLimit: async () => false });
+  const companies = new CompanyService({ store, now: () => now, newId: () => `id-${(ids += 1)}`, isOverLimit: async () => false, pantryOf });
   const user = (id: string, username: string): User => {
     store.addUser(id, username);
     return { id, username, passwordHash: "", createdAt: START - DAY_MS, tags: [] };
@@ -180,6 +180,17 @@ describe("work days and payroll", () => {
 
     setup.advance(DAY_MS);
     expect((await setup.companies.settle(founder, { tasksShipped: 0 })).ok).toBe(true);
+  });
+
+  it("charges the company for what its members took from the pantry that day", async () => {
+    const asked: string[] = [];
+    const setup = world(async (userId, day) => (asked.push(`${userId}:${day}`), 235));
+    const founder = setup.user("u1", "maya");
+    await foundedCompany(setup, founder);
+    const settled = await setup.companies.settle(founder, { tasksShipped: 0 });
+    if (!settled.ok) throw new Error("settle failed");
+    expect(settled.value.lines.filter((line) => line.reason === "pantry").map((line) => line.amountCents)).toEqual([-235]);
+    expect(asked).toEqual([`u1:${new Date(setup.now()).toISOString().slice(0, 10)}`]);
   });
 
   it("refuses payroll the server never booked, or for the wrong amount", () => {

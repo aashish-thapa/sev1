@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { categoryById, CONTRACTOR_FEE_CENTS, ROLE_MINIMUM_PAY_CENTS, ROOM_KINDS, SERVER_TIERS } from "../../domain/company/catalog.ts";
+import { categoryById, CONTRACTOR_FEE_CENTS, ROLE_MINIMUM_PAY_CENTS, ROOM_KINDS, SERVER_TIERS, serverTierById, STARTER_SERVER_TIER } from "../../domain/company/catalog.ts";
 import { capacityRps, checkOffer, checkRoomPurchase, checkServerPurchase, racks, seats, uncoveredRoles, type CompanyBook } from "../../domain/company/rules.ts";
 import { formatCents } from "../../domain/economy.ts";
 import { ROLE_IDS, type Role } from "../../domain/incident.ts";
@@ -186,6 +186,10 @@ export function Headquarters({ api, company, username, onChanged, tasks, day }: 
           <h2 id="shop-title" className="admin__heading">
             Rooms and servers
           </h2>
+          <p className="company__note">
+            Your first bay came with a one-rack closet and a free {serverTierById(STARTER_SERVER_TIER).title.toLowerCase()}, so the company could earn from day one. More servers
+            need a server room.
+          </p>
           <ul className="shop">
             {ROOM_KINDS.map((room) => {
               const problem = checkRoomPurchase(book, room.id);

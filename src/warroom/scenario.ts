@@ -55,6 +55,8 @@ export type Tier = 1 | 2 | 3 | 4 | 5;
 export type Scenario = {
   readonly id: string;
   readonly tier: Tier;
+  /** Epoch ms a new War Room went live: Pro may practice it at once, everyone else a week later. Undated ones are open to all. */
+  readonly releasedAt?: number;
   readonly title: string;
   readonly severity: IncidentCard["alert"]["severity"];
   readonly service: string;

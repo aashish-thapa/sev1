@@ -1,4 +1,5 @@
 import type { Level } from "../../domain/career.ts";
+import { isPro, isReleasedFor, type Entitlements } from "../../domain/entitlements.ts";
 import type { Role } from "../../domain/incident.ts";
 import type { Scenario } from "../scenario.ts";
 import { checkoutMeltdown } from "./checkout-meltdown.ts";
@@ -45,3 +46,14 @@ export function soloScenarioFor(role: Role, rotation = 0, level: Level = 0): Sce
 
 /** Shared rooms always play the cross-team incident: it's the one nobody can fix alone. */
 export const TEAM_SCENARIO = checkoutMeltdown;
+
+/**
+ * War Rooms a player may pick to practice (no pay, no experience): whatever their level unlocked,
+ * and with Pro every released War Room for their role, hardest first.
+ */
+export function practiceWarRooms(role: Role, level: Level, entitlements: Entitlements | null, now: number): readonly Scenario[] {
+  const pool = role === "infrastructure" ? INFRA_SOLO : [checkoutMeltdown];
+  return pool
+    .filter((scenario) => isReleasedFor(scenario.releasedAt, entitlements, now) && (isUnlocked(scenario, level) || isPro(entitlements, now)))
+    .toReversed();
+}

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { advance, debrief, declareResolved, openIncident, type Incident, type IncidentNotice } from "./incident.ts";
 import type { Scenario } from "./scenario.ts";
 import { crashOnCheckout } from "./scenarios/crash-on-checkout.ts";
-import { SCENARIOS, soloScenarioFor, unlockedWarRooms } from "./scenarios/index.ts";
+import { practiceWarRooms, SCENARIOS, soloScenarioFor, unlockedWarRooms } from "./scenarios/index.ts";
 import { oomAfterDeploy } from "./scenarios/oom-after-deploy.ts";
 import { scaledToZero } from "./scenarios/scaled-to-zero.ts";
 import { runLine } from "./shell/shell.ts";
@@ -117,6 +117,14 @@ describe("the War Room ladder", () => {
     const counts = ([0, 1, 2, 3, 4] as const).map((level) => unlockedWarRooms("infrastructure", level).length);
     expect(counts).toEqual([...counts].sort((left, right) => left - right));
     expect(unlockedWarRooms("infrastructure", 4)[0].tier).toBeGreaterThan(unlockedWarRooms("infrastructure", 4).at(-1)?.tier ?? 0);
+  });
+
+  it("lets Pro practice every War Room for its role, and everyone else what their level unlocked", () => {
+    const now = 1_800_000_000_000;
+    const pro = { proUntil: now + 1, cosmetics: [] };
+    const intern = practiceWarRooms("infrastructure", 0, null, now);
+    expect(intern.every((scenario) => scenario.tier === 1)).toBe(true);
+    expect(practiceWarRooms("infrastructure", 0, pro, now).length).toBe(unlockedWarRooms("infrastructure", 4).length);
   });
 
   it("keeps the cross-team incident for roles without their own ladder yet", () => {

@@ -82,6 +82,8 @@ export const CompanySchema = z.object({
   /** Offers the founder has out to investors; only the founder gets them. */
   investmentOffers: z.array(z.lazy(() => InvestmentOfferSchema)).default([]),
   trackers: z.lazy(() => TrackersSchema).nullable().default(null),
+  /** Players asking to invest; only the founder gets them. */
+  investmentProposals: z.array(z.lazy(() => InvestmentProposalSchema)).default([]),
 });
 export type Company = z.output<typeof CompanySchema>;
 
@@ -114,6 +116,8 @@ export const MyCompanySchema = z.object({
   holdings: z.array(z.lazy(() => HoldingSchema)).default([]),
   /** Dividends booked for you and not yet in your wallet; claimed like payroll. */
   dividends: z.array(z.lazy(() => PendingDividendSchema)).default([]),
+  /** Your proposals to invest, waiting for a founder's answer. */
+  proposals: z.array(z.lazy(() => MyProposalSchema)).default([]),
 });
 export type MyCompany = z.output<typeof MyCompanySchema>;
 
@@ -318,3 +322,15 @@ export const TrackersSchema = z.object({
   last30: WindowSchema,
 });
 export type TrackersWire = z.output<typeof TrackersSchema>;
+
+/** POST /api/companies/:companyId/proposals: a player asks to invest; the founder accepts (it becomes an offer to them) or declines. */
+export const ProposalRequestSchema = z.object({ amountCents: Cents, equityBps: Bps });
+export type ProposalRequest = z.input<typeof ProposalRequestSchema>;
+
+/** A proposal as the founder sees it. */
+export const InvestmentProposalSchema = z.object({ id: z.string(), investor: z.string(), amountCents: Cents, equityBps: Bps, createdAt: z.number() });
+export type InvestmentProposal = z.output<typeof InvestmentProposalSchema>;
+
+/** A proposal as the player who made it sees it. */
+export const MyProposalSchema = InvestmentProposalSchema.extend({ companyId: z.string(), companyName: z.string() });
+export type MyProposal = z.output<typeof MyProposalSchema>;

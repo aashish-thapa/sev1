@@ -2,7 +2,9 @@ import { z } from "zod";
 import { parseLocalDate, previousDay, type LocalDate } from "./calendar.ts";
 import { TOPICS, ROLE_IDS, type Role } from "./incident.ts";
 import { emptyWallet, pay, WalletSchema, type Payment } from "./economy.ts";
+import { EMPTY_PANTRY, PantryLogSchema, recordTaken, type ConsumableId } from "./pantry.ts";
 import { rateAttempt } from "./rating.ts";
+import { drain, refuel, RESTED, WellbeingSchema, type Refuel } from "./wellbeing.ts";
 
 const HISTORY_LIMIT = 60;
 
@@ -51,6 +53,10 @@ const ProgressFieldsSchema = z.object({
   featuredBadge: z.string().min(1).max(40).nullable().default(null),
   /** Paid-tier hints opened today (Pro's daily allowance); resets when the day changes. */
   hintsUsed: z.object({ day: LocalDateSchema, count: z.int().nonnegative() }).nullable().default(null),
+  /** Energy and fullness; saves from before them start rested. */
+  wellbeing: WellbeingSchema.default(RESTED),
+  /** What you've taken from the office pantry, for startup mode's operating costs. */
+  pantry: PantryLogSchema.default(EMPTY_PANTRY),
 });
 
 /** Saves from before `correctCards` existed: count what history and today's shift still remember. */
@@ -86,6 +92,8 @@ export function emptyProgress(): Progress {
     bestStreak: 0,
     featuredBadge: null,
     hintsUsed: null,
+    wellbeing: RESTED,
+    pantry: EMPTY_PANTRY,
     history: [],
     activeShift: null,
     warRoom: {},
@@ -145,6 +153,22 @@ export function hintsUsedOn(progress: Progress, day: LocalDate): number {
 /** Counts one allowance hint against `day`. Whether one was left to spend is the caller's rule (entitlements). */
 export function spendHint(progress: Progress, day: LocalDate): Progress {
   return { ...progress, hintsUsed: { day, count: hintsUsedOn(progress, day) + 1 } };
+}
+
+/** Active minutes on the floor tire you and make you hungry. */
+export function wearDown(progress: Progress, activeMinutes: number): Progress {
+  const wellbeing = drain(progress.wellbeing, activeMinutes);
+  return wellbeing === progress.wellbeing ? progress : { ...progress, wellbeing };
+}
+
+/** Taking something from the pantry (a brewed cup, a snack from the shelf) logs it once. */
+export function takeFromPantry(progress: Progress, id: ConsumableId, day: LocalDate): Progress {
+  return { ...progress, pantry: recordTaken(progress.pantry, id, day) };
+}
+
+/** A sip or a bite: `portion` of one serving's worth of energy or fullness. */
+export function consume(progress: Progress, kind: Refuel, portion: number): Progress {
+  return { ...progress, wellbeing: refuel(progress.wellbeing, kind, portion) };
 }
 
 export function featureBadge(progress: Progress, badgeId: string | null): Progress {

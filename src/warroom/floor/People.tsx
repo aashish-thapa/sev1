@@ -5,8 +5,9 @@ import type { CommsMessage } from "../scenario.ts";
 import { badgeById } from "../../domain/achievements.ts";
 import { knownTags } from "../../domain/tags.ts";
 import type { Teammate } from "../ui/feed.ts";
-import { loopThrough, positionOnLoop, WALK_SPEED, type Point } from "./navigation.ts";
-import { PEOPLE, seatOf, type Person } from "./office.ts";
+import { loopThrough, WALK_SPEED, type Point } from "./navigation.ts";
+import { carriedAt, walkerPose } from "./people/walkers.ts";
+import { PEOPLE, seatOf, type Person, type Carried } from "./office.ts";
 import { Avatar } from "./people/Avatar.tsx";
 import { avatarFor, HEAD_HEIGHT } from "./people/avatars.ts";
 import { motionFor, type Situation } from "./people/behaviour.ts";
@@ -94,6 +95,7 @@ function PersonModel({ person, comms, now, getPlayer, reduceMotion, panic, crowd
   const visit = useVisit(person, comms, now, getPlayer);
   const motion = () => motionFor(situation.current, panic.current, reduceMotion);
   const isTalking = useRef(false);
+  const carrying = useRef<Carried | null>(person.kind === "standing" ? (person.holds ?? null) : null);
   useEffect(() => {
     isTalking.current = conversation !== null;
   }, [conversation]);
@@ -115,7 +117,9 @@ function PersonModel({ person, comms, now, getPlayer, reduceMotion, panic, crowd
       pose = { x: person.x, z: person.z, heading, isWalking: false };
       situation.current = isTalking.current ? { state: "speaking" } : { state: "standing", activity: person.activity };
     } else if (person.kind === "walker" && loop) {
-      pose = positionOnLoop(loop, time + person.offset * 7);
+      const step = walkerPose(person, loop, time);
+      carrying.current = carriedAt(person, step);
+      pose = step;
       situation.current = pose.isWalking ? { state: "walking", speed: WALK_SPEED } : { state: "standing", activity: "waiting" };
     } else if (person.kind === "messenger") {
       pose = visit.pose(time);
@@ -141,10 +145,11 @@ function PersonModel({ person, comms, now, getPlayer, reduceMotion, panic, crowd
   });
 
   const isSeated = person.kind === "seated";
+  const carries = (person.kind === "walker" && person.carries) || (person.kind === "standing" && person.holds);
   return (
     <group ref={body} name={person.id}>
       <Suspense fallback={<StandIn isSeated={isSeated} />}>
-        <Avatar id={person.avatar} motion={motion} />
+        <Avatar id={person.avatar} motion={motion} carried={carries ? () => carrying.current : undefined} />
       </Suspense>
       {person.kind === "messenger" && <SpeechBubble name={person.name} text={visit.message?.text ?? null} isShown={visit.isArrived} y={HEAD_HEIGHT + 0.26} />}
       {conversation && <SpeechBubble name={conversation.name} text={conversation.line} isShown={always} y={(isSeated ? SEATED_HEAD : HEAD_HEIGHT) + 0.26} />}

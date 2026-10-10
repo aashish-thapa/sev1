@@ -29,6 +29,7 @@ export {
   type SpokenLine,
   type VoiceDirectorOptions,
 } from "./voice.ts";
+export { snackBite, stomachRumble, yawn } from "./pantry-sfx.ts";
 export { browserSpeechBackend, type SpeechBackend, type SpeechVoice } from "./speech.ts";
 export { useSoundscape } from "./useSoundscape.ts";
 export { useAudioUnlock } from "./useAudioUnlock.ts";

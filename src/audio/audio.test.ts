@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AudioEngine } from "./engine.ts";
 import { createSoundSystem } from "./index.ts";
 import { createSoundscapeLoops } from "./loops.ts";
+import { snackBite, stomachRumble, yawn } from "./pantry-sfx.ts";
 import { chairCreak, coffeeBrew, doorOpen, failBuzz, footstep, keyClick, laptopOpen, notificationPing, pagerBuzz, successChime, typingBurst } from "./sfx.ts";
 import { soundscapeFor, type SoundscapeState, type Zone } from "./soundscape.ts";
 import type { SpeechBackend, SpeechVoice, UtteranceEnding, UtteranceEvents, UtteranceRequest } from "./speech.ts";
@@ -89,6 +90,9 @@ const allSfx = (engine: AudioEngine) => {
   laptopOpen(engine);
   coffeeBrew(engine);
   chairCreak(engine);
+  snackBite(engine);
+  yawn(engine);
+  stomachRumble(engine);
 };
 
 describe("audio engine", () => {

@@ -19,6 +19,7 @@ import { CareerContext } from "./career-context.ts";
 import { useActivityClock } from "./useActivityClock.ts";
 import { useShiftGame, type GameServices } from "./useShiftGame.ts";
 import { WalletContext } from "./wallet-context.ts";
+import { WellbeingContext } from "./wellbeing-context.ts";
 
 /** Rooms share the app's origin (the dev server proxies /rooms to the room server). */
 function roomUrl(): string {
@@ -34,6 +35,10 @@ export function App({ shareUrl, proSale, adminApi, ...services }: Props) {
   const isInRoom = room.room !== null && room.status !== "left" && room.status !== "failed";
   // Solo infra rotates through the pure infra outages; other roles and every team room get the cross-team meltdown.
   const career = useMemo(() => careerLevel(game.progress), [game.progress]);
+  const wellbeing = useMemo(
+    () => ({ wellbeing: game.progress.wellbeing, takeFromPantry: game.takeFromPantry, consume: game.consume }),
+    [game.consume, game.progress.wellbeing, game.takeFromPantry],
+  );
   const scenario = isInRoom ? (findScenario(room.room?.scenarioId ?? "") ?? TEAM_SCENARIO) : soloScenarioFor(role, warRoomPlays(game.progress), career.level);
 
   // Fetch the 3D office while the player is still in the lobby.
@@ -65,6 +70,7 @@ export function App({ shareUrl, proSale, adminApi, ...services }: Props) {
   return (
     <WalletContext value={game.progress.wallet}>
       <CareerContext value={career}>
+      <WellbeingContext value={wellbeing}>
       {isInOffice ? (
         <OfficeErrorBoundary onLeave={leaveOffice}>
           <WarRoomView
@@ -101,6 +107,7 @@ export function App({ shareUrl, proSale, adminApi, ...services }: Props) {
           }}
         />
       )}
+      </WellbeingContext>
       </CareerContext>
     </WalletContext>
   );

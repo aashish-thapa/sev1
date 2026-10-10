@@ -6,7 +6,25 @@ import { ROLE_IDS, ROLES, roleOf, type IncidentCard, type Role } from "../domain
 import { payRef } from "../domain/economy.ts";
 import { hasBoughtSolution, spend, type SolutionTier, type SpendOutcome } from "../domain/purchases.ts";
 import { hasEarned } from "../domain/achievements.ts";
-import { chooseRole, earn, featureBadge, hasFinishedShift, hintsUsedOn, recordAssistedRun, spendHint as spendHintOn, recordAttempt, recordWarRoomRun, startShift, type Attempt, type Progress } from "../domain/progress.ts";
+import {
+  chooseRole,
+  consume,
+  earn,
+  featureBadge,
+  hasFinishedShift,
+  hintsUsedOn,
+  recordAssistedRun,
+  recordAttempt,
+  recordWarRoomRun,
+  spendHint as spendHintOn,
+  startShift,
+  takeFromPantry,
+  wearDown,
+  type Attempt,
+  type Progress,
+} from "../domain/progress.ts";
+import type { ConsumableId } from "../domain/pantry.ts";
+import type { Refuel } from "../domain/wellbeing.ts";
 import { overallRating, rateAttempt, STARTING_RATING } from "../domain/rating.ts";
 import { planShift, presentIncident, type Pace, type PresentedIncident } from "../domain/shift.ts";
 import type { ProgressStore } from "../storage/progress-store.ts";
@@ -69,6 +87,10 @@ export type ShiftGame = {
   recordWarRoom(scenario: { readonly id: string; readonly title: string }, result: Debrief, run: { readonly isTeam: boolean; readonly startedAt: number }): void;
   /** Pays salary for whole minutes of active play in the office. */
   paySalary(minutes: number): void;
+  /** Takes a serving from the office pantry (logged for startup mode's costs). */
+  takeFromPantry(id: ConsumableId): void;
+  /** A sip or a bite: `portion` of a serving's energy or fullness. */
+  consume(kind: Refuel, portion: number): void;
 };
 
 export function useShiftGame({ library, store, today: clock, now = Date.now }: GameServices): ShiftGame {
@@ -167,10 +189,13 @@ export function useShiftGame({ library, store, today: clock, now = Date.now }: G
     },
     [commit, now, progress],
   );
+  const takeFromPantryNow = useCallback((id: ConsumableId) => commit(takeFromPantry(progress, id, today)), [commit, progress, today]);
+  const consumeNow = useCallback((kind: Refuel, portion: number) => commit(consume(progress, kind, portion)), [commit, progress]);
   const paySalary = useCallback(
     (minutes: number) => {
       const at = now();
-      const paid = earn(progress, { kind: "salary", ref: payRef.salary(at), minutes, level: careerLevel(progress).level }, at);
+      // The same active minutes pay salary and wear you down, saved together.
+      const paid = wearDown(earn(progress, { kind: "salary", ref: payRef.salary(at), minutes, level: careerLevel(progress).level }, at), minutes);
       if (paid !== progress) commit(paid);
     },
     [commit, now, progress],
@@ -206,6 +231,8 @@ export function useShiftGame({ library, store, today: clock, now = Date.now }: G
     spendHint,
     buySolution,
     paySalary,
+    takeFromPantry: takeFromPantryNow,
+    consume: consumeNow,
   };
 }
 

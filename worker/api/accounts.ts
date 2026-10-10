@@ -1,0 +1,130 @@
+import { z } from "zod";
+import { isPlausibleProgress } from "../../src/domain/economy.ts";
+import { emptyProgress, ProgressSchema, type Progress } from "../../src/domain/progress.ts";
+import type { Account, SyncedProgress } from "../../src/storage/account-protocol.ts";
+import { hashPassword, verifyPassword } from "./password.ts";
+import type { AccountStore, LedgerRow, User } from "./store.ts";
+import { hashToken, newSessionToken } from "./tokens.ts";
+
+export const SESSION_SECONDS = 30 * 24 * 60 * 60;
+const ATTEMPT_WINDOW_MS = 15 * 60_000;
+/** Per username and per address, per window: enough for typos, too few to guess a password. */
+const LOGIN_ATTEMPTS_PER_USER = 10;
+const LOGIN_ATTEMPTS_PER_ADDRESS = 40;
+const SIGNUPS_PER_ADDRESS = 5;
+/** Anonymous play has no server clock; its ledger's first entry stands in, capped so a backdated ledger buys little. */
+const MAX_ANONYMOUS_SECONDS = 30 * 24 * 60 * 60;
+
+export const UsernameSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(/^[a-z0-9_-]{3,24}$/, "3–24 letters, numbers, - or _");
+export const PasswordSchema = z.string().min(8, "at least 8 characters").max(128, "at most 128 characters");
+export const CredentialsSchema = z.object({ username: UsernameSchema, password: PasswordSchema });
+
+export type SignedIn = { readonly account: Account; readonly token: string; readonly progress: SyncedProgress | null };
+
+export type AuthFailure = "username_taken" | "bad_credentials" | "rate_limited";
+export type AuthResult = { readonly ok: true; readonly value: SignedIn } | { readonly ok: false; readonly failure: AuthFailure };
+export type SaveResult = { readonly ok: true; readonly updatedAt: number } | { readonly ok: false; readonly current: SyncedProgress | null };
+
+type Clock = () => number;
+
+/** Sign-up, sign-in and saved progress; storage and HTTP live elsewhere. */
+export class AccountService {
+  private readonly store: AccountStore;
+  private readonly now: Clock;
+
+  constructor(store: AccountStore, now: Clock) {
+    this.store = store;
+    this.now = now;
+  }
+
+  /** Creates the account and, when it's plausible, keeps the progress earned before signing up. */
+  async signUp(username: string, password: string, anonymous: Progress | null, address: string): Promise<AuthResult> {
+    if (await this.isOverLimit(`signup:${address}`, SIGNUPS_PER_ADDRESS)) return { ok: false, failure: "rate_limited" };
+    const user: User = { id: crypto.randomUUID(), username, passwordHash: await hashPassword(password), createdAt: this.now() };
+    if (!(await this.store.createUser(user))) return { ok: false, failure: "username_taken" };
+
+    let progress: SyncedProgress | null = null;
+    if (anonymous && isPlausibleProgress(emptyProgress(), anonymous, this.anonymousSeconds(anonymous))) {
+      progress = { progress: anonymous, updatedAt: this.now() };
+      await this.store.saveProgress(user.id, { body: JSON.stringify(anonymous), updatedAt: progress.updatedAt }, this.creditsSince(emptyProgress(), anonymous));
+    }
+    return { ok: true, value: { account: { username }, token: await this.startSession(user), progress } };
+  }
+
+  async signIn(username: string, password: string, address: string): Promise<AuthResult> {
+    // Both limits count every attempt, so neither one username nor one address can grind through guesses.
+    const isUserLimited = await this.isOverLimit(`login:${username}`, LOGIN_ATTEMPTS_PER_USER);
+    const isAddressLimited = await this.isOverLimit(`login-ip:${address}`, LOGIN_ATTEMPTS_PER_ADDRESS);
+    if (isUserLimited || isAddressLimited) return { ok: false, failure: "rate_limited" };
+    const user = await this.store.findUser(username);
+    if (!user) {
+      // Unknown users still pay for a hash, so response time doesn't reveal which usernames exist.
+      await hashPassword(password);
+      return { ok: false, failure: "bad_credentials" };
+    }
+    if (!(await verifyPassword(password, user.passwordHash))) return { ok: false, failure: "bad_credentials" };
+    return { ok: true, value: { account: { username: user.username }, token: await this.startSession(user), progress: await this.progressOf(user) } };
+  }
+
+  async signOut(token: string): Promise<void> {
+    await this.store.deleteSession(await hashToken(token));
+  }
+
+  async userFor(token: string | null): Promise<User | null> {
+    if (!token) return null;
+    return this.store.findSessionUser(await hashToken(token), this.now());
+  }
+
+  async progressOf(user: User): Promise<SyncedProgress | null> {
+    const saved = await this.store.loadProgress(user.id);
+    if (!saved) return null;
+    const parsed = ProgressSchema.safeParse(JSON.parse(saved.body));
+    return parsed.success ? { progress: parsed.data, updatedAt: saved.updatedAt } : null;
+  }
+
+  /** Accepts the save only if its wallet could have been earned since the last one; otherwise hands back what's stored. */
+  async saveProgress(user: User, next: Progress): Promise<SaveResult> {
+    const current = await this.progressOf(user);
+    const since = current?.updatedAt ?? user.createdAt;
+    const elapsedSeconds = Math.max(0, (this.now() - since) / 1000);
+    if (!isPlausibleProgress(current?.progress ?? emptyProgress(), next, elapsedSeconds)) return { ok: false, current };
+    const updatedAt = this.now();
+    await this.store.saveProgress(user.id, { body: JSON.stringify(next), updatedAt }, this.creditsSince(current?.progress ?? emptyProgress(), next));
+    return { ok: true, updatedAt };
+  }
+
+  /** The account's balance by the server's books, which startup-mode spending will draw on. */
+  balanceOf(user: User): Promise<number> {
+    return this.store.ledgerBalance(user.id);
+  }
+
+  /**
+   * Wallet entries new since `previous`, as rows for the books. A wallet numbers its entries with a
+   * sequence it never reuses, so the sequence is a stable reference: a retried save books nothing twice.
+   */
+  private creditsSince(previous: Progress, next: Progress): LedgerRow[] {
+    return next.wallet.ledger
+      .filter((entry) => entry.seq >= previous.wallet.nextSeq)
+      .map((entry) => ({ id: crypto.randomUUID(), amountCents: entry.amountCents, reason: entry.reason, sourceRef: `wallet:${entry.seq}`, createdAt: this.now() }));
+  }
+
+  private async startSession(user: User): Promise<string> {
+    const token = newSessionToken();
+    await this.store.createSession(await hashToken(token), user.id, this.now() + SESSION_SECONDS * 1000);
+    return token;
+  }
+
+  private async isOverLimit(key: string, limit: number): Promise<boolean> {
+    const windowStart = Math.floor(this.now() / ATTEMPT_WINDOW_MS) * ATTEMPT_WINDOW_MS;
+    return (await this.store.countAttempt(key, windowStart)) > limit;
+  }
+
+  private anonymousSeconds(progress: Progress): number {
+    const first = Math.min(...progress.wallet.ledger.map((entry) => entry.at), this.now());
+    return Math.min(MAX_ANONYMOUS_SECONDS, Math.max(0, (this.now() - first) / 1000));
+  }
+}

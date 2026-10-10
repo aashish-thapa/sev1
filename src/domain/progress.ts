@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { parseLocalDate, previousDay, type LocalDate } from "./calendar.ts";
 import { TOPICS, ROLE_IDS, type Role } from "./incident.ts";
+import { emptyWallet, pay, WalletSchema, type Payment } from "./economy.ts";
 import { rateAttempt } from "./rating.ts";
 
 const HISTORY_LIMIT = 60;
@@ -40,6 +41,8 @@ export const ProgressSchema = z.object({
   warRoom: z.record(z.string(), WarRoomRecordSchema).default({}),
   // Unset until the player picks a role on their first visit.
   role: z.enum(ROLE_IDS as [Role, ...Role[]]).nullable().default(null),
+  // Saves from before job-mode pay start with an empty wallet.
+  wallet: WalletSchema.default(emptyWallet),
 });
 
 export type Attempt = z.infer<typeof AttemptSchema>;
@@ -57,7 +60,14 @@ export function emptyProgress(): Progress {
     activeShift: null,
     warRoom: {},
     role: null,
+    wallet: emptyWallet(),
   };
+}
+
+/** Credits job-mode pay; `at` is epoch milliseconds. */
+export function earn(progress: Progress, payment: Payment, at: number): Progress {
+  const wallet = pay(progress.wallet, payment, at);
+  return wallet === progress.wallet ? progress : { ...progress, wallet };
 }
 
 export function chooseRole(progress: Progress, role: Role): Progress {

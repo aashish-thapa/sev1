@@ -10,6 +10,7 @@ import {
   type Resume,
   type ServerMessage,
   type ServerMessageOf,
+  ROOM_CODE_QUERY,
 } from "./protocol.ts";
 
 /** The slice of the WebSocket API the client uses; both the browser's WebSocket and `ws` satisfy it. */
@@ -69,7 +70,8 @@ type Listeners = { [Type in keyof RoomEvents]: Set<(event: RoomEvents[Type]) => 
 const OPEN = 1;
 const NORMAL_CLOSURE = 1000;
 const OUTBOX_LIMIT = 64;
-const DEFAULT_PRESENCE_INTERVAL_MS = 100;
+/** 4 Hz: smooth enough with client-side easing, and each inbound message counts against the free hosting budget. */
+const DEFAULT_PRESENCE_INTERVAL_MS = 250;
 const DEFAULT_KEEPALIVE_MS = 15_000;
 
 /** One player's connection to a war room. Survives dropped sockets by rejoining the same seat. */
@@ -177,7 +179,7 @@ export class RoomClient {
 
   private connect() {
     this.setStatus(this.attempt === 0 ? "connecting" : "reconnecting");
-    const socket = new this.options.WebSocket(this.options.url);
+    const socket = new this.options.WebSocket(this.socketUrl());
     this.socket = socket;
     const isCurrent = () => socket === this.socket;
     socket.addEventListener("open", () => {
@@ -191,6 +193,15 @@ export class RoomClient {
     });
     // A close event always follows, and reconnecting is handled there; `ws` throws on unheard errors.
     socket.addEventListener("error", () => {});
+  }
+
+  /** Names the room up front when it's known, so a host can route the socket before the first message. */
+  private socketUrl(): string {
+    const code = this.seatHeld?.roomCode ?? (this.intent?.kind === "join" ? this.intent.roomCode : null);
+    if (!code) return this.options.url;
+    const url = new URL(this.options.url);
+    url.searchParams.set(ROOM_CODE_QUERY, code);
+    return url.toString();
   }
 
   private hello() {

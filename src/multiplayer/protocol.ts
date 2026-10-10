@@ -9,6 +9,11 @@ import { IncidentFrameSchema } from "./frame.ts";
 export const ROOM_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ";
 export const ROOM_CODE_LENGTH = 4;
 export const MAX_PLAYERS_PER_ROOM = 5;
+/**
+ * Query parameter naming the room a socket is for. A host that keeps each room on its own machine
+ * routes by it before any message arrives; a socket without it is opening a new room.
+ */
+export const ROOM_CODE_QUERY = "room";
 /** Larger inbound frames get an error reply; the socket's hard `maxPayload` sits above this. */
 export const MAX_INBOUND_BYTES = 2048;
 export const MAX_COMMAND_LENGTH = 500;

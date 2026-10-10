@@ -3,11 +3,15 @@ import type { Run } from "../app/useShiftGame.ts";
 import type { Topic } from "../domain/incident.ts";
 import { liveStreak, type Progress } from "../domain/progress.ts";
 import { overallRating, STARTING_RATING } from "../domain/rating.ts";
+import type { LedgerEntry } from "../domain/economy.ts";
 import { shareText } from "../domain/share.ts";
+import { Payslip } from "./Payslip.tsx";
 
 type Props = {
   run: Run;
   progress: Progress;
+  /** What this discussion paid: one line per correct call. */
+  earnings: readonly LedgerEntry[];
   shareUrl: string;
   onDone: () => void;
 };
@@ -30,7 +34,7 @@ const TOPIC_LABEL: Record<Topic, string> = {
   "machine-learning": "Machine learning",
 };
 
-export function ShiftReport({ run, progress, shareUrl, onDone }: Props) {
+export function ShiftReport({ run, progress, earnings, shareUrl, onDone }: Props) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const results = run.attempts.map((attempt) => attempt.isCorrect);
   const correct = results.filter(Boolean).length;
@@ -96,6 +100,8 @@ export function ShiftReport({ run, progress, shareUrl, onDone }: Props) {
           </tbody>
         </table>
       )}
+
+      <Payslip entries={earnings} emptyNote="No correct calls this round — nothing to pay." />
 
       <div className="report__actions">
         {isRated && (

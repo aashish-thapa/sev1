@@ -18,6 +18,7 @@ type Props = {
 
 /** A discussion at a wall screen: the room's big display, with the cards on it. */
 export function DiscussionOverlay({ discussion, progress, shareUrl, onAnswer, onWrapUp, onClose }: Props) {
+  const earnings = progress.wallet.ledger.filter((entry) => entry.seq >= discussion.paidFromSeq && entry.reason === "card");
   const roomName = discussion.room ? ROLE_INFO[discussion.room].room : "Library";
   const { engine, voice } = getAudio();
   // The colleague standing at the screen talks it through; one voice per room.
@@ -62,7 +63,7 @@ export function DiscussionOverlay({ discussion, progress, shareUrl, onAnswer, on
               onAnswered={onAnswered}
             />
           ) : (
-            <ShiftReport run={discussion.run} progress={progress} shareUrl={shareUrl} onDone={onClose} />
+            <ShiftReport run={discussion.run} progress={progress} earnings={earnings} shareUrl={shareUrl} onDone={onClose} />
           )}
         </div>
       </div>

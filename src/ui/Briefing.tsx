@@ -4,6 +4,9 @@ import { ROLE_IDS, type IncidentCard, type Role } from "../domain/incident.ts";
 import { hasFinishedShift, liveStreak, type Progress } from "../domain/progress.ts";
 import { overallRating } from "../domain/rating.ts";
 import { ROLE_INFO } from "../domain/roles.ts";
+import { AccountPanel } from "./AccountPanel.tsx";
+import { WalletChip } from "./WalletChip.tsx";
+import { formatCents, SALARY_CENTS_PER_MINUTE } from "../domain/economy.ts";
 
 const VISIBLE_QUEUE = 6;
 
@@ -128,6 +131,7 @@ export function Briefing({ progress, today, queuedAlerts, roles, onEnterOffice, 
             <dt>Rating</dt>
             <dd>{overallRating(progress.ratings)}</dd>
           </div>
+          <WalletChip />
         </dl>
       </header>
 
@@ -154,6 +158,10 @@ export function Briefing({ progress, today, queuedAlerts, roles, onEnterOffice, 
             ? `Today’s problems are done. The ${info.room} screen still has practice, and the pager can still go off.`
             : `${queuedAlerts.length} problems wait on the ${info.room} screen. Walk over and talk them through — and keep your laptop close: the pager can go off any time.`}
         </p>
+        <p className="briefing__pay">
+          The job pays {formatCents(SALARY_CENTS_PER_MINUTE)} for every active minute on the floor, plus a bonus for each correct call and each incident
+          you close.
+        </p>
         <div className="briefing__actions">
           <button type="button" className="button button--primary briefing__cta" onClick={onEnterOffice}>
             Enter the office
@@ -165,6 +173,7 @@ export function Briefing({ progress, today, queuedAlerts, roles, onEnterOffice, 
       </section>
 
       <TeamPanel team={team} />
+      <AccountPanel />
 
       <footer className="briefing__foot">
         <p>Sound on recommended · works on desktop and phones (play sideways).</p>

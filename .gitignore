@@ -25,3 +25,6 @@ dist-ssr
 
 # Downloaded asset sources (rebuild with pnpm assets)
 .asset-cache
+
+# Wrangler local state (D1, Durable Objects) and build output
+.wrangler

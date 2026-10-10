@@ -2,6 +2,7 @@ import type { Scenario } from "../src/warroom/scenario.ts";
 import type { Logger } from "./log.ts";
 import { generateRoomCode } from "./room-code.ts";
 import { Room, type RoomTiming } from "./room.ts";
+import type { RoomDirectory } from "./session.ts";
 
 export type RegistryOptions = {
   readonly maxRooms: number;
@@ -13,7 +14,7 @@ export type RegistryOptions = {
 };
 
 /** Owns every live room in the process: creation under a cap, lookup by code, and expiry once abandoned. */
-export class RoomRegistry {
+export class RoomRegistry implements RoomDirectory {
   private readonly rooms = new Map<string, Room>();
   private readonly expiries = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly options: RegistryOptions;

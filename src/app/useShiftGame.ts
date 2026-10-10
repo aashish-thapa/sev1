@@ -2,7 +2,8 @@ import { useCallback, useMemo, useState } from "react";
 import type { IncidentLibrary } from "../content/library.ts";
 import type { LocalDate } from "../domain/calendar.ts";
 import { ROLE_IDS, roleOf, type IncidentCard, type Role } from "../domain/incident.ts";
-import { chooseRole, hasFinishedShift, recordAttempt, recordWarRoomRun, startShift, type Attempt, type Progress } from "../domain/progress.ts";
+import { payRef } from "../domain/economy.ts";
+import { chooseRole, earn, hasFinishedShift, recordAttempt, recordWarRoomRun, startShift, type Attempt, type Progress } from "../domain/progress.ts";
 import { overallRating, rateAttempt, STARTING_RATING } from "../domain/rating.ts";
 import { planShift, presentIncident, type PresentedIncident } from "../domain/shift.ts";
 import type { ProgressStore } from "../storage/progress-store.ts";
@@ -22,13 +23,15 @@ export type Screen = { readonly name: "lobby" } | { readonly name: "office" };
 
 /** A conversation at one of the office's wall screens: working through cards, then the wrap-up. */
 export type Discussion =
-  | { readonly stage: "cards"; readonly run: Run; readonly room: Role | null }
-  | { readonly stage: "report"; readonly run: Run; readonly room: Role | null };
+  | { readonly stage: "cards"; readonly run: Run; readonly room: Role | null; readonly paidFromSeq: number }
+  | { readonly stage: "report"; readonly run: Run; readonly room: Role | null; readonly paidFromSeq: number };
 
 export type GameServices = {
   readonly library: IncidentLibrary;
   readonly store: ProgressStore;
   readonly today: () => LocalDate;
+  /** Wall-clock epoch milliseconds, for ledger timestamps. */
+  readonly now?: () => number;
 };
 
 export type ShiftGame = {
@@ -51,10 +54,13 @@ export type ShiftGame = {
   answer(attempt: Attempt): number;
   wrapUpDiscussion(): void;
   closeDiscussion(): void;
-  recordWarRoom(scenarioId: string, result: Debrief): void;
+  /** Records the run and pays the resolution bonus (every player in a team room is paid their own). */
+  recordWarRoom(scenario: { readonly id: string; readonly title: string }, result: Debrief, run: { readonly isTeam: boolean; readonly startedAt: number }): void;
+  /** Pays salary for whole minutes of active play in the office. */
+  paySalary(minutes: number): void;
 };
 
-export function useShiftGame({ library, store, today: clock }: GameServices): ShiftGame {
+export function useShiftGame({ library, store, today: clock, now = Date.now }: GameServices): ShiftGame {
   const today = clock();
   const [progress, setProgress] = useState<Progress>(() => discardUnplayableShift(store.load(), today, library, store));
   const [practiceRound, setPracticeRound] = useState(0);
@@ -78,13 +84,13 @@ export function useShiftGame({ library, store, today: clock }: GameServices): Sh
         const ids = active?.incidentIds ?? planShift(cardsOf(library, ownRole), today, new Set(progress.seenIds));
         const next = active ? progress : startShift(progress, today, ids);
         commit(next);
-        setDiscussion({ stage: "cards", room, run: buildRun("rated", today, ids, next.activeShift?.attempts ?? [], next, library) });
+        setDiscussion({ stage: "cards", room, paidFromSeq: next.wallet.nextSeq, run: buildRun("rated", today, ids, next.activeShift?.attempts ?? [], next, library) });
         return;
       }
       const pool = room === null ? library.cards : cardsOf(library, room);
       const ids = planShift(pool, today, new Set(progress.seenIds), practiceRound);
       setPracticeRound((round) => round + 1);
-      setDiscussion({ stage: "cards", room, run: buildRun("practice", today, ids, [], progress, library) });
+      setDiscussion({ stage: "cards", room, paidFromSeq: progress.wallet.nextSeq, run: buildRun("practice", today, ids, [], progress, library) });
     },
     [commit, library, practiceRound, progress, today],
   );
@@ -94,13 +100,20 @@ export function useShiftGame({ library, store, today: clock }: GameServices): Sh
       if (discussion?.stage !== "cards") return 0;
       const { run } = discussion;
       setDiscussion({ ...discussion, run: { ...run, attempts: [...run.attempts, attempt] } });
-      if (run.mode === "practice") return 0;
+      const title = library.byId(attempt.incidentId)?.alert.title ?? attempt.topic;
+      const answeredAt = now();
+      const card = { kind: "card", ref: payRef.card(attempt.incidentId, answeredAt), difficulty: attempt.difficulty, mode: run.mode, title } as const;
+      const paid = attempt.isCorrect ? earn(progress, card, answeredAt) : progress;
+      if (run.mode === "practice") {
+        if (paid !== progress) commit(paid);
+        return 0;
+      }
       const before = progress.ratings[attempt.topic] ?? STARTING_RATING;
       const after = rateAttempt(progress.ratings, attempt, attempt.isCorrect)[attempt.topic] ?? before;
-      commit(recordAttempt(progress, attempt));
+      commit(recordAttempt(paid, attempt));
       return after - before;
     },
-    [commit, discussion, progress],
+    [commit, discussion, library, now, progress],
   );
 
   const wrapUpDiscussion = useCallback(() => {
@@ -114,8 +127,20 @@ export function useShiftGame({ library, store, today: clock }: GameServices): Sh
   }, []);
   const onChooseRole = useCallback((role: Role) => commit(chooseRole(progress, role)), [commit, progress]);
   const recordWarRoom = useCallback(
-    (scenarioId: string, result: Debrief) => commit(recordWarRoomRun(progress, scenarioId, result.points, result.grade)),
-    [commit, progress],
+    (scenario: { readonly id: string; readonly title: string }, result: Debrief, run: { readonly isTeam: boolean; readonly startedAt: number }) => {
+      const recorded = recordWarRoomRun(progress, scenario.id, result.points, result.grade);
+      const bonus = { kind: "incident", ref: payRef.incident(scenario.id, run.startedAt), points: result.points, title: scenario.title, isTeam: run.isTeam } as const;
+      commit(earn(recorded, bonus, now()));
+    },
+    [commit, now, progress],
+  );
+  const paySalary = useCallback(
+    (minutes: number) => {
+      const at = now();
+      const paid = earn(progress, { kind: "salary", ref: payRef.salary(at), minutes }, at);
+      if (paid !== progress) commit(paid);
+    },
+    [commit, now, progress],
   );
 
   const queuedAlerts = useMemo(() => {
@@ -143,6 +168,7 @@ export function useShiftGame({ library, store, today: clock }: GameServices): Sh
     wrapUpDiscussion,
     closeDiscussion,
     recordWarRoom,
+    paySalary,
   };
 }
 

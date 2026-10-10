@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
+import { useWallet } from "../../app/wallet-context.ts";
+import { INCIDENT_MIN_POINTS } from "../../domain/economy.ts";
 import { AnswerPad } from "../../ui/AnswerPad.tsx";
+import { Payslip } from "../../ui/Payslip.tsx";
 import { debrief, type Debrief, type Incident } from "../incident.ts";
 import type { Role } from "../../domain/incident.ts";
 import { ROLE_INFO } from "../../domain/roles.ts";
@@ -9,15 +12,19 @@ import type { useRoom } from "../../multiplayer/useRoom.ts";
 import { SoloIncident } from "./LiveIncident.tsx";
 import { TeamIncident } from "./TeamIncident.tsx";
 
+/** One stint in the office: when it began (names the incident's bonus) and where its payslip starts in the ledger. */
+type Visit = { readonly startedAt: number; readonly paidFromSeq: number };
+
 type Stage =
-  | { readonly name: "office"; readonly isPaged: boolean; readonly run: number }
-  | { readonly name: "postmortem"; readonly incident: Incident; readonly picked: number | null }
-  | { readonly name: "debrief"; readonly result: Debrief };
+  | { readonly name: "office"; readonly isPaged: boolean; readonly run: number; readonly visit: Visit }
+  | { readonly name: "postmortem"; readonly incident: Incident; readonly picked: number | null; readonly visit: Visit }
+  | { readonly name: "debrief"; readonly result: Debrief; readonly visit: Visit };
 
 type Props = {
   scenario: Scenario;
   role: Role;
-  onFinish: (result: Debrief) => void;
+  /** `startedAt`: epoch ms this incident run began — a stable name for its bonus. */
+  onFinish: (result: Debrief, startedAt: number) => void;
   onLeave: () => void;
   onUseScreen: (screen: WallScreen) => void;
   /** Called when the pager goes off, so whatever the player was doing can be interrupted. */
@@ -34,8 +41,9 @@ const AUTO_PAGE_MS = { min: 60_000, spread: 60_000 } as const;
 
 /** The office: quiet until the pager goes off, then the live incident, postmortem and debrief. */
 export function WarRoomView({ scenario, role, onFinish, onLeave, onUseScreen, onPaged, overlay, room }: Props) {
-  const [stage, setStage] = useState<Stage>({ name: "office", isPaged: false, run: 0 });
-  const onClosed = useCallback((incident: Incident) => setStage({ name: "postmortem", incident, picked: null }), []);
+  const wallet = useWallet();
+  const [stage, setStage] = useState<Stage>(() => ({ name: "office", isPaged: false, run: 0, visit: { startedAt: Date.now(), paidFromSeq: wallet.nextSeq } }));
+  const onClosed = useCallback((incident: Incident) => setStage((current) => ({ name: "postmortem", incident, picked: null, visit: current.visit })), []);
   const isQuiet = stage.name === "office" && !stage.isPaged;
   const run = stage.name === "office" ? stage.run : 0;
 
@@ -90,8 +98,8 @@ export function WarRoomView({ scenario, role, onFinish, onLeave, onUseScreen, on
               className="button button--primary reveal__next"
               onClick={() => {
                 const result = debrief(stage.incident, scenario, stage.picked === postmortem.answerIndex);
-                onFinish(result);
-                setStage({ name: "debrief", result });
+                onFinish(result, stage.visit.startedAt);
+                setStage({ name: "debrief", result, visit: stage.visit });
               }}
             >
               See your grade
@@ -103,6 +111,7 @@ export function WarRoomView({ scenario, role, onFinish, onLeave, onUseScreen, on
   }
 
   const { result } = stage;
+  const earnings = wallet.ledger.filter((entry) => entry.seq >= stage.visit.paidFromSeq);
   return (
     <main className="debrief">
       <p className="paged__source">{scenario.title} · debrief</p>
@@ -137,11 +146,12 @@ export function WarRoomView({ scenario, role, onFinish, onLeave, onUseScreen, on
           </li>
         ))}
       </ul>
+      <Payslip entries={earnings} emptyNote={`No resolution bonus below ${INCIDENT_MIN_POINTS} points — the fix did more harm than good.`} />
       <div className="paged__actions">
         <button
           type="button"
           className="button button--primary"
-          onClick={() => (room ? onLeave() : setStage({ name: "office", isPaged: false, run: Date.now() }))}
+          onClick={() => (room ? onLeave() : setStage({ name: "office", isPaged: false, run: Date.now(), visit: { startedAt: Date.now(), paidFromSeq: wallet.nextSeq } }))}
         >
           {room ? "Leave the room" : "Back to the office"}
         </button>

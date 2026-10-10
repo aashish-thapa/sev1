@@ -2433,3 +2433,190 @@ a {
 .hud__row--controls {
   grid-template-columns: auto minmax(0, 1fr) auto auto;
 }
+
+/* Job-mode pay */
+
+.wallet-chip dd {
+  color: var(--color-good);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.hud__row--calm {
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+}
+
+.hud__wallet dt {
+  color: var(--color-muted);
+  font-size: var(--text-2xs);
+}
+
+.hud__wallet dd {
+  font-size: var(--text-sm);
+  line-height: 1.2;
+}
+
+.payout {
+  position: fixed;
+  bottom: max(var(--space-xl), env(safe-area-inset-bottom));
+  left: 50%;
+  z-index: var(--z-toast);
+  transform: translateX(-50%);
+  max-width: calc(100% - 2 * var(--space-md));
+  pointer-events: none;
+}
+
+.payout__line {
+  display: inline-flex;
+  gap: var(--space-xs);
+  align-items: baseline;
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  background: var(--color-paper-2);
+  color: var(--color-ink-2);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  animation: reveal-rise var(--dur-long) var(--ease-out) both;
+}
+
+.payout__line strong {
+  color: var(--color-good);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Salary ticks every minute: present, never loud. */
+.payout__line[data-reason="salary"] {
+  border-color: var(--color-rule-2);
+  font-size: var(--text-xs);
+}
+
+.payslip {
+  width: 100%;
+  max-width: 32rem;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.payslip caption {
+  padding-block-end: var(--space-xs);
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-align: start;
+  text-transform: uppercase;
+}
+
+.payslip th,
+.payslip td {
+  padding-block: var(--space-2xs);
+  border-bottom: 1px solid var(--color-rule-2);
+  font-weight: 400;
+  text-align: start;
+}
+
+.payslip td {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+  white-space: nowrap;
+}
+
+.payslip tfoot th,
+.payslip tfoot td {
+  border-bottom: 0;
+  color: var(--color-good);
+  font-weight: 600;
+}
+
+.payslip td.payslip__empty {
+  color: var(--color-muted);
+  font-family: var(--font-body);
+  text-align: start;
+  white-space: normal;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .payout__line {
+    animation-name: fade-in;
+  }
+}
+
+.briefing__pay {
+  max-width: 34rem;
+  color: var(--color-muted);
+  font-size: var(--text-sm);
+}
+
+/* ── Account (lobby): optional sign-up that keeps job-mode money across devices ── */
+
+.account {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding-block: var(--space-lg);
+  border-top: 1px solid var(--color-rule-2);
+}
+
+.account__title {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 800;
+  font-stretch: 75%;
+  line-height: 1;
+}
+
+.account__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.account__lede,
+.account__status {
+  min-height: 1lh;
+  color: var(--color-ink-2);
+  font-size: var(--text-sm);
+}
+
+.account__name {
+  color: var(--color-ink);
+  font-family: var(--font-mono);
+}
+
+.account__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-xs) var(--space-sm);
+}
+
+.account__field {
+  display: flex;
+  flex: 1 1 12rem;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  max-width: 20rem;
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+}
+
+.account input {
+  min-height: 44px;
+  padding: 0 var(--space-sm);
+  border: 1px solid var(--color-rule-strong);
+  border-radius: var(--radius-md);
+  outline: 2px solid transparent;
+  outline-offset: 1px;
+  background: var(--color-paper-2);
+  color: var(--color-ink);
+  font: 400 var(--text-base) / 1 var(--font-body);
+}
+
+.account input:focus-visible {
+  outline-color: var(--color-focus);
+}

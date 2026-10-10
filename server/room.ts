@@ -1,4 +1,3 @@
-import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import type { Role } from "../src/domain/incident.ts";
 import { encodeFrame } from "../src/multiplayer/frame.ts";
 import {
@@ -15,6 +14,7 @@ import type { CommsMessage, Scenario } from "../src/warroom/scenario.ts";
 import { runLine } from "../src/warroom/shell/shell.ts";
 import type { Logger } from "./log.ts";
 import { chatComms, declaredComms, joinedComms, leftComms, noticeComms } from "./notices.ts";
+import { isSameSecret, newSecret } from "./secrets.ts";
 import { startTicker, type StopTicker } from "./ticker.ts";
 
 /** One player's socket, as the room sees it. */
@@ -233,8 +233,8 @@ export class Room {
   private seat(request: JoinRequest, connection: Connection): Seat | null {
     if (this.seats.size >= MAX_PLAYERS_PER_ROOM) return null;
     const seat: Seat = {
-      id: randomUUID(),
-      token: randomBytes(24).toString("base64url"),
+      id: crypto.randomUUID(),
+      token: newSecret(24),
       name: request.name,
       role: request.role,
       position: null,
@@ -249,7 +249,7 @@ export class Room {
   /** Reattaches a held seat; a failed reclaim falls through to a fresh seat rather than an error. */
   private reclaim(resume: Resume, connection: Connection): Seat | null {
     const seat = this.seats.get(resume.playerId);
-    if (!seat || !sameSecret(seat.token, resume.token)) return null;
+    if (!seat || !isSameSecret(seat.token, resume.token)) return null;
     if (seat.expiry) clearTimeout(seat.expiry);
     seat.expiry = null;
     seat.connection?.close(SUPERSEDED_CLOSE_CODE, "seat reclaimed by a newer connection");
@@ -305,12 +305,6 @@ export class Room {
       this.stopTicker = null;
     }
   }
-}
-
-function sameSecret(expected: string, actual: string): boolean {
-  const left = Buffer.from(expected);
-  const right = Buffer.from(actual);
-  return left.length === right.length && timingSafeEqual(left, right);
 }
 
 function shorten(text: string, limit: number): string {

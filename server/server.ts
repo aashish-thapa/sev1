@@ -2,18 +2,12 @@ import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
-import {
-  encodeServerMessage,
-  MAX_INBOUND_BYTES,
-  parseClientMessage,
-  type ClientMessage,
-  type ErrorCode,
-  type ServerMessage,
-} from "../src/multiplayer/protocol.ts";
+import { encodeServerMessage, MAX_INBOUND_BYTES } from "../src/multiplayer/protocol.ts";
 import type { Logger } from "./log.ts";
 import { RoomRegistry } from "./registry.ts";
-import type { Connection, Room, RoomTiming } from "./room.ts";
+import type { Connection, RoomTiming } from "./room.ts";
 import type { ScenarioCatalog } from "./scenarios.ts";
+import { openSession } from "./session.ts";
 
 export type ServerOptions = {
   readonly port: number;
@@ -37,8 +31,6 @@ export type RunningServer = {
 /** Frames past this are cut off by `ws` itself; between it and MAX_INBOUND_BYTES the client gets an error reply instead. */
 const HARD_MAX_PAYLOAD = MAX_INBOUND_BYTES * 8;
 const GOING_AWAY = 1001;
-
-type Session = { readonly room: Room; readonly playerId: string };
 
 export async function startServer(options: ServerOptions): Promise<RunningServer> {
   const { logger } = options;
@@ -106,92 +98,28 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   };
 }
 
-/** Lifecycle of one socket: parse every frame, route it to the player's room, release the seat on close. */
+/** Bridges one `ws` socket to a room session; framing and lifecycle only. */
 function serve(socket: WebSocket, registry: RoomRegistry, options: ServerOptions) {
-  const { logger } = options;
   const connection: Connection = {
     send: (payload) => {
       if (socket.readyState === WebSocket.OPEN) socket.send(payload);
     },
     close: (code, reason) => socket.close(code, reason),
   };
-  const reply = (message: ServerMessage) => connection.send(encodeServerMessage(message));
-  const fail = (code: ErrorCode, message: string) => reply({ type: "error", code, message });
-  let session: Session | null = null;
-
-  const enter = (room: Room, request: Parameters<Room["join"]>[0]) => {
-    const outcome = room.join(request, connection);
-    if (outcome.ok) session = { room, playerId: outcome.playerId };
-    else fail(outcome.code, outcome.message);
-  };
-
-  const inRoom = (act: (room: Room, playerId: string) => void) => {
-    if (session) act(session.room, session.playerId);
-    else fail("not_in_room", "Create or join a war room first.");
-  };
-
-  const handle = (message: ClientMessage) => {
-    switch (message.type) {
-      case "ping":
-        reply({ type: "pong", nonce: message.nonce });
-        return;
-      case "create": {
-        if (session) return fail("already_in_room", `You are already in room ${session.room.code}.`);
-        const scenario = options.findScenario(message.scenarioId);
-        if (!scenario) return fail("unknown_scenario", `There is no scenario called ${message.scenarioId}.`);
-        const room = registry.create(scenario);
-        if (!room) return fail("server_full", "This server is hosting as many war rooms as it can. Try again shortly.");
-        return enter(room, { name: message.name, role: message.role });
-      }
-      case "join": {
-        if (session) return fail("already_in_room", `You are already in room ${session.room.code}.`);
-        const room = registry.find(message.roomCode);
-        if (!room) return fail("room_not_found", `No war room with code ${message.roomCode}.`);
-        return enter(room, { name: message.name, role: message.role, resume: message.resume });
-      }
-      case "leave":
-        if (!session) return fail("not_in_room", "You are not in a war room.");
-        session.room.leave(session.playerId);
-        session = null;
-        return;
-      case "presence":
-        return inRoom((room, playerId) => room.presence(playerId, { x: message.x, z: message.z, yaw: message.yaw }));
-      case "command":
-        return inRoom((room, playerId) => room.command(playerId, message.line));
-      case "declare":
-        return inRoom((room, playerId) => room.declare(playerId));
-      case "chat":
-        return inRoom((room, playerId) => room.chat(playerId, message.text));
-    }
-  };
+  const session = openSession({ connection, rooms: registry, findScenario: options.findScenario, logger: options.logger });
 
   socket.on("message", (data: RawData, isBinary: boolean) => {
-    if (isBinary) return fail("bad_message", "Send JSON text frames.");
-    if (byteLength(data) > MAX_INBOUND_BYTES) return fail("too_large", `Messages are limited to ${MAX_INBOUND_BYTES} bytes.`);
-    const parsed = parseClientMessage(decode(data));
-    if (!parsed.ok) {
-      logger("warn", "message_rejected", { code: parsed.code, room: session?.room.code ?? null });
-      return fail(parsed.code, parsed.reason);
+    if (isBinary) {
+      connection.send(encodeServerMessage({ type: "error", code: "bad_message", message: "Send JSON text frames." }));
+      return;
     }
-    try {
-      handle(parsed.message);
-    } catch (error) {
-      // A bug in the simulation or shell must cost one command, not the process and every room in it.
-      logger("error", "message_failed", {
-        type: parsed.message.type,
-        room: session?.room.code ?? null,
-        message: error instanceof Error ? error.message : String(error),
-      });
-      fail("internal", "The server hit an error handling that message.");
-    }
+    const length = byteLength(data);
+    // Oversized frames are refused by the session before decoding costs anything.
+    session.receive(length > MAX_INBOUND_BYTES ? "" : decode(data), length);
   });
 
-  socket.on("close", () => {
-    if (session) session.room.detach(session.playerId, connection);
-    session = null;
-  });
-
-  socket.on("error", (error) => logger("warn", "socket_error", { message: error.message }));
+  socket.on("close", () => session.end());
+  socket.on("error", (error) => options.logger("warn", "socket_error", { message: error.message }));
 }
 
 function byteLength(data: RawData): number {

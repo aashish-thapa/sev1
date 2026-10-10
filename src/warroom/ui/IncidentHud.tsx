@@ -1,5 +1,6 @@
 import type { Incident } from "../incident.ts";
 import { SoundToggle } from "../../ui/SoundToggle.tsx";
+import { WalletChip } from "../../ui/WalletChip.tsx";
 import { clockAt, type Scenario } from "../scenario.ts";
 
 const countFormat = new Intl.NumberFormat("en");
@@ -47,11 +48,14 @@ export function IncidentHud({ incident, scenario, isPaged, onPage, onDeclare, on
   if (!isPaged) {
     return (
       <header className="hud">
-        <div className="hud__row">
+        <div className="hud__row hud__row--calm">
           <button type="button" className="button button--quiet" onClick={onLeave}>
             Leave
           </button>
           <p className="hud__title">On call · all quiet</p>
+          <dl className="hud__wallet">
+            <WalletChip />
+          </dl>
           <SoundToggle />
           <button type="button" className="button button--ghost hud__resolve" onClick={onPage}>
             Page me
@@ -85,6 +89,7 @@ export function IncidentHud({ incident, scenario, isPaged, onPage, onDeclare, on
           <dd>{countFormat.format(Math.round(cluster.failedCheckouts))}</dd>
         </div>
         <SlaClock incident={incident} />
+        <WalletChip />
         <div className="hud__action">
           {phase.name === "monitoring" ? (
             <p className="hud__monitoring" role="status">

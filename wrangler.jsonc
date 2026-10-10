@@ -1,0 +1,29 @@
+// Cloudflare Workers (free plan): the built site, one Durable Object per war room, D1 for accounts.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sev1",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-10-06",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    // Sockets and the API must reach the worker; the SPA fallback would otherwise answer them with index.html.
+    "run_worker_first": ["/rooms", "/api/*"]
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "ROOMS", "class_name": "RoomObject" }]
+  },
+  // The free plan only offers SQLite-backed Durable Objects.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RoomObject"] }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "sev1",
+      "migrations_dir": "worker/migrations"
+    }
+  ],
+  "observability": { "enabled": true },
+  // 8787 is the Node room server's; the Vite dev server proxies /api here.
+  "dev": { "port": 8790 }
+}

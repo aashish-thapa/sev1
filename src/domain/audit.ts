@@ -18,7 +18,8 @@ import {
   type Wallet,
 } from "./economy.ts";
 import type { Progress } from "./progress.ts";
-import { scenarioOfPurchase, solutionPriceCents, type SolutionTier } from "./purchases.ts";
+import { scenarioOfPurchase, solutionPriceCents } from "./purchases.ts";
+import type { Tier } from "./tier.ts";
 
 /** Network and timer jitter between syncs: allow this much extra time and a couple of extra events. */
 const TIME_SLACK = 1.25;
@@ -28,7 +29,7 @@ const MAX_CARD_CENTS = Math.max(...Object.values(CARD_BONUS_CENTS));
 const EARN_REASONS = ["salary", "card", "incident"] as const satisfies readonly PayReason[];
 
 /** Looks up the tier of a scenario by id; the Worker answers from the scenario registry. */
-export type TierOf = (scenarioId: string) => SolutionTier | undefined;
+export type TierOf = (scenarioId: string) => Tier | undefined;
 
 /** With no registry, nothing can be bought — every purchase line is rejected. */
 const NO_TIERS: TierOf = () => undefined;

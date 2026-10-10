@@ -1,5 +1,8 @@
 import type { IncidentCard, Role } from "../domain/incident.ts";
+import type { Tier } from "../domain/tier.ts";
 import type { ClusterState } from "./sim/model.ts";
+
+export type { Tier };
 
 export type CommsMessage = {
   readonly at: number;
@@ -43,13 +46,6 @@ export type Objective = {
 
 /** One move of a worked solution: the exact command to run, and in one line why. */
 export type SolutionStep = { readonly command: string; readonly why: string };
-
-/**
- * How hard an incident is, matched to the career level that unlocks it (tier = level + 1):
- * 1 guided, one cause, one fix · 2 diagnose · 3 a plausible fix backfires ·
- * 4 the usual fix does nothing · 5 cloud-scale or cross-team.
- */
-export type Tier = 1 | 2 | 3 | 4 | 5;
 
 /** One playable live incident: a starting cluster, what "fixed" means, and the story around it. */
 export type Scenario = {

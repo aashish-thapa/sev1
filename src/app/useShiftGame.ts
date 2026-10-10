@@ -4,7 +4,8 @@ import type { LocalDate } from "../domain/calendar.ts";
 import { careerLevel } from "../domain/career.ts";
 import { ROLE_IDS, ROLES, roleOf, type IncidentCard, type Role } from "../domain/incident.ts";
 import { payRef } from "../domain/economy.ts";
-import { hasBoughtSolution, spend, type SolutionTier, type SpendOutcome } from "../domain/purchases.ts";
+import { hasBoughtSolution, spend, type SpendOutcome } from "../domain/purchases.ts";
+import type { Tier } from "../domain/tier.ts";
 import { hasEarned } from "../domain/achievements.ts";
 import { chooseRole, earn, featureBadge, hasFinishedShift, hintsUsedOn, recordAssistedRun, spendHint as spendHintOn, recordAttempt, recordWarRoomRun, startShift, type Attempt, type Progress } from "../domain/progress.ts";
 import { overallRating, rateAttempt, STARTING_RATING } from "../domain/rating.ts";
@@ -61,7 +62,7 @@ export type ShiftGame = {
   closeDiscussion(): void;
   /** Records the run and pays the resolution bonus (every player in a team room is paid their own). */
   /** Buys the step-by-step solution for this run; the run then pays nothing and earns no experience. */
-  buySolution(scenario: { readonly id: string; readonly title: string; readonly tier: SolutionTier }, runStartedAt: number): SpendOutcome;
+  buySolution(scenario: { readonly id: string; readonly title: string; readonly tier: Tier }, runStartedAt: number): SpendOutcome;
   /** Allowance hints opened today (Pro's daily free hints). */
   readonly hintsUsedToday: number;
   /** Records one allowance hint opened today. */
@@ -159,7 +160,7 @@ export function useShiftGame({ library, store, today: clock, now = Date.now }: G
   );
   const spendHint = useCallback(() => commit(spendHintOn(progress, today)), [commit, progress, today]);
   const buySolution = useCallback(
-    (scenario: { readonly id: string; readonly title: string; readonly tier: SolutionTier }, runStartedAt: number): SpendOutcome => {
+    (scenario: { readonly id: string; readonly title: string; readonly tier: Tier }, runStartedAt: number): SpendOutcome => {
       const purchase = { kind: "solution", scenarioId: scenario.id, runStartedAt, tier: scenario.tier, level: careerLevel(progress).level, title: scenario.title } as const;
       const outcome = spend(progress.wallet, purchase, now());
       if (outcome.ok && outcome.wallet !== progress.wallet) commit({ ...progress, wallet: outcome.wallet });

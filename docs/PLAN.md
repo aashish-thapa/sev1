@@ -39,7 +39,8 @@ Your job-mode money funds a company of your own.
 - **Outages cost money.** When your system pages and nobody on staff can fix it, you can pay a third-party contractor (us) to resolve it. Every minute your system is down loses revenue.
 - **Decision tree.** You choose what to build, how much reliability to buy, when to hire and when to raise money. Each choice changes revenue, burn rate and incident odds. The company rises or falls on those decisions.
 - **Investors.** Raise money by giving up equity. Players can also invest their own job-mode money in other players' startups.
-- **Trackers.** Live views of investments, inventory (assets), expenses (salaries, assets, contractors) and earnings.
+- **Trackers.** Live views of investments, inventory (assets), expenses (salaries, assets, contractors, office upkeep) and earnings.
+- **Office upkeep.** In job mode the pantry is free: the employer pays for coffee and snacks. Every coffee and snack is still counted, with a unit cost in cents (`src/domain/pantry.ts`). In startup mode these counts become part of the company's operating costs.
 
 Startup mode needs money that the server holds and decides on (see the anti-cheat item under Hosting). Job-mode wallets are kept on the device and only sanity-checked by the server.
 

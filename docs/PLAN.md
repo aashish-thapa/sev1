@@ -71,6 +71,16 @@ Ownership:
 - **D1 tables, server-held balances, company APIs and invitations:** the account/economy session.
 - **The 3D office per company:** the account/economy session.
 
+### Startup mode: hiring, levels and the company leaderboard (planned 2026-10-10)
+
+- **Company leaderboard.** The top companies by revenue over their last 7 work days, showing category, level, size and founder. A company that's coasting falls off.
+- **Find companies.** Search companies by name or category, see their level, size and open roles.
+- **Hiring.** A founder (or a member they make a hiring manager) opens a posting with a role, pay (≥ the role minimum), a minimum career level and a minimum interview score. Players apply by taking the interview. The founder or a hiring manager hires or rejects among applicants who meet the bar. Direct invitations still work too.
+- **Interviews are graded on the server.** Three tasks for the role, at the posting's difficulty, served without their answers and graded server-side, so the score can't be faked from the browser.
+- **Company levels: easy work first, harder as it grows.** Garage, Seed, Series A, Growth, Scale, by lifetime revenue and work days. A level sets the daily task difficulty (easy for a garage, hard at Scale), the pay a posting can ask for, and later which incidents page the company.
+
+Ownership follows phase 1: pure rules, schemas and screens are the War Room session's; D1, endpoints and server-side grading are the account/economy session's.
+
 ## Hosting: free, always on (no Render)
 
 Everything runs on the **Cloudflare Workers Free** plan, with no idle sleep or cold-start parking.

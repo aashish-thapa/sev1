@@ -47,6 +47,12 @@ export type Objective = {
 /** One move of a worked solution: the exact command to run, and in one line why. */
 export type SolutionStep = { readonly command: string; readonly why: string };
 
+/** What the pager watches when it isn't checkout 5xx: a 0–1 share whose healthy baseline is 0. */
+export type AlertMetric = {
+  readonly label: string;
+  readonly rate: (state: ClusterState) => number;
+};
+
 /** One playable live incident: a starting cluster, what "fixed" means, and the story around it. */
 export type Scenario = {
   readonly id: string;
@@ -66,6 +72,11 @@ export type Scenario = {
   readonly seed: string;
   readonly initialState: () => ClusterState;
   readonly isRootCauseFixed: (state: ClusterState) => boolean;
+  /**
+   * The number the incident pages, resolves and reopens on, in place of checkout 5xx. Set it when the
+   * fix doesn't show in 5xx (customers blocked or declined before the cluster), or the pager lies.
+   */
+  readonly alertMetric?: AlertMetric;
   /** Lost checkouts that cost one debrief point; scales scoring to the incident's traffic and unavoidable damage. */
   readonly lostCheckoutsPerPoint?: number;
   /** Per-role outcomes beyond the root cause; each unmet one costs points in the debrief. */

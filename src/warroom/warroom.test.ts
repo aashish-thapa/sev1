@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { advance, declareResolved, debrief, openIncident, type Incident, type IncidentNotice } from "./incident.ts";
+import { advance, alertLabel, alertRate, declareResolved, debrief, openIncident, type Incident, type IncidentNotice } from "./incident.ts";
+import type { Scenario } from "./scenario.ts";
 import { checkoutPoolLeak as scenario } from "./scenarios/checkout-pool-leak.ts";
+import { scaledToZero } from "./scenarios/scaled-to-zero.ts";
 import { rolloutRestart, rolloutUndo, scale, terminateIdleSessions, type ActionResult } from "./sim/actions.ts";
+import type { ClusterState } from "./sim/model.ts";
 
 function play(seconds: number, incident: Incident) {
   const notices: IncidentNotice[] = [];
@@ -36,7 +39,7 @@ describe("checkout pool leak", () => {
     expect(incident.cluster.errorRate).toBeLessThan(0.01);
     expect(scenario.isRootCauseFixed(incident.cluster)).toBe(true);
 
-    const declared = declareResolved(incident);
+    const declared = declareResolved(incident, scenario);
     expect(declared.notice).toBeUndefined();
     const { incident: closed, notices } = play(700, declared.incident);
     expect(notices.map((notice) => notice.kind)).toEqual(["closed"]);
@@ -49,7 +52,7 @@ describe("checkout pool leak", () => {
     incident = apply(incident, rolloutRestart(incident.cluster, "checkout-api"));
     incident = play(120, incident).incident;
     expect(incident.cluster.errorRate).toBeLessThan(0.01);
-    const declared = declareResolved(incident);
+    const declared = declareResolved(incident, scenario);
     const { notices } = play(700, declared.incident);
     expect(notices[0]?.kind).toBe("reopened");
   });
@@ -67,6 +70,49 @@ describe("checkout pool leak", () => {
     const before = opened.cluster.deployments[0].pods.map((pod) => pod.leaked);
     const incident = apply(opened, terminateIdleSessions(opened.cluster));
     expect(incident.cluster.deployments[0].pods.map((pod) => pod.leaked)).toEqual(before);
+  });
+});
+
+describe("an incident that pages on something other than 5xx", () => {
+  const pagingOn = (rate: (state: ClusterState) => number): Scenario => ({ ...scenario, alertMetric: { label: "customers turned away", rate } });
+
+  function rolledBack(): Incident {
+    let incident = play(30, openIncident(scenario)).incident;
+    incident = apply(incident, rolloutUndo(incident.cluster, "checkout-api"));
+    return play(120, incident).incident;
+  }
+
+  it("keeps the 5xx gate for scenarios that name no metric", () => {
+    const incident = rolledBack();
+    expect(alertRate(scenario, incident.cluster)).toBe(incident.cluster.errorRate);
+    expect(alertLabel(scenario)).toBe("checkout 5xx");
+  });
+
+  it("refuses to resolve while its metric is high, even at 0% 5xx", () => {
+    const incident = rolledBack();
+    expect(incident.cluster.errorRate).toBeLessThan(0.01);
+    expect(declareResolved(incident, pagingOn(() => 0.3)).notice).toEqual({ kind: "refused", rate: 0.3, label: "customers turned away" });
+  });
+
+  it("resolves on its metric alone, whatever the 5xx rate", () => {
+    const outage = openIncident(scaledToZero);
+    expect(outage.cluster.errorRate).toBe(1);
+    const declared = declareResolved(outage, { ...scaledToZero, alertMetric: { label: "customers turned away", rate: () => 0 } });
+    expect(declared.notice).toBeUndefined();
+    expect(declared.incident.phase.name).toBe("monitoring");
+  });
+
+  it("reopens when its metric climbs back, with the metric in the notice", () => {
+    const paged = pagingOn((state) => (state.t > 200 ? 0.2 : 0));
+    let incident = declareResolved(rolledBack(), paged).incident;
+    const notices: IncidentNotice[] = [];
+    for (let index = 0; index < 60; index += 1) {
+      const result = advance(incident, paged);
+      incident = result.incident;
+      if (result.notice) notices.push(result.notice);
+    }
+    expect(notices).toEqual([{ kind: "reopened", rate: 0.2, label: "customers turned away", wasRollingOut: false }]);
+    expect(incident.reopenCount).toBe(1);
   });
 });
 

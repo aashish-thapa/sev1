@@ -5,8 +5,10 @@ import { currentTemplateHash, isLive, type ClusterState } from "./sim/model.ts";
 
 /** Simulated seconds of quiet the incident must survive after "resolved" before it closes. */
 export const MONITORING_SECONDS = 600;
+/** Both gates apply to whichever rate the scenario pages on. */
 const REOPEN_ERROR_RATE = 0.05;
 const RESOLVABLE_ERROR_RATE = 0.01;
+const DEFAULT_ALERT_LABEL = "checkout 5xx";
 const UNMET_OBJECTIVE_PENALTY = 10;
 const DEFAULT_LOST_CHECKOUTS_PER_POINT = 150;
 
@@ -23,9 +25,18 @@ export type Incident = {
 };
 
 export type IncidentNotice =
-  | { readonly kind: "reopened"; readonly errorRate: number; readonly wasRollingOut: boolean }
+  | { readonly kind: "reopened"; readonly rate: number; readonly label: string; readonly wasRollingOut: boolean }
   | { readonly kind: "closed" }
-  | { readonly kind: "refused"; readonly errorRate: number };
+  | { readonly kind: "refused"; readonly rate: number; readonly label: string };
+
+/** The rate the pager watches: the scenario's own metric, or checkout 5xx. */
+export function alertRate(scenario: Scenario, cluster: ClusterState): number {
+  return scenario.alertMetric?.rate(cluster) ?? cluster.errorRate;
+}
+
+export function alertLabel(scenario: Scenario): string {
+  return scenario.alertMetric?.label ?? DEFAULT_ALERT_LABEL;
+}
 
 export function openIncident(scenario: Scenario): Incident {
   return { cluster: scenario.initialState(), phase: { name: "live" }, reopenCount: 0, declaredAt: null };
@@ -37,10 +48,11 @@ export function advance(incident: Incident, scenario: Scenario): { incident: Inc
   const cluster = step(incident.cluster, seededRandom(`${scenario.seed}:${incident.cluster.t}`));
 
   if (incident.phase.name === "monitoring") {
-    if (cluster.errorRate > REOPEN_ERROR_RATE) {
+    const rate = alertRate(scenario, cluster);
+    if (rate > REOPEN_ERROR_RATE) {
       return {
         incident: { ...incident, cluster, phase: { name: "live" }, reopenCount: incident.reopenCount + 1 },
-        notice: { kind: "reopened", errorRate: cluster.errorRate, wasRollingOut: isRollingOut(cluster) },
+        notice: { kind: "reopened", rate, label: alertLabel(scenario), wasRollingOut: isRollingOut(cluster) },
       };
     }
     const secondsLeft = incident.phase.secondsLeft - 1;
@@ -59,10 +71,11 @@ export function isRollingOut(cluster: ClusterState): boolean {
   });
 }
 
-export function declareResolved(incident: Incident): { incident: Incident; notice?: IncidentNotice } {
+export function declareResolved(incident: Incident, scenario: Scenario): { incident: Incident; notice?: IncidentNotice } {
   if (incident.phase.name !== "live") return { incident };
-  if (incident.cluster.errorRate >= RESOLVABLE_ERROR_RATE) {
-    return { incident, notice: { kind: "refused", errorRate: incident.cluster.errorRate } };
+  const rate = alertRate(scenario, incident.cluster);
+  if (rate >= RESOLVABLE_ERROR_RATE) {
+    return { incident, notice: { kind: "refused", rate, label: alertLabel(scenario) } };
   }
   return {
     incident: { ...incident, phase: { name: "monitoring", secondsLeft: MONITORING_SECONDS }, declaredAt: incident.cluster.t },

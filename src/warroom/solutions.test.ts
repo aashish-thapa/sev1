@@ -35,7 +35,7 @@ function runSteps(scenario: Scenario, role: Role, incident: Incident): Incident 
 }
 
 function close(scenario: Scenario, incident: Incident) {
-  const declared = declareResolved(incident);
+  const declared = declareResolved(incident, scenario);
   expect(declared.notice, `${scenario.id} refused to resolve`).toBeUndefined();
   return play(scenario, declared.incident, 700);
 }

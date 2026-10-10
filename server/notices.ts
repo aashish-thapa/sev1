@@ -14,12 +14,12 @@ const percent = (rate: number) => `${Math.round(rate * 100)}%`;
 export function noticeComms(notice: IncidentNotice, at: number): CommsMessage {
   switch (notice.kind) {
     case "refused":
-      return { at, from: PAGER, text: `Can’t resolve: checkout 5xx is still ${percent(notice.errorRate)}.` };
+      return { at, from: PAGER, text: `Can’t resolve: ${notice.label} is still ${percent(notice.rate)}.` };
     case "reopened":
       return {
         at,
         from: PAGER,
-        text: `Re-triggered — 5xx back at ${percent(notice.errorRate)}${notice.wasRollingOut ? " while the rollout was still replacing pods" : ""}. The incident is open again.`,
+        text: `Re-triggered — ${notice.label} back at ${percent(notice.rate)}${notice.wasRollingOut ? " while the rollout was still replacing pods" : ""}. The incident is open again.`,
       };
     case "closed":
       return { at, from: PAGER, text: "Quiet for 10 minutes. Incident closed — time for the postmortem." };

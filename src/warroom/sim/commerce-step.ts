@@ -82,13 +82,28 @@ export function commerceDemand(state: ClusterState, commerce: Commerce): Commerc
   };
 }
 
+/** A customer ends the second without an order if the WAF blocks them, or lets them through and they run out of retries. */
+function lostShare(blocked: number, gaveUp: number): number {
+  return blocked + (1 - blocked) * gaveUp;
+}
+
 /** Customers who end this second without an order: blocked at the edge, or out of retries. */
 export function lostCheckouts(demand: CommerceDemand, checkoutFailureRate: number): number {
   return demand.segments.reduce((sum, segment) => {
     const customers = demand.organicCheckoutsPerSecond * segment.share;
     const gaveUp = mixGiveUp(segment.mix, checkoutFailureRate);
-    return sum + customers * (demand.blockedShare + (1 - demand.blockedShare) * gaveUp);
+    return sum + customers * lostShare(demand.blockedShare, gaveUp);
   }, 0);
+}
+
+/**
+ * Share of organic checkout customers who ended the last second without an order, for scenarios
+ * whose fix doesn't show in 5xx: the failure rate customers saw then, on the clients and WAF rules in place at `t`.
+ */
+export function customerLossRate(commerce: Commerce, t: number): number {
+  const blocked = blockedShare(commerce.wafRules);
+  const failure = commerce.pulse.checkoutFailureRate;
+  return clientSegments(commerce, t).reduce((sum, segment) => sum + segment.share * lostShare(blocked, mixGiveUp(segment.mix, failure)), 0);
 }
 
 /**

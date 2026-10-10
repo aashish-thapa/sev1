@@ -30,7 +30,7 @@ function playSolo(role: Role): Incident {
       hasMoved = true;
     }
     if (!isDeclared && hasMoved && incident.cluster.t > 360 && incident.cluster.errorRate < 0.01) {
-      incident = declareResolved(incident).incident;
+      incident = declareResolved(incident, scenario).incident;
       isDeclared = incident.phase.name === "monitoring";
     }
   }

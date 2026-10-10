@@ -1,4 +1,4 @@
-import { useContext, useEffect, useMemo } from "react";
+import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { careerLevel } from "../domain/career.ts";
 import { warRoomPlays } from "../domain/progress.ts";
 import { Briefing } from "../ui/Briefing.tsx";
@@ -22,6 +22,8 @@ import { useActivityClock } from "./useActivityClock.ts";
 import { useShiftGame, type GameServices } from "./useShiftGame.ts";
 import { WalletContext } from "./wallet-context.ts";
 import { AccountContext } from "./useAccount.ts";
+import { CompanyOfficeContext } from "../warroom/floor/company-office/context.ts";
+import type { Company } from "../storage/company-protocol.ts";
 import { useClaimGrants } from "./useClaimGrants.ts";
 import { WellbeingContext } from "./wellbeing-context.ts";
 
@@ -73,6 +75,21 @@ export function App({ shareUrl, proSale, adminApi, companyApi, tasks, ...service
 
   // Rooms show it by your name; only an earned badge is ever sent.
   const badge = featuredBadge(game.progress)?.id ?? null;
+  // The company whose office room you walked into from the HQ: its floor shows only what it bought.
+  const [companyOffice, setCompanyOffice] = useState<{ readonly code: string; readonly company: Company } | null>(null);
+  const enterCompanyOffice = useCallback(
+    async (code: string) => {
+      // Know the office's layout before stepping in, so you start at your desk, not behind a shut door.
+      const mine = await companyApi.mine();
+      if (mine.ok && mine.value.company) setCompanyOffice({ code, company: mine.value.company });
+      room.join(code, { name: username ?? "", role, badge });
+    },
+    [badge, companyApi, role, room, username],
+  );
+  const officeVisit = useMemo(
+    () => (companyOffice && isInRoom && room.room?.code === companyOffice.code ? { company: companyOffice.company, me: username } : null),
+    [companyOffice, isInRoom, room.room?.code, username],
+  );
 
   const leaveOffice = () => {
     if (isInRoom) room.leave();
@@ -85,6 +102,7 @@ export function App({ shareUrl, proSale, adminApi, companyApi, tasks, ...service
       <WellbeingContext value={wellbeing}>
       {isInOffice ? (
         <OfficeErrorBoundary onLeave={leaveOffice}>
+          <CompanyOfficeContext value={officeVisit}>
           <WarRoomView
             key={`${scenario.id}:${isInRoom ? room.room?.code : "solo"}`}
             scenario={scenario}
@@ -98,6 +116,7 @@ export function App({ shareUrl, proSale, adminApi, companyApi, tasks, ...service
             onPaged={game.closeDiscussion}
             overlay={overlay}
           />
+          </CompanyOfficeContext>
           <PayoutToast />
           <PromotionToast />
         </OfficeErrorBoundary>
@@ -116,7 +135,7 @@ export function App({ shareUrl, proSale, adminApi, companyApi, tasks, ...service
             walletCents: game.progress.wallet.balanceCents,
             fundCompany: game.fundCompany,
             claimPayout: game.claimPayout,
-            enterOffice: (code) => room.join(code, { name: username ?? "", role, badge }),
+            enterOffice: enterCompanyOffice,
           }}
           fetchLeaderboard={fetchLeaderboard}
           rooms={{

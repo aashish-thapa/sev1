@@ -25,6 +25,11 @@ export type Wall = { readonly from: readonly [number, number]; readonly to: read
 
 const WALL_THICKNESS = 0.2;
 
+/** The data centre's only door: a gap in its glass front onto the corridor. */
+export const DATACENTRE_DOOR = { fromX: 7, toX: 9, z: 1 } as const;
+/** The data centre's glass front, wall to wall. */
+export const DATACENTRE_FRONT = { fromX: -11, toX: 11, z: 1 } as const;
+
 /** Interior and exterior walls; door openings are simply the gaps between segments. */
 export const WALLS: readonly Wall[] = [
   // Exterior.
@@ -35,8 +40,8 @@ export const WALLS: readonly Wall[] = [
   // Data centre: solid sides, glass front onto the corridor with a door at x 7..9.
   { from: [-11, -15], to: [-11, 1], kind: "solid" },
   { from: [11, -15], to: [11, 1], kind: "solid" },
-  { from: [-11, 1], to: [7, 1], kind: "glass" },
-  { from: [9, 1], to: [11, 1], kind: "glass" },
+  { from: [-11, 1], to: [DATACENTRE_DOOR.fromX, 1], kind: "glass" },
+  { from: [DATACENTRE_DOOR.toX, 1], to: [11, 1], kind: "glass" },
   // Cabins A and B with doors onto the corridor, storage behind them.
   { from: [-22, -6], to: [-11, -6], kind: "solid" },
   { from: [-16.5, -6], to: [-16.5, 1], kind: "solid" },
@@ -73,19 +78,24 @@ const CLUSTER_XS = [-18, -13, -8, -3, 2] as const;
 const CLUSTER_ROWS = [8, 12.5] as const;
 export const DESK = { width: 1.5, depth: 0.75, height: 0.74 } as const;
 
-/** Desk clusters of four: two side by side, two back to back. */
-export const DESKS: readonly Desk[] = CLUSTER_ROWS.flatMap((z) =>
-  CLUSTER_XS.flatMap((x) =>
-    [-1, 1].flatMap((side) =>
-      [-1, 1].map((front) => ({
-        id: `desk-${x}-${z}-${side}-${front}`,
-        x: x + side * (DESK.width / 2 + 0.05),
-        z: z + front * (DESK.depth / 2),
-        facing: (front === -1 ? 1 : -1) as 1 | -1,
-      })),
-    ),
-  ),
-);
+/** Where a four-desk cluster stands: the middle of its two pairs of desks. */
+export type DeskCluster = { readonly x: number; readonly z: number };
+
+export const CLUSTERS: readonly DeskCluster[] = CLUSTER_ROWS.flatMap((z) => CLUSTER_XS.map((x) => ({ x, z })));
+
+/** A cluster's four desks: two side by side, two back to back. */
+export function desksOf({ x, z }: DeskCluster): Desk[] {
+  return [-1, 1].flatMap((side) =>
+    [-1, 1].map((front) => ({
+      id: `desk-${x}-${z}-${side}-${front}`,
+      x: x + side * (DESK.width / 2 + 0.05),
+      z: z + front * (DESK.depth / 2),
+      facing: (front === -1 ? 1 : -1) as 1 | -1,
+    })),
+  );
+}
+
+export const DESKS: readonly Desk[] = CLUSTERS.flatMap(desksOf);
 
 /** Your desk: front cluster, south side, so you look past your monitor at the data-centre glass. */
 export const PLAYER_DESK = DESKS.find((desk) => desk.x < -3 && desk.x > -4 && desk.z > 8 && desk.z < 9 && desk.facing === -1) ?? DESKS[0];
@@ -125,14 +135,13 @@ export function wallFootprints(): Footprint[] {
 }
 
 /** Everything static the player bumps into, except the racks (which move with the incident). */
-export function officeObstacles(): Footprint[] {
-  const desks = deskClusterFootprints();
-  return [...wallFootprints(), ...desks, ...FURNITURE.map((item) => item.footprint), ...furnishingFootprints()];
+export function officeObstacles(clusters: readonly DeskCluster[] = CLUSTERS): Footprint[] {
+  return [...wallFootprints(), ...deskClusterFootprints(clusters), ...FURNITURE.map((item) => item.footprint), ...furnishingFootprints()];
 }
 
 /** One box per four-desk cluster, so nobody slips between two desks. */
-export function deskClusterFootprints(): Footprint[] {
-  return CLUSTER_ROWS.flatMap((z) => CLUSTER_XS.map((x) => ({ x, z, width: DESK.width * 2 + 0.1, depth: DESK.depth * 2 })));
+export function deskClusterFootprints(clusters: readonly DeskCluster[] = CLUSTERS): Footprint[] {
+  return clusters.map(({ x, z }) => ({ x, z, width: DESK.width * 2 + 0.1, depth: DESK.depth * 2 }));
 }
 
 // ── Role rooms and their wall screens ─────────────────────────────

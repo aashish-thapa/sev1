@@ -24,6 +24,10 @@ function summaryOf(listing: CompanyListing): CompanySummary {
     revenue7dCents: Math.max(0, listing.revenue7dCents),
     lifetimeRevenueCents: Math.max(0, listing.lifetimeRevenueCents),
     postings: listing.postings.slice(0, POSTINGS_SHOWN).map(postingOf),
+    // Filled from the full books once the directory reads them; until then the list shows no valuation.
+    valuationCents: 0,
+    valuationHistory: [],
+    weekChangeBps: null,
   };
 }
 

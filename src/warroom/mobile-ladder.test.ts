@@ -7,6 +7,7 @@ import { checkoutCluster } from "./scenarios/checkout-cluster.ts";
 import { checkoutCommerce, iosUserAgent, NO_RETRY, SHOP_REMOTE_CONFIG } from "./scenarios/checkout-commerce.ts";
 import { forcedUpdateWall } from "./scenarios/forced-update-wall.ts";
 import { iosRetryConfig } from "./scenarios/ios-retry-config.ts";
+import { pinnedCertRotation } from "./scenarios/pinned-cert-rotation.ts";
 import { scaledToZero } from "./scenarios/scaled-to-zero.ts";
 import { runLine } from "./shell/shell.ts";
 import { clientSegments, triggerShare, unsafeRetryShare } from "./sim/clients.ts";
@@ -16,7 +17,7 @@ import { isOlderThan, updateWall } from "./sim/update-wall.ts";
 
 const MIN_VERSION = "min_supported_version";
 /** The mobile ladder, easiest first. */
-const LADDER: readonly Scenario[] = [iosRetryConfig, androidStagedRollout500s, forcedUpdateWall];
+const LADDER: readonly Scenario[] = [iosRetryConfig, androidStagedRollout500s, forcedUpdateWall, pinnedCertRotation];
 /** As solutions.test.ts plays a worked answer: the first move 20 s after the page, a command every 8 s, then 180 s to settle. */
 const FIRST_MOVE_AT = 20;
 const THINKING_SECONDS = 8;
@@ -325,5 +326,49 @@ describe("forced-update-wall: forcing an update to a build that isn't out", () =
     const { refused, closed } = resolve(scenario, lowered);
     expect(refused).toBeUndefined();
     expect(debrief(closed, scenario, true).points).toBeLessThan(debrief(resolve(scenario, solve(scenario)).closed, scenario, true).points);
+  });
+});
+
+describe("pinned-cert-rotation: the apps pin a key the API no longer serves", () => {
+  const scenario = pinnedCertRotation;
+  const NEW_INTERMEDIATE_PIN = "sha256/WLzjxBehVlZI4YwxVVf20Pz/c9kniFWRpoB2oTlCcR0=";
+  const loss = (incident: Incident) => customerLossRate(commerceOf(incident), incident.cluster.t);
+  const correct = () => debrief(resolve(scenario, solve(scenario)).closed, scenario, true);
+
+  it("loses every app customer with no 5xx at all, and the apps' telemetry names the missing pin", () => {
+    const opened = play(scenario, openIncident(scenario), FIRST_MOVE_AT);
+    expect(opened.cluster.errorRate).toBe(0);
+    expect(loss(opened)).toBeCloseTo(0.48, 9);
+    expect(text(scenario, "releases status", opened)).toMatch(/android\s+7\.2\.4\s.*100\.0%/);
+    const errors = text(scenario, "releases tls-errors", opened);
+    expect(errors).toContain("[TrustKit] Pin validation failed for api.marlow.shop");
+    expect(errors).toContain("javax.net.ssl.SSLPeerUnverifiedException: Certificate pinning failure!");
+    expect(errors).toContain(`    ${NEW_INTERMEDIATE_PIN}: CN=Halyard TLS RSA CA 2026,O=Halyard Trust,C=US`);
+    expect(errors).not.toContain(`    ${NEW_INTERMEDIATE_PIN}\n`);
+  });
+
+  it("report-only mode restores checkout but turns pinning off: resolve is allowed, the objective and root cause are not met", () => {
+    const { settled, refused, closed } = tryFix(scenario, "remote-config set api_pinning_mode report-only");
+    expect(loss(settled)).toBe(0);
+    expect(refused).toBeUndefined();
+    expect(text(scenario, "releases tls-errors", settled)).toContain("allowed, report sent");
+    const result = debrief(closed, scenario, true);
+    expect(result.isRootCauseFixed).toBe(false);
+    expect(result.objectives?.find((objective) => objective.role === "mobile")?.isMet).toBe(false);
+    expect(result.points).toBeLessThan(correct().points - 30);
+  });
+
+  it("halting a release, flipping a feature or rolling back does nothing", () => {
+    const opened = play(scenario, openIncident(scenario), FIRST_MOVE_AT);
+    const { settled, refused } = tryFix(scenario, "releases halt ios 7.3.0", "remote-config set checkout_express_pay_enabled false");
+    expect(loss(settled)).toBeCloseTo(loss(opened), 9);
+    expect(refused?.kind).toBe("refused");
+    expect(text(scenario, "releases rollback android", settled)).toContain("cannot downgrade");
+  });
+
+  it("a pin set without the new intermediate's key fixes nothing", () => {
+    const { settled, refused } = tryFix(scenario, `remote-config set api_pin_set ${NEW_INTERMEDIATE_PIN.slice(0, -2)}A=`);
+    expect(loss(settled)).toBeCloseTo(0.48, 9);
+    expect(refused?.kind).toBe("refused");
   });
 });

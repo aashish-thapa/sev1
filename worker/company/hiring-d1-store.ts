@@ -245,6 +245,10 @@ export class D1CompanyDirectory implements CompanyDirectoryStore {
       .bind(...rows.map((row) => row.id))
       .all<PostingRecord>();
     const postings = results.map(toPosting);
+    const books = await this.db
+      .prepare(`SELECT company_id, work_day, reason, amount_cents FROM company_ledger WHERE company_id IN (${placeholders}) ORDER BY created_at`)
+      .bind(...rows.map((row) => row.id))
+      .all<{ company_id: string; work_day: number; reason: string; amount_cents: number }>();
     return rows.map((row) => ({
       id: row.id,
       name: row.name,
@@ -255,6 +259,7 @@ export class D1CompanyDirectory implements CompanyDirectoryStore {
       lifetimeRevenueCents: row.lifetime,
       revenue7dCents: row.recent,
       postings: postings.filter((posting) => posting.companyId === row.id),
+      lines: books.results.filter((line) => line.company_id === row.id).map((line) => ({ workDay: line.work_day, reason: line.reason, amountCents: line.amount_cents })),
     }));
   }
 }

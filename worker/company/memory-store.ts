@@ -165,6 +165,11 @@ export class MemoryCompanyStore implements CompanyStore, CompanyBank {
     return true;
   }
 
+  /** Every line in a company's books, oldest first, for its valuation. */
+  bookLines(companyId: string): readonly BookLine[] {
+    return this.ledger.filter((line) => line.companyId === companyId);
+  }
+
   /** Revenue lines, for the directory's ranking. */
   revenueLines(companyId: string): readonly BookLine[] {
     return this.ledger.filter((line) => line.companyId === companyId && line.reason === "revenue");

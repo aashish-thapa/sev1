@@ -233,6 +233,10 @@ describe("company list", () => {
     expect(top.map((company) => company.name)).toEqual(["Zed Labs", "Acme Ops"]);
     expect(top[0]).toMatchObject({ revenue7dCents: 140_000, founder: "sam", members: 1 });
     expect(top[1].level).toBeGreaterThan(1);
+    // Valuation comes from the full books: Zed's recent profit values it higher and still climbing over its last week.
+    expect(top[0].valuationCents).toBeGreaterThan(top[1].valuationCents);
+    expect(top[0].valuationHistory.length).toBeGreaterThan(0);
+    expect(top[0].weekChangeBps).not.toBeNull();
   });
 
   it("searches by name prefix in any case, takes wildcards literally, and filters by category", async () => {

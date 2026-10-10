@@ -157,6 +157,7 @@ export class MemoryCompanyDirectory implements CompanyDirectoryStore {
           lifetimeRevenueCents: revenue.reduce((sum, line) => sum + line.amountCents, 0),
           revenue7dCents: revenue.filter((line) => line.workDay > company.workDay - 7).reduce((sum, line) => sum + line.amountCents, 0),
           postings: [...this.hiring.postings.values()].filter((posting) => posting.companyId === company.id && posting.isOpen),
+          lines: this.companies.bookLines(company.id),
         };
       });
   }

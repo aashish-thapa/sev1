@@ -1,5 +1,6 @@
 /** What the public company list needs: active companies with the numbers that rank them. */
 import type { CategoryId } from "../../src/domain/company/catalog.ts";
+import type { BookLine } from "../../src/domain/company/investors.ts";
 import type { PostingRow } from "./hiring-store.ts";
 
 export type CompanyListing = {
@@ -14,6 +15,8 @@ export type CompanyListing = {
   readonly revenue7dCents: number;
   /** Open postings only. */
   readonly postings: readonly PostingRow[];
+  /** Every line in the company's books, oldest first: its valuation and that valuation's history come from these. */
+  readonly lines: readonly BookLine[];
 };
 
 export interface CompanyDirectoryStore {

@@ -26,6 +26,8 @@ export type SessionOptions = {
   readonly logger: Logger;
   /** Milliseconds, for rate limits; injectable so tests can move time. */
   readonly now?: () => number;
+  /** Who the host verified this socket belongs to (from its session cookie); guests have no tags. */
+  readonly identity?: { readonly tags: readonly string[] };
 };
 
 /** What a transport hands the session: each text frame, and the socket going away. */
@@ -37,7 +39,7 @@ export type Session = {
 type Seated = { readonly room: Room; readonly playerId: string };
 
 /** One socket's conversation with the rooms: parse every frame, route it to the player's room, release the seat on close. */
-export function openSession({ connection, rooms, findScenario, logger, now = Date.now }: SessionOptions): Session {
+export function openSession({ connection, rooms, findScenario, logger, now = Date.now, identity = { tags: [] } }: SessionOptions): Session {
   const reply = (message: ServerMessage) => connection.send(encodeServerMessage(message));
   const fail = (code: ErrorCode, message: string) => reply({ type: "error", code, message });
   let seated: Seated | null = null;
@@ -65,13 +67,13 @@ export function openSession({ connection, rooms, findScenario, logger, now = Dat
         if (!scenario) return fail("unknown_scenario", `There is no scenario called ${message.scenarioId}.`);
         const room = rooms.create(scenario, message.visibility);
         if (!room) return fail("server_full", "This server is hosting as many war rooms as it can. Try again shortly.");
-        return enter(room, { name: message.name, role: message.role, badge: message.badge });
+        return enter(room, { name: message.name, role: message.role, badge: message.badge, tags: identity.tags });
       }
       case "join": {
         if (seated) return fail("already_in_room", `You are already in room ${seated.room.code}.`);
         const room = rooms.find(message.roomCode);
         if (!room) return fail("room_not_found", `No war room with code ${message.roomCode}.`);
-        return enter(room, { name: message.name, role: message.role, badge: message.badge, resume: message.resume });
+        return enter(room, { name: message.name, role: message.role, badge: message.badge, tags: identity.tags, resume: message.resume });
       }
       case "leave":
         if (!seated) return fail("not_in_room", "You are not in a war room.");

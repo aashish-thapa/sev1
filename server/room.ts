@@ -35,7 +35,14 @@ export type RoomTiming = {
 
 export const DEFAULT_ROOM_TIMING: RoomTiming = { tickMs: 1000, monitoringTickMs: 50, playerGraceMs: 60_000 };
 
-export type JoinRequest = { readonly name: string; readonly role: Role; readonly badge: string | null; readonly resume?: Resume };
+export type JoinRequest = {
+  readonly name: string;
+  readonly role: Role;
+  readonly badge: string | null;
+  /** From the host's verified identity for this socket, never from the client's message. */
+  readonly tags: readonly string[];
+  readonly resume?: Resume;
+};
 
 export type JoinOutcome = { readonly ok: true; readonly playerId: string } | { readonly ok: false; readonly code: ErrorCode; readonly message: string };
 
@@ -51,6 +58,7 @@ type Seat = {
   readonly name: string;
   readonly role: Role;
   readonly badge: string | null;
+  readonly tags: readonly string[];
   /** Null until the client says it can do voice; only then is it sent handshakes. */
   voice: { isMicOn: boolean } | null;
   position: Position | null;
@@ -116,7 +124,7 @@ export class Room {
     if (this.incident.phase.name === "closed") this.send(seat, this.closedMessage());
 
     this.broadcast({ type: "players", players: this.players() }, seat);
-    if (!resumed) this.post(joinedComms(seat.name, seat.role, seat.badge, this.incident.cluster.t));
+    if (!resumed) this.post(joinedComms(seat.name, seat.role, seat.badge, seat.tags, this.incident.cluster.t));
     this.logger("info", resumed ? "player_resumed" : "player_joined", { room: this.code, player: seat.id, role: seat.role });
     this.occupancyChanged();
     return { ok: true, playerId: seat.id };
@@ -270,6 +278,7 @@ export class Room {
       name: request.name,
       role: request.role,
       badge: request.badge,
+      tags: request.tags,
       voice: null,
       position: null,
       connection,
@@ -299,6 +308,7 @@ export class Room {
       position: seat.position,
       isConnected: seat.connection !== null,
       badge: seat.badge,
+      tags: [...seat.tags],
       voice: seat.voice,
     }));
   }

@@ -139,6 +139,8 @@ const PlayerSchema = z.object({
   /** False while a dropped player's seat is held for them to reconnect. */
   isConnected: z.boolean(),
   badge: ShownBadgeSchema,
+  /** Granted tags (e.g. "creator"), set by the server from the account, never by the client. */
+  tags: z.array(z.string().max(40)).max(8).default([]),
   /** Null for a client without voice; it's never sent a handshake it couldn't read. */
   voice: z.object({ isMicOn: z.boolean() }).nullable().default(null),
 });

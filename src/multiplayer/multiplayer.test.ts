@@ -256,6 +256,17 @@ describe("war room server", () => {
     await expect.poll(publicRooms, { timeout: WAIT_MS, interval: 10 }).toEqual([]);
   });
 
+  it("shows tags only from the host's verified identity, never from what a client sends", async () => {
+    const { joinedComms } = await import("../../server/notices.ts");
+    expect(joinedComms("aashish", "infrastructure", null, ["creator"], 0).text).toBe("aashish [Creator] (infrastructure) joined.");
+    await boot();
+    const { host } = await createRoom();
+    const players = await host.next("players").catch(() => null);
+    const me = (players?.players ?? []).find((player) => player.name === "Maya");
+    expect(me?.tags ?? []).toEqual([]);
+    expect(parseClientMessage(JSON.stringify({ type: "join", roomCode: "ABCD", name: "Sam", role: "data", tags: ["creator"] })).ok).toBe(false);
+  });
+
   it("relays voice handshakes only to teammates who can do voice, and only so many", async () => {
     await boot();
     const { host, welcome } = await createRoom();

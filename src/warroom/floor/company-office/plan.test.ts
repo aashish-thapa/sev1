@@ -42,6 +42,8 @@ describe("officePlan", () => {
     expect(plan.memberDesks.get("early")).toEqual(plan.desks[1]);
     expect(plan.memberDesks.get("late")).toEqual(plan.desks[2]);
     expect(myDeskIn(plan, "late")).toEqual(plan.desks[2]);
+    // A visitor gets the next desk nobody holds, not the founder's chair.
+    expect(myDeskIn(plan, "visitor")).toEqual(plan.desks[3]);
   });
 
   it("never offers more clusters than the building has", () => {

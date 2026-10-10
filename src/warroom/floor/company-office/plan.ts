@@ -128,6 +128,10 @@ export function boardFigures(company: CompanyLayout): BoardFigures {
 export function myDeskIn(plan: OfficePlan, username: string | null): Desk {
   const assigned = username ? plan.memberDesks.get(username) : undefined;
   if (assigned) return assigned;
+  // A visitor takes a desk nobody holds, so they don't spawn in a member's chair.
+  const held = new Set([...plan.memberDesks.values()].map((desk) => desk.id));
+  const free = plan.desks.find((desk) => !held.has(desk.id));
+  if (free && held.size > 0) return free;
   return plan.desks.some((desk) => desk.id === PLAYER_DESK.id) ? PLAYER_DESK : (plan.desks[0] ?? PLAYER_DESK);
 }
 

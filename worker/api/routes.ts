@@ -1,5 +1,6 @@
 import { ProgressSchema } from "../../src/domain/progress.ts";
 import { SaveRequestSchema, SignInRequestSchema, SignUpRequestSchema } from "../../src/storage/account-protocol.ts";
+import { LEADERBOARD_PATH } from "../../src/storage/leaderboard-protocol.ts";
 import { AccountService, CredentialsSchema, SESSION_SECONDS, type AuthResult } from "./accounts.ts";
 import { clearedSessionCookie, failure, isSameOrigin, json, readBody, sessionCookie, sessionTokenOf } from "./http.ts";
 
@@ -50,6 +51,10 @@ export async function handleApi(request: Request, accounts: AccountService): Pro
       if (!progress.success) return failure("invalid", "That isn't saved progress.", 400);
       const saved = await accounts.saveProgress(user, progress.data);
       return saved.ok ? json({ updatedAt: saved.updatedAt }) : json({ error: "rejected", current: saved.current }, 409);
+    }
+    case `GET ${LEADERBOARD_PATH}`: {
+      const user = await accounts.userFor(sessionTokenOf(request));
+      return json(await accounts.leaderboard(user));
     }
     default:
       return failure("not_found", `No route for ${route}.`, 404);

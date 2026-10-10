@@ -1,9 +1,12 @@
 import { z } from "zod";
+import { featuredBadge } from "../../src/domain/achievements.ts";
 import { isPlausibleProgress, type TierOf } from "../../src/domain/audit.ts";
+import { careerLevel } from "../../src/domain/career.ts";
 import { emptyProgress, ProgressSchema, type Progress } from "../../src/domain/progress.ts";
 import type { Account, SyncedProgress } from "../../src/storage/account-protocol.ts";
+import { LEADERBOARD_SIZE, type Leaderboard } from "../../src/storage/leaderboard-protocol.ts";
 import { hashPassword, verifyPassword } from "./password.ts";
-import type { AccountStore, LedgerRow, User } from "./store.ts";
+import type { AccountStore, LedgerRow, Standing, User } from "./store.ts";
 import { hashToken, newSessionToken } from "./tokens.ts";
 
 export const SESSION_SECONDS = 30 * 24 * 60 * 60;
@@ -31,6 +34,12 @@ export type SaveResult = { readonly ok: true; readonly updatedAt: number } | { r
 
 type Clock = () => number;
 
+/** What the leaderboard publishes for a save: only a badge the player has actually earned is shown. */
+function standingOf(progress: Progress): Standing {
+  const career = careerLevel(progress);
+  return { experience: career.experience, title: career.title, featuredBadge: featuredBadge(progress)?.id ?? null };
+}
+
 /** Sign-up, sign-in and saved progress; storage and HTTP live elsewhere. */
 export class AccountService {
   private readonly store: AccountStore;
@@ -53,7 +62,7 @@ export class AccountService {
     let progress: SyncedProgress | null = null;
     if (anonymous && isPlausibleProgress(emptyProgress(), anonymous, this.anonymousSeconds(anonymous), this.tierOf)) {
       progress = { progress: anonymous, updatedAt: this.now() };
-      await this.store.saveProgress(user.id, { body: JSON.stringify(anonymous), updatedAt: progress.updatedAt }, this.creditsSince(emptyProgress(), anonymous));
+      await this.store.saveProgress(user.id, { body: JSON.stringify(anonymous), updatedAt: progress.updatedAt }, standingOf(anonymous), this.creditsSince(emptyProgress(), anonymous));
     }
     return { ok: true, value: { account: { username }, token: await this.startSession(user), progress } };
   }
@@ -96,7 +105,7 @@ export class AccountService {
     const elapsedSeconds = Math.max(0, (this.now() - since) / 1000);
     if (!isPlausibleProgress(current?.progress ?? emptyProgress(), next, elapsedSeconds, this.tierOf)) return { ok: false, current };
     const updatedAt = this.now();
-    await this.store.saveProgress(user.id, { body: JSON.stringify(next), updatedAt }, this.creditsSince(current?.progress ?? emptyProgress(), next));
+    await this.store.saveProgress(user.id, { body: JSON.stringify(next), updatedAt }, standingOf(next), this.creditsSince(current?.progress ?? emptyProgress(), next));
     return { ok: true, updatedAt };
   }
 
@@ -109,6 +118,13 @@ export class AccountService {
    * Wallet entries new since `previous`, as rows for the books. A wallet numbers its entries with a
    * sequence it never reuses, so the sequence is a stable reference: a retried save books nothing twice.
    */
+  /** The top accounts by experience, and where the caller stands if signed in with saved progress. */
+  async leaderboard(user: User | null): Promise<Leaderboard> {
+    const top = await this.store.topAccounts(LEADERBOARD_SIZE);
+    const entries = top.map((account, index) => ({ rank: index + 1, ...account }));
+    return { entries, me: user ? await this.store.rankOf(user.id) : null };
+  }
+
   private creditsSince(previous: Progress, next: Progress): LedgerRow[] {
     return next.wallet.ledger
       .filter((entry) => entry.seq >= previous.wallet.nextSeq)

@@ -3,7 +3,7 @@ import { payRef } from "../../src/domain/economy.ts";
 import { earn, emptyProgress, type Progress } from "../../src/domain/progress.ts";
 import { AccountService } from "./accounts.ts";
 import { hashPassword, verifyPassword } from "./password.ts";
-import type { AccountStore, LedgerRow, SavedProgress, User } from "./store.ts";
+import type { AccountStore, LedgerRow, SavedProgress, Standing, User } from "./store.ts";
 
 /** Fewer rounds keep the suite fast; the production count is exercised once below. */
 const FAST_ITERATIONS = 1_000;
@@ -14,6 +14,7 @@ class MemoryAccountStore implements AccountStore {
   readonly progress = new Map<string, SavedProgress>();
   readonly attempts = new Map<string, { windowStart: number; count: number }>();
   readonly ledger = new Map<string, LedgerRow & { userId: string }>();
+  readonly standings = new Map<string, Standing & { updatedAt: number }>();
 
   async findUser(username: string) {
     return this.users.get(username) ?? null;
@@ -37,12 +38,26 @@ class MemoryAccountStore implements AccountStore {
   async loadProgress(userId: string) {
     return this.progress.get(userId) ?? null;
   }
-  async saveProgress(userId: string, saved: SavedProgress, credits: readonly LedgerRow[]) {
+  async saveProgress(userId: string, saved: SavedProgress, standing: Standing, credits: readonly LedgerRow[]) {
     this.progress.set(userId, saved);
+    this.standings.set(userId, { ...standing, updatedAt: saved.updatedAt });
     for (const credit of credits) {
       const key = `${userId}:${credit.sourceRef}`;
       if (!this.ledger.has(key)) this.ledger.set(key, { ...credit, userId });
     }
+  }
+  private ranked() {
+    const usernames = new Map([...this.users.values()].map((user) => [user.id, user.username]));
+    return [...this.standings.entries()]
+      .sort(([, a], [, b]) => b.experience - a.experience || a.updatedAt - b.updatedAt)
+      .map(([userId, standing]) => ({ userId, username: usernames.get(userId) ?? "", experience: standing.experience, title: standing.title, featuredBadge: standing.featuredBadge }));
+  }
+  async topAccounts(limit: number) {
+    return this.ranked().slice(0, limit).map(({ userId: _userId, ...account }) => account);
+  }
+  async rankOf(userId: string) {
+    const index = this.ranked().findIndex((account) => account.userId === userId);
+    return index < 0 ? null : { rank: index + 1, experience: this.ranked()[index].experience };
   }
   async ledgerBalance(userId: string) {
     return [...this.ledger.values()].filter((row) => row.userId === userId).reduce((sum, row) => sum + row.amountCents, 0);
@@ -149,5 +164,31 @@ describe("AccountService", () => {
     await accounts.saveProgress(user, next);
     expect(store.ledger.size).toBe(2);
     expect(await accounts.balanceOf(user)).toBe(next.wallet.balanceCents);
+  });
+});
+
+describe("leaderboard", () => {
+  it("ranks accounts by experience, shows only earned badges, and places the caller", async () => {
+    const { accounts, advance } = setup();
+    const veteran = await accounts.signUp("veteran", "correct horse battery", null, "1.1.1.1");
+    const rookie = await accounts.signUp("rookie", "correct horse battery", null, "1.1.1.2");
+    if (!veteran.ok || !rookie.ok) throw new Error("sign-up failed");
+    const veteranUser = await accounts.userFor(veteran.value.token);
+    const rookieUser = await accounts.userFor(rookie.value.token);
+    if (!veteranUser || !rookieUser) throw new Error("no session");
+    advance(10 * 60_000);
+    const at = Date.UTC(2026, 9, 10, 12, 5);
+    const earned = earn(emptyProgress(), { kind: "card", ref: payRef.card("c1", at), difficulty: 1, mode: "rated", title: "c1" }, at);
+    expect((await accounts.saveProgress(veteranUser, { ...earned, correctCards: 1, featuredBadge: "not-a-real-badge" })).ok).toBe(true);
+    expect((await accounts.saveProgress(rookieUser, emptyProgress())).ok).toBe(true);
+
+    const board = await accounts.leaderboard(rookieUser);
+    expect(board.entries.map((entry) => [entry.rank, entry.username, entry.experience])).toEqual([
+      [1, "veteran", 10],
+      [2, "rookie", 0],
+    ]);
+    expect(board.entries[0].featuredBadge).toBeNull();
+    expect(board.me).toEqual({ rank: 2, experience: 0 });
+    expect((await accounts.leaderboard(null)).me).toBeNull();
   });
 });

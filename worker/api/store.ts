@@ -1,7 +1,11 @@
 /** What the account service needs from storage; D1 in production, memory in tests. */
+import type { Title } from "../../src/domain/career.ts";
 
 export type User = { readonly id: string; readonly username: string; readonly passwordHash: string; readonly createdAt: number };
 export type SavedProgress = { readonly body: string; readonly updatedAt: number };
+/** What the leaderboard shows for an account, derived from its progress at save time. */
+export type Standing = { readonly experience: number; readonly title: Title; readonly featuredBadge: string | null };
+export type RankedAccount = Standing & { readonly username: string };
 /** One credit in the server's books. `sourceRef` identifies what earned it, so the same credit is never booked twice. */
 export type LedgerRow = { readonly id: string; readonly amountCents: number; readonly reason: string; readonly sourceRef: string; readonly createdAt: number };
 
@@ -14,8 +18,12 @@ export interface AccountStore {
   findSessionUser(tokenHash: string, now: number): Promise<User | null>;
   deleteSession(tokenHash: string): Promise<void>;
   loadProgress(userId: string): Promise<SavedProgress | null>;
-  /** Stores the progress and books its new credits together; credits already booked are skipped. */
-  saveProgress(userId: string, progress: SavedProgress, credits: readonly LedgerRow[]): Promise<void>;
+  /** Stores the progress, its standing and its new credits together; credits already booked are skipped. */
+  saveProgress(userId: string, progress: SavedProgress, standing: Standing, credits: readonly LedgerRow[]): Promise<void>;
+  /** The top `limit` accounts by experience; earlier saves win ties. */
+  topAccounts(limit: number): Promise<RankedAccount[]>;
+  /** 1-based rank and experience of an account with saved progress, else null. */
+  rankOf(userId: string): Promise<{ rank: number; experience: number } | null>;
   /** The account's balance by the server's books. */
   ledgerBalance(userId: string): Promise<number>;
   /** Counts one attempt against `key` in the window starting at `windowStart`; returns the count so far. */

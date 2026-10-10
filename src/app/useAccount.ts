@@ -1,5 +1,5 @@
 import { createContext, useCallback, useEffect, useState, useSyncExternalStore } from "react";
-import type { Account } from "../storage/account-protocol.ts";
+import type { Account, Entitlements } from "../storage/account-protocol.ts";
 import type { AccountApi, AccountProblem, Outcome, SignedIn } from "../storage/account-api.ts";
 import type { ProgressStore } from "../storage/progress-store.ts";
 import type { ProgressSync, SyncStatus } from "../storage/syncing-progress-store.ts";
@@ -9,6 +9,8 @@ export type AccountStatus = "checking" | "anonymous" | "signed-in";
 export type AccountSession = {
   readonly status: AccountStatus;
   readonly account: Account | null;
+  /** What the account has paid for, from the server; null for guests. */
+  readonly entitlements: Entitlements | null;
   readonly sync: SyncStatus;
   readonly problem: AccountProblem | null;
   readonly isBusy: boolean;
@@ -20,11 +22,19 @@ export type AccountSession = {
 /** Null outside the app shell (tests, stories): account UI then renders nothing. */
 export const AccountContext = createContext<AccountSession | null>(null);
 
-type State = { readonly status: AccountStatus; readonly account: Account | null; readonly problem: AccountProblem | null; readonly isBusy: boolean };
+type State = {
+  readonly status: AccountStatus;
+  readonly account: Account | null;
+  readonly entitlements: Entitlements | null;
+  readonly problem: AccountProblem | null;
+  readonly isBusy: boolean;
+};
+
+const SIGNED_OUT: State = { status: "anonymous", account: null, entitlements: null, problem: null, isBusy: false };
 
 /** Who's signed in, and the bridge between signing in and syncing progress. */
 export function useAccount(api: AccountApi, store: ProgressStore, sync: ProgressSync): AccountSession {
-  const [state, setState] = useState<State>({ status: "checking", account: null, problem: null, isBusy: false });
+  const [state, setState] = useState<State>({ ...SIGNED_OUT, status: "checking" });
   const snapshot = useSyncExternalStore(
     (listener) => sync.subscribe(listener),
     () => sync.snapshot,
@@ -36,12 +46,12 @@ export function useAccount(api: AccountApi, store: ProgressStore, sync: Progress
       const me = await api.me();
       if (!isCurrent) return;
       if (!me.ok || me.value === null) {
-        setState({ status: "anonymous", account: null, problem: null, isBusy: false });
+        setState(SIGNED_OUT);
         return;
       }
       const saved = await api.loadProgress();
       if (!isCurrent) return;
-      setState({ status: "signed-in", account: me.value, problem: null, isBusy: false });
+      setState({ status: "signed-in", account: me.value.account, entitlements: me.value.entitlements, problem: null, isBusy: false });
       if (saved.ok) await sync.signedIn(saved.value);
     };
     // restore() reports every outcome through state; there's no caller to hand a rejection to.
@@ -59,10 +69,13 @@ export function useAccount(api: AccountApi, store: ProgressStore, sync: Progress
         setState((current) => ({ ...current, isBusy: false, problem: outcome.problem }));
         return;
       }
-      setState({ status: "signed-in", account: outcome.value.account, problem: null, isBusy: false });
+      setState({ status: "signed-in", account: outcome.value.account, entitlements: null, problem: null, isBusy: false });
       await sync.signedIn(outcome.value.progress);
+      // Sign-in doesn't carry entitlements; ask once, so a returning Pro player has their perks straight away.
+      const me = await api.me();
+      if (me.ok && me.value) setState((current) => ({ ...current, entitlements: me.value?.entitlements ?? null }));
     },
-    [sync],
+    [api, sync],
   );
 
   const signUp = useCallback((username: string, password: string) => enter(() => api.signUp(username, password, store.load())), [api, enter, store]);
@@ -75,7 +88,7 @@ export function useAccount(api: AccountApi, store: ProgressStore, sync: Progress
       return;
     }
     sync.signedOut();
-    setState({ status: "anonymous", account: null, problem: null, isBusy: false });
+    setState(SIGNED_OUT);
   }, [api, sync]);
 
   return { ...state, sync: snapshot.status, signUp, signIn, signOut };

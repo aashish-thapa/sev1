@@ -4,23 +4,29 @@ import {
   AuthResponseSchema,
   ErrorResponseSchema,
   MeResponseSchema,
+  NO_ENTITLEMENTS,
   RejectedSaveSchema,
   SaveResponseSchema,
   SyncedProgressSchema,
   type Account,
   type ApiError,
+  type Entitlements,
   type SyncedProgress,
 } from "./account-protocol.ts";
 
 /** Why a call didn't succeed: an answer from the server, or no answer at all. */
 export type AccountProblem = { readonly error: ApiError | "offline"; readonly message: string };
+/** The signed-in account and its entitlements, as /api/me reports them. */
+export type Me = { readonly account: Account; readonly entitlements: Entitlements };
+
 export type Outcome<Value> = { readonly ok: true; readonly value: Value } | { readonly ok: false; readonly problem: AccountProblem };
 export type SignedIn = { readonly account: Account; readonly progress: SyncedProgress | null };
 export type SaveOutcome = { readonly ok: true; readonly updatedAt: number } | { readonly ok: false; readonly current: SyncedProgress | null } | { readonly ok: false; readonly problem: AccountProblem };
 
 /** The account server as the browser sees it. */
 export interface AccountApi {
-  me(): Promise<Outcome<Account | null>>;
+  /** Who's signed in and what they've paid for; null when signed out. */
+  me(): Promise<Outcome<Me | null>>;
   signUp(username: string, password: string, progress: Progress): Promise<Outcome<SignedIn>>;
   signIn(username: string, password: string): Promise<Outcome<SignedIn>>;
   signOut(): Promise<Outcome<null>>;
@@ -40,7 +46,9 @@ export class HttpAccountApi implements AccountApi {
 
   async me() {
     const result = await this.call("GET", "/me", MeResponseSchema);
-    return result.ok ? { ok: true as const, value: result.value.account } : result;
+    if (!result.ok) return result;
+    const { account, entitlements } = result.value;
+    return { ok: true as const, value: account ? { account, entitlements: entitlements ?? NO_ENTITLEMENTS } : null };
   }
 
   signUp(username: string, password: string, progress: Progress) {

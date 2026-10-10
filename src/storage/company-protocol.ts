@@ -118,6 +118,8 @@ export const MyCompanySchema = z.object({
   dividends: z.array(z.lazy(() => PendingDividendSchema)).default([]),
   /** Your proposals to invest, waiting for a founder's answer. */
   proposals: z.array(z.lazy(() => MyProposalSchema)).default([]),
+  /** Investments being negotiated in person, as founder or investor. */
+  deals: z.array(z.lazy(() => DealSchema)).default([]),
 });
 export type MyCompany = z.output<typeof MyCompanySchema>;
 
@@ -189,6 +191,8 @@ export const CompanySummarySchema = z.object({
   valuationHistory: z.array(z.object({ workDay: Count, valuationCents: Cents })).max(30).default([]),
   /** Change over the last 7 work days in basis points; null until it has a week behind it. */
   weekChangeBps: z.int().nullable().default(null),
+  /** What the latest closed investment said the company was worth, and when; null before any. */
+  lastRound: z.object({ valuationCents: Cents, workDay: Count, at: z.number() }).nullable().default(null),
 });
 export type CompanySummary = z.output<typeof CompanySummarySchema>;
 
@@ -340,3 +344,38 @@ export type InvestmentProposal = z.output<typeof InvestmentProposalSchema>;
 /** A proposal as the player who made it sees it. */
 export const MyProposalSchema = InvestmentProposalSchema.extend({ companyId: z.string(), companyName: z.string() });
 export type MyProposal = z.output<typeof MyProposalSchema>;
+
+// ── Deals: investments agreed in a meeting ─────────────────────────
+
+export const DEALS_PATH = "/api/deals";
+
+const TermsSchema = z.object({ amountCents: Cents, equityBps: Bps });
+
+/**
+ * An investment being negotiated face to face in the company's office (see domain/company/deal.ts).
+ * Accepting a proposal or making an offer opens one; it closes when both agree to the same terms.
+ */
+export const DealSchema = z.object({
+  id: z.string(),
+  companyId: z.string(),
+  companyName: z.string(),
+  founder: z.string(),
+  investor: z.string(),
+  terms: TermsSchema,
+  stage: z.enum(["talking", "agreed", "walked-away"]),
+  /** Who has agreed to the terms on the table, while talking. */
+  agreed: z.array(z.enum(["founder", "investor"])).max(2),
+  /** Once agreed: the spend the investor's wallet makes for exactly these terms. */
+  investRef: z.string().nullable(),
+  createdAt: z.number(),
+});
+export type DealWire = z.output<typeof DealSchema>;
+
+/** POST /api/deals/:id/terms: new terms on the table (either side). Clears both agreements. */
+export const DealTermsRequestSchema = TermsSchema;
+/** POST /api/deals/:id/agree: agree to these terms, exactly as read; refused if they changed. */
+export const DealAgreeRequestSchema = TermsSchema;
+export type DealTerms = z.input<typeof TermsSchema>;
+
+/** POST /api/deals/:id/meeting: the office room to meet in; the investor gets in while the deal is open. */
+export const MeetingResponseSchema = z.object({ code: z.string().min(1) });

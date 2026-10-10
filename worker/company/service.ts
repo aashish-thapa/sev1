@@ -171,7 +171,8 @@ export class CompanyService {
       this.deps.hiring?.myApplications(caller.id) ?? [],
       this.deps.investors ? myInvesting(caller.id, this.deps.investors, this.deps.proposals) : { investmentOffers: [], holdings: [], dividends: [], proposals: [] },
     ]);
-    return { company: view ? await this.present(view, caller.id) : null, invitations, payouts, applications, ...investing };
+    // Deals are negotiated in person once the deal server lands; until then there are none.
+    return { company: view ? await this.present(view, caller.id) : null, invitations, payouts, applications, ...investing, deals: [] };
   }
 
   async found(caller: Caller, request: FoundRequest): Promise<Outcome<{ companyId: string; fundingRef: string; seedCents: number }>> {

@@ -26,6 +26,8 @@ function summaryOf(listing: CompanyListing): CompanySummary {
     lifetimeRevenueCents: Math.max(0, listing.lifetimeRevenueCents),
     postings: listing.postings.slice(0, POSTINGS_SHOWN).map(postingOf),
     ...valuationOf(listing.lines, listing.workDays),
+    // The latest closed round, once the directory reads closed investments.
+    lastRound: null,
   };
 }
 

@@ -6,7 +6,6 @@ import { OfficeErrorBoundary } from "../ui/OfficeErrorBoundary.tsx";
 import type { ProSale } from "../ui/ProPanel.tsx";
 import type { AdminApi } from "../storage/admin-api.ts";
 import type { CompanyApi } from "../storage/company-api.ts";
-import type { Task } from "../domain/work/task.ts";
 import { DiscussionOverlay } from "../ui/DiscussionOverlay.tsx";
 import { findScenario, soloScenarioFor, TEAM_SCENARIO } from "../warroom/scenarios/index.ts";
 import { preloadFloor } from "../warroom/ui/floorLoader.ts";
@@ -37,10 +36,9 @@ type Props = GameServices & {
   readonly proSale: ProSale;
   readonly adminApi: AdminApi;
   readonly companyApi: CompanyApi;
-  readonly tasks: readonly Task[];
 };
 
-export function App({ shareUrl, proSale, adminApi, companyApi, tasks, ...services }: Props) {
+export function App({ shareUrl, proSale, adminApi, companyApi, ...services }: Props) {
   const game = useShiftGame(services);
   useClaimGrants(useContext(AccountContext)?.pendingGrants, game.progress.wallet, game.claimGrant);
   const room = useRoom({ url: roomUrl() });
@@ -133,8 +131,6 @@ export function App({ shareUrl, proSale, adminApi, companyApi, tasks, ...service
           adminApi={adminApi}
           company={{
             api: companyApi,
-            tasks,
-            today: game.today,
             walletCents: game.progress.wallet.balanceCents,
             fundCompany: game.fundCompany,
             claimPayout: game.claimPayout,

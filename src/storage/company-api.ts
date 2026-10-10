@@ -10,6 +10,9 @@ import {
   InterviewSchema,
   POSTINGS_PATH,
   TOP_COMPANIES_PATH,
+  WORK_PATH,
+  WorkBoardSchema,
+  WorkItemSchema,
   FoundResponseSchema,
   InviteRequestSchema,
   MyCompanySchema,
@@ -21,6 +24,9 @@ import {
   type InterviewAnswers,
   type InterviewResult,
   type OpenPostingRequest,
+  type WorkAnswer,
+  type WorkBoard,
+  type WorkItem,
   type MyCompany,
   type SettleRequest,
   type WorkDaySettlement,
@@ -51,6 +57,10 @@ export interface CompanyApi {
   decide(applicationId: string, decision: "hire" | "reject"): Promise<CompanyOutcome<unknown>>;
   /** The code of the company's own office room: members only, the same for every member, never listed. */
   enterOffice(): Promise<CompanyOutcome<{ code: string }>>;
+  /** Your board for the UTC day, with each answered task's result. */
+  work(signal?: AbortSignal): Promise<CompanyOutcome<WorkBoard>>;
+  /** One attempt per task, graded on the server. */
+  answerWork(answer: WorkAnswer): Promise<CompanyOutcome<WorkItem>>;
 }
 
 const ErrorSchema = z.object({ error: z.enum(API_ERRORS), message: z.string().optional() });
@@ -107,6 +117,12 @@ export class HttpCompanyApi implements CompanyApi {
   }
   enterOffice() {
     return call(`${COMPANY_PATH}/office`, "POST", {}, OfficeSchema);
+  }
+  work(signal?: AbortSignal) {
+    return call(WORK_PATH, "GET", undefined, WorkBoardSchema, signal);
+  }
+  answerWork(answer: WorkAnswer) {
+    return call(`${WORK_PATH}/${encodeURIComponent(answer.taskId)}`, "POST", answer, WorkItemSchema);
   }
 }
 

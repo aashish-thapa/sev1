@@ -14,7 +14,6 @@ import { AdminDashboard } from "./admin/AdminDashboard.tsx";
 import { CompanyPage } from "./company/CompanyPage.tsx";
 import type { CompanyApi } from "../storage/company-api.ts";
 import type { PendingPayout } from "../storage/company-protocol.ts";
-import type { Task } from "../domain/work/task.ts";
 import { isAdmin } from "../domain/tags.ts";
 import type { AdminApi } from "../storage/admin-api.ts";
 import { LeaderboardPanel } from "./LeaderboardPanel.tsx";
@@ -32,8 +31,6 @@ type Props = {
   adminApi: AdminApi;
   company: {
     api: CompanyApi;
-    tasks: readonly Task[];
-    today: string;
     walletCents: number;
     fundCompany: (fundingRef: string, cents: number) => boolean;
     claimPayout: (payout: PendingPayout) => void;
@@ -156,8 +153,6 @@ export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, fetch
           fundCompany={company.fundCompany}
           claimPayout={company.claimPayout}
           onSignUp={() => setAccountOpen(true)}
-          tasks={company.tasks}
-          day={company.today}
           enterOffice={company.enterOffice}
         />
       ) : view === "admin" ? (

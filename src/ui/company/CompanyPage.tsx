@@ -8,7 +8,6 @@ import { ROLE_INFO } from "../../domain/roles.ts";
 import { InterviewView } from "../work/InterviewView.tsx";
 import { CompanyDirectory } from "./CompanyDirectory.tsx";
 import { MyApplications } from "./MyApplications.tsx";
-import type { Task } from "../../domain/work/task.ts";
 import { companyErrorText } from "./errors.ts";
 import { FoundCompany } from "./FoundCompany.tsx";
 import { Headquarters } from "./Headquarters.tsx";
@@ -25,10 +24,6 @@ export type CompanyPageProps = {
   /** Earns a booked salary into the wallet; claiming the same payout twice does nothing. */
   claimPayout: (payout: PendingPayout) => void;
   onSignUp: () => void;
-  /** Daily-work tasks for the HQ's board. */
-  tasks: readonly Task[];
-  /** The local day, YYYY-MM-DD. */
-  day: string;
   /** Joins the company's office room at `code`. */
   enterOffice: (code: string) => void;
 };
@@ -163,7 +158,7 @@ export function CompanyPage(props: CompanyPageProps) {
           </button>
         </section>
       ) : (
-        <Headquarters api={api} company={company} username={props.username} onChanged={refresh} tasks={props.tasks} day={props.day} enterOffice={props.enterOffice} />
+        <Headquarters api={api} company={company} username={props.username} onChanged={refresh} enterOffice={props.enterOffice} />
       )}
       {company !== null && <CompanyDirectory api={api} onApply={null} myApplications={applications} />}
     </section>

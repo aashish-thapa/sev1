@@ -18,7 +18,6 @@ import { localDateOf } from "./domain/calendar.ts";
 import { HttpAccountApi } from "./storage/account-api.ts";
 import { HttpAdminApi } from "./storage/admin-api.ts";
 import { HttpCompanyApi } from "./storage/company-api.ts";
-import { createTaskLibrary } from "./content/task-library.ts";
 import { HttpBillingApi, IS_PRO_ON_SALE } from "./storage/billing-api.ts";
 import type { ProSale } from "./ui/ProPanel.tsx";
 import { BrowserProgressStore } from "./storage/progress-store.ts";
@@ -26,8 +25,6 @@ import { BrowserChangeClock, SyncingProgressStore } from "./storage/syncing-prog
 
 const packs = import.meta.glob<unknown>("./content/packs/*.json", { eager: true, import: "default" });
 const library = createLibrary(packs, ({ path, message }) => console.error(`Skipped invalid incident pack ${path}:\n${message}`));
-const taskPacks = import.meta.glob<unknown>("./content/tasks/*.json", { eager: true, import: "default" });
-const tasks = createTaskLibrary(taskPacks, ({ path, message }) => console.error(`Skipped invalid task pack ${path}:\n${message}`));
 const storage = safeLocalStorage();
 const accounts = new HttpAccountApi();
 const store = new SyncingProgressStore(new BrowserProgressStore(storage), new BrowserChangeClock(storage), accounts);
@@ -43,7 +40,7 @@ if (!root) throw new Error("index.html is missing #root");
 
 createRoot(root).render(
   <StrictMode>
-    <Root library={library} store={store} sync={store} accounts={accounts} today={today} shareUrl={window.location.origin} proSale={proSale} adminApi={new HttpAdminApi()} companyApi={new HttpCompanyApi()} tasks={tasks} />
+    <Root library={library} store={store} sync={store} accounts={accounts} today={today} shareUrl={window.location.origin} proSale={proSale} adminApi={new HttpAdminApi()} companyApi={new HttpCompanyApi()} />
   </StrictMode>,
 );
 

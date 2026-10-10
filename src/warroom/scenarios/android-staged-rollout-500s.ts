@@ -117,7 +117,7 @@ export const androidStagedRollout500s: Scenario = {
         why: "Android 7.3.0 is the only build failing checkouts, and its new checkout client sits behind this key. Turning it off fixes phones that already updated, within about two minutes.",
       },
       { command: "releases halt android 7.3.0", why: "Stops Google Play offering 7.3.0 to anyone new until a fixed build ships. On its own it fixes nobody who already has it." },
-      { command: "releases status android", why: "FAILED on 7.3.0 falls toward 0% as apps fetch the change, and the rollout shows PAUSED." },
+      { command: "releases status android", why: "FAILED on 7.3.0 falls toward 0% as apps fetch the change, and the rollout shows HALTED." },
       { command: `remote-config history ${V2_KEY}`, why: "Turned on for the 7.3.0 rollout this morning; your change is the newest version." },
     ],
   },

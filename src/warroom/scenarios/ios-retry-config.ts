@@ -103,7 +103,7 @@ export const iosRetryConfig: Scenario = {
     { at: 45, from: "Maya Okonkwo · Support", text: "New App Store reviews: “Pay spins, then fails, and my card shows two pending charges.” All from iPhones." },
     { at: 75, from: "Sam Tan · Eng manager", text: "The gateway’s TAM says the traffic surge is long over but we’re still sending about three charge attempts per order. They’re asking us to back off." },
     { at: 105, from: "Jonah Reyes · Mobile lead (your mentor)", text: "7.3.0 reads its retry policy from remote config: remote-config get checkout_retry_policy. Halting the release won’t change phones that already have 7.3.0." },
-    { at: 150, from: "Jonah Reyes · Mobile lead (your mentor)", text: "remote-config set checkout_retry_policy backoff. Apps pick it up within about two minutes; then watch REQ/ORDER fall." },
+    { at: 150, from: "Jonah Reyes · Mobile lead (your mentor)", text: "7.3.0's retry policy lives in remote config and it's set to immediate. Switch it to a policy with backoff; apps pick it up within about two minutes, then watch REQ/ORDER fall." },
   ],
   hints: [
     "Compare how many checkout requests each app build sends for every order it takes.",

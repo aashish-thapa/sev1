@@ -29,6 +29,8 @@ export function rolloutLabel(platform: Platform): string {
       return "released (100%)";
     case "phased": {
       const percentToday = PHASED_PERCENT[Math.min(rollout.day, PHASED_PERCENT.length) - 1];
+      // Google Play's staged rollouts are a percentage and are halted, not paused; only the App Store counts days.
+      if (platform.id === "android") return `staged rollout${rollout.isPaused ? " · HALTED" : ""} · ${percentToday}%`;
       return `phased${rollout.isPaused ? " · PAUSED" : ""} · day ${rollout.day}/7 (${percentToday}%)`;
     }
     case "service-worker":

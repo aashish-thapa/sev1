@@ -93,7 +93,7 @@ export const forcedUpdateWall: Scenario = {
       "You own the iOS and Android apps: releases for builds and how each does in the field, remote-config for what installed apps do, including which builds are still allowed to run.",
   },
   suggestions: {
-    mobile: ["releases status", "remote-config list", `remote-config history ${ADDRESS_KEY}`, `remote-config set ${MIN_VERSION_KEY} 7.3.1`, `remote-config set ${ADDRESS_KEY} false`],
+    mobile: ["releases status", "remote-config list", `remote-config history ${ADDRESS_KEY}`, `remote-config set ${MIN_VERSION_KEY} 7.3.1`, `remote-config get ${MIN_VERSION_KEY}`],
   },
   opensAtSecondOfDay: 11 * HOUR,
   seed: "forced-update-wall",

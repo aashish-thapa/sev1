@@ -14,7 +14,7 @@ export const addressAutocomplete500s: Scenario = {
   severity: "SEV2",
   service: CHECKOUT,
   briefing:
-    "Since a little after 13:00, about a third of web checkouts fail with “Something went wrong” at the Pay button. The apps are fine, the payment gateway is green, and checkout-api hasn’t deployed since yesterday. Several flags changed on checkout-web this hour.",
+    "Since a little after 13:00, about a third of all checkouts fail with “Something went wrong” at the Pay button, every one of them on web. The apps are fine, the payment gateway is green, and checkout-api hasn’t deployed since yesterday. Several flags changed on checkout-web this hour.",
   roles: ["frontend"],
   roleBriefings: {
     frontend: "You own checkout-web: the flags CLI and RUM. Nothing was deployed, but flags were flipped. Work out which change broke checkout before you touch anything.",
@@ -69,7 +69,7 @@ export const addressAutocomplete500s: Scenario = {
     const flag = state.commerce && findFlag(state.commerce, AUTOCOMPLETE_FLAG);
     return !!flag && !isFlagOn(flag);
   },
-  // A third of web checkouts fail until the flag reaches every tab: a quick fix still loses ~2,000.
+  // Most web checkouts (a third of all) fail until the flag reaches every tab: a quick fix still loses ~2,000.
   lostCheckoutsPerPoint: 200,
   externals: [
     {
@@ -87,7 +87,7 @@ export const addressAutocomplete500s: Scenario = {
     { at: 55, from: "Tom Adeyemi · Web engineer", text: `I turned on ${GIFT_FLAG} at 12:58. Could that be it? Happy to switch it off.` },
     { at: 100, from: "Sam Tan · Eng manager", text: "Backend confirms checkout-api hasn’t deployed since yesterday, and its 500s are all on web. Whatever changed, changed in the browser." },
     { at: 160, from: "Nina Berg · Web engineer", text: "Address autocomplete went to 100% after lunch. QA tested it on UK addresses; it looked fine." },
-    { at: 240, from: "Elena Ruiz · VP Engineering", text: "A third of web checkouts failing for half an hour. Where are we?" },
+    { at: 240, from: "Elena Ruiz · VP Engineering", text: "A third of checkouts failing for half an hour, all on web. Where are we?" },
   ],
   hints: [
     "Not every checkout fails. Find out what the failing ones have in common.",

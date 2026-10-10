@@ -55,7 +55,7 @@ export const deadKillSwitch: Scenario = {
     "Since mid-morning, about one web checkout in four fails with “Something went wrong” after Pay. The apps are fine and checkout-api hasn’t deployed. The checkout runbook has a kill switch for card-form trouble. Find the cause before you reach for it.",
   roles: ["frontend"],
   roleBriefings: {
-    frontend: "You own checkout-web: the flags CLI and RUM. The card form changed this morning. A kill switch only helps if what it falls back to still works.",
+    frontend: "You own checkout-web: the flags CLI and RUM. The card form changed this morning; the runbook has a kill switch for it.",
   },
   suggestions: {
     frontend: ["rum errors", "rum payment-paths", "rum overview", "flags list", `flags get ${PAYMENT_ELEMENT_FLAG}`, `flags set ${PAYMENT_ELEMENT_FLAG} off`],

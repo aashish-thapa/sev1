@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { Role } from "../domain/incident.ts";
 import type { Incident } from "../warroom/incident.ts";
 import type { CommsMessage } from "../warroom/scenario.ts";
@@ -16,6 +16,7 @@ export type RoomInfo = {
   readonly seat: Seat;
   /** This player's side in a versus match; null in a co-op room. */
   readonly team: Team | null;
+  readonly mode: RoomMode;
 };
 
 export type RoomView = {
@@ -98,7 +99,31 @@ export function useRoom(options: { url: string; WebSocket?: SocketConstructor })
     [client],
   );
   const join = useCallback(
-    (roomCode: string, engineer: Engineer, resume?: Resume) => client.join({ roomCode, resume, ...engineer }),
+    (roomCode: string, engineer: Engineer, resume?: Resume, team?: Team) => client.join({ roomCode, resume, team, ...engineer }),
+    [client],
+  );
+
+  // A random match starts looking as soon as its room exists, so the first welcome pages it.
+  const isSearchPending = useRef(false);
+  useEffect(() => {
+    const offWelcome = client.on("welcome", () => {
+      if (!isSearchPending.current) return;
+      isSearchPending.current = false;
+      client.page();
+    });
+    const offStatus = client.on("status", ({ status }) => {
+      if (status === "failed" || status === "left") isSearchPending.current = false;
+    });
+    return () => {
+      offWelcome();
+      offStatus();
+    };
+  }, [client]);
+  const findOpponent = useCallback(
+    (scenarioId: string, engineer: Engineer) => {
+      isSearchPending.current = true;
+      client.create({ scenarioId, visibility: "private", mode: "matchmade", ...engineer });
+    },
     [client],
   );
   const leave = useCallback(() => client.leave(), [client]);
@@ -114,7 +139,7 @@ export function useRoom(options: { url: string; WebSocket?: SocketConstructor })
   );
   const announceMic = useCallback((isMicOn: boolean) => client.voice(isMicOn), [client]);
 
-  return { ...view, create, join, leave, run, declare, page, chat, sendPresence, sendSignal, onSignal, announceMic };
+  return { ...view, create, findOpponent, join, leave, run, declare, page, chat, sendPresence, sendSignal, onSignal, announceMic };
 }
 
 function reduce(view: RoomView, { type, event }: Event): RoomView {
@@ -125,7 +150,7 @@ function reduce(view: RoomView, { type, event }: Event): RoomView {
     case "welcome":
       return {
         ...view,
-        room: { code: event.roomCode, playerId: event.playerId, scenarioId: event.scenarioId, seat: seatOf(event), team: event.team },
+        room: { code: event.roomCode, playerId: event.playerId, scenarioId: event.scenarioId, seat: seatOf(event), team: event.team, mode: event.mode },
         players: event.players,
         comms: event.comms,
         history: event.history,

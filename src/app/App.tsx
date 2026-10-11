@@ -7,7 +7,7 @@ import type { ProSale } from "../ui/ProPanel.tsx";
 import type { AdminApi } from "../storage/admin-api.ts";
 import type { CompanyApi } from "../storage/company-api.ts";
 import { DiscussionOverlay } from "../ui/DiscussionOverlay.tsx";
-import { findScenario, soloScenarioFor, TEAM_SCENARIO } from "../warroom/scenarios/index.ts";
+import { findScenario, randomMatchScenario, soloScenarioFor, TEAM_SCENARIO } from "../warroom/scenarios/index.ts";
 import { preloadFloor } from "../warroom/ui/floorLoader.ts";
 import { WarRoomView } from "../warroom/ui/WarRoomView.tsx";
 import { useRoom } from "../multiplayer/useRoom.ts";
@@ -182,6 +182,10 @@ export function App({ shareUrl, proSale, adminApi, companyApi, ...services }: Pr
             error: room.error?.message ?? null,
             onCreate: (name, visibility, scenarioId, format) => room.create(scenarioId, { name, role, badge, avatar }, visibility, format),
             onJoin: (code, name) => room.join(code, { name, role, badge, avatar }),
+            onFindOpponent: (name) => {
+              const pick = randomMatchScenario(role, career.level, Math.random);
+              if (pick) room.findOpponent(pick.id, { name, role, badge, avatar });
+            },
             listPublic: fetchPublicRooms,
           }}
         />

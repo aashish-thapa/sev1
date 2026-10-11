@@ -74,12 +74,17 @@ export function TopRanks({ view, href }: { view: LeaderboardView; href: string }
 
 type Mode = "solo" | "host" | "join";
 
+/** Solo is your own shift, or a race against one random opponent (a bot crew when nobody's around). */
+type SoloKind = "shift" | "random";
+
 /** What the lobby can do with rooms: host one, join one, and list the open ones. */
 export type RoomActions = {
   status: string;
   error: string | null;
   onCreate: (name: string, visibility: RoomVisibility, scenarioId: string, format: RoomMode) => void;
   onJoin: (code: string, name: string) => void;
+  /** Starts a random 1v1: a matchmade room on an incident picked for this player, searching at once. */
+  onFindOpponent: (name: string) => void;
   listPublic: ListPublicRooms;
 };
 
@@ -98,6 +103,7 @@ type ModeCardProps = {
 /** Bottom right: pick a role and a way to play, then START. */
 export function ModeCard({ role, onRole, name, onName, onSolo, incidents, rooms }: ModeCardProps) {
   const [mode, setMode] = useState<Mode>("solo");
+  const [soloKind, setSoloKind] = useState<SoloKind>("shift");
   const [visibility, setVisibility] = useState<RoomVisibility>("private");
   const [format, setFormat] = useState<RoomMode>("coop");
   // The list follows role and level, so a pick it no longer holds falls back to the first: the cross-team incident.
@@ -106,11 +112,14 @@ export function ModeCard({ role, onRole, name, onName, onSolo, incidents, rooms 
   const [code, setCode] = useState("");
   const publicRooms = usePublicRooms(rooms.listPublic, mode === "join");
   const isBusy = rooms.status === "connecting";
-  const needsName = mode !== "solo" && !name;
+  const isRoomBound = mode !== "solo" || soloKind === "random";
+  const needsName = isRoomBound && !name;
 
   const start = () => {
-    if (mode === "solo") onSolo();
-    else if (mode === "host") rooms.onCreate(name, visibility, incident.id, format);
+    if (mode === "solo" && soloKind === "shift") onSolo();
+    else if (mode === "solo") rooms.onFindOpponent(name);
+    // Matchmade rooms are never listed, so only the code brings friends in.
+    else if (mode === "host") rooms.onCreate(name, format === "matchmade" ? "private" : visibility, incident.id, format);
     else if (code.length === 4) rooms.onJoin(code, name);
   };
   const canStart = !isBusy && !needsName && (mode !== "join" || code.length === 4);
@@ -134,7 +143,16 @@ export function ModeCard({ role, onRole, name, onName, onSolo, incidents, rooms 
       </div>
 
       <div className="mode-card__detail">
-        {mode === "solo" && <p>Your shift, colleagues on the other roles.</p>}
+        {mode === "solo" && (
+          <div className="mode-card__choice" role="radiogroup" aria-label="Solo play">
+            {(["shift", "random"] as const).map((option) => (
+              <button key={option} type="button" role="radio" aria-checked={soloKind === option} className="mode-card__pill" onClick={() => setSoloKind(option)}>
+                {option === "shift" ? "Shift" : "Random 1v1"}
+              </button>
+            ))}
+          </div>
+        )}
+        {mode === "solo" && <p>{soloKind === "shift" ? "Your shift, colleagues on the other roles." : "Race a random opponent on the same incident, or a bot crew if nobody's around."}</p>}
         {mode === "host" && (
           <div className="mode-card__choice" role="radiogroup" aria-label="Incident">
             {incidents.map((candidate) => (
@@ -153,7 +171,7 @@ export function ModeCard({ role, onRole, name, onName, onSolo, incidents, rooms 
             ))}
           </div>
         )}
-        {mode === "host" && (
+        {mode === "host" && format !== "matchmade" && (
           <div className="mode-card__choice" role="radiogroup" aria-label="Who can join">
             {(["private", "public"] as const).map((option) => (
               <button key={option} type="button" role="radio" aria-checked={visibility === option} className="mode-card__pill" onClick={() => setVisibility(option)}>
@@ -192,7 +210,7 @@ export function ModeCard({ role, onRole, name, onName, onSolo, incidents, rooms 
             )}
           </>
         )}
-        {onName && mode !== "solo" && (
+        {onName && isRoomBound && (
           <input className="mode-card__name" value={name} maxLength={24} autoComplete="nickname" placeholder="Your name" aria-label="Your name in rooms" onChange={(event) => onName(event.target.value)} />
         )}
       </div>
@@ -253,6 +271,6 @@ export function CharacterPicker({
   );
 }
 
-const FORMAT_LABEL: Readonly<Record<RoomMode, string>> = { coop: "Co-op", versus: "Versus · red vs blue", matchmade: "Random opponents" };
+const FORMAT_LABEL: Readonly<Record<RoomMode, string>> = { coop: "Co-op", versus: "Versus by code", matchmade: "Random opponents" };
 
 const POSE_LABEL: Readonly<Record<Pose, string>> = { idle: "Standing", phone: "On the phone", talk: "Talking" };

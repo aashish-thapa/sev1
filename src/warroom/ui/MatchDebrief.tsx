@@ -1,14 +1,17 @@
 import { ROLE_INFO } from "../../domain/roles.ts";
 import type { RoomView } from "../../multiplayer/useRoom.ts";
-import { outcomeFor, type MatchOutcome } from "../match-view.ts";
+import { laneName, outcomeFor, type MatchOutcome } from "../match-view.ts";
 import { mostValuable, type Scorecard } from "../scorecard.ts";
-import { TEAM_LABEL, type Team, type Winner } from "../versus.ts";
+import type { LaneStanding, Team, Winner } from "../versus.ts";
 
-function headline(outcome: MatchOutcome, winner: Winner): string {
-  if (outcome === "won") return "Your team won";
-  if (outcome === "lost") return "Your team lost";
-  if (outcome === "draw" || winner === "draw") return "Dead heat: a draw";
-  return `${TEAM_LABEL[winner]} won`;
+function headline(outcome: MatchOutcome, winner: Winner, lanes: readonly LaneStanding[], team: Team | null): string {
+  const isVersusBots = lanes.some((lane) => lane.team !== team && lane.crew === "bots");
+  const against = isVersusBots && team !== null ? " vs the bot crew" : "";
+  if (outcome === "won") return `Your team won${against}`;
+  if (outcome === "lost") return `Your team lost${against}`;
+  if (outcome === "draw" || winner === "draw") return `Dead heat: a draw${against}`;
+  const winning = lanes.find((lane) => lane.team === winner);
+  return `${winning ? laneName(winning) : winner} won`;
 }
 
 /** The verdict on a versus match, once it's decided: who won, and each side's points. */
@@ -18,12 +21,12 @@ export function MatchResult({ match, team }: { match: NonNullable<RoomView["matc
   const outcome = outcomeFor(winner, team);
   return (
     <section className="match-result" data-outcome={outcome} aria-label="Match result">
-      <h2 className="match-result__headline">{headline(outcome, winner)}</h2>
+      <h2 className="match-result__headline">{headline(outcome, winner, match.lanes, team)}</h2>
       <dl className="match-result__lanes">
         {match.lanes.map((lane) => (
           <div key={lane.team} data-team={lane.team} aria-current={lane.team === team ? "true" : undefined}>
             <dt>
-              {TEAM_LABEL[lane.team]}
+              {laneName(lane)}
               {lane.team === winner && " ★"}
             </dt>
             <dd>{lane.finish ? `${lane.finish.points} pts` : "Didn't close"}</dd>

@@ -136,6 +136,7 @@ export class Room {
       comms: [...this.comms],
       history: [...seat.history],
       phase: this.phase,
+      team: null,
     });
     this.send(seat, { type: "state", frame: encodeFrame(null, this.incident) });
     if (this.incident.phase.name === "closed") this.send(seat, this.closedMessage());
@@ -334,6 +335,7 @@ export class Room {
         ifPostmortemCorrect: debrief(this.incident, this.scenario, true),
         ifPostmortemWrong: debrief(this.incident, this.scenario, false),
       },
+      scorecard: [],
     };
   }
 

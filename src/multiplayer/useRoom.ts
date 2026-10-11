@@ -29,6 +29,10 @@ export type RoomView = {
   /** What everyone else is running, newest last. */
   readonly activity: readonly ServerMessageOf<"activity">[];
   readonly debrief: ServerMessageOf<"closed">["debrief"] | null;
+  /** What each engineer did, once the incident has closed. */
+  readonly scorecard: ServerMessageOf<"closed">["scorecard"];
+  /** A versus match's latest standings; null in a co-op room. */
+  readonly match: Omit<ServerMessageOf<"match">, "type"> | null;
   /** The last error the server reported; a failed handshake also lands here. */
   readonly error: ServerMessageOf<"error"> | null;
 };
@@ -47,6 +51,8 @@ const INITIAL_VIEW: RoomView = {
   comms: [],
   activity: [],
   debrief: null,
+  scorecard: [],
+  match: null,
   error: null,
 };
 
@@ -75,6 +81,7 @@ export function useRoom(options: { url: string; WebSocket?: SocketConstructor })
       forward("error"),
       forward("closed"),
       forward("phase"),
+      forward("match"),
     ];
     return () => {
       for (const off of unsubscribe) off();
@@ -124,7 +131,7 @@ function reduce(view: RoomView, { type, event }: Event): RoomView {
       };
     case "phase":
       // A new incident (or a quiet office) starts every laptop clean; chat history stays.
-      return { ...view, phase: event.phase, terminal: [], activity: [], debrief: null };
+      return { ...view, phase: event.phase, terminal: [], activity: [], debrief: null, scorecard: [] };
     case "incident":
       return { ...view, incident: event };
     case "players":
@@ -143,7 +150,9 @@ function reduce(view: RoomView, { type, event }: Event): RoomView {
     case "error":
       return { ...view, error: event };
     case "closed":
-      return { ...view, debrief: event.debrief };
+      return { ...view, debrief: event.debrief, scorecard: event.scorecard };
+    case "match":
+      return { ...view, match: { stage: event.stage, lanes: event.lanes } };
   }
 }
 

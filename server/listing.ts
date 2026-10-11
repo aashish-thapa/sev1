@@ -17,6 +17,7 @@ export function publicListing(room: Room, listing: RoomListing): PublicRoom | nu
     players,
     maxPlayers: MAX_PLAYERS_PER_ROOM,
     scenarioTitle: room.scenario.title,
+    mode: "coop",
     openedAt: listing.openedAt,
   };
 }

@@ -31,6 +31,8 @@ export default defineConfig({
         // The 3D hall is ~1 MB; fetch it the first time someone walks the floor, not on install.
         // People, props and surfaces (~25 MB) load when the office opens and are cached as they arrive.
         globIgnores: ["**/FloorView-*.js", "office/**"],
+        // ponytail: every War Room is bundled into the main chunk (~2.3 MB); split the scenarios into a lazy chunk and drop this back to the 2 MiB default.
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         runtimeCaching: [
           {
             urlPattern: ({ url }) => url.pathname.startsWith("/office/"),

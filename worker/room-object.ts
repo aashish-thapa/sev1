@@ -3,9 +3,10 @@ import { DurableObject } from "cloudflare:workers";
 import { encodeServerMessage, ROOM_CODE_QUERY } from "../src/multiplayer/protocol.ts";
 import { publicListing, type RoomListing } from "../server/listing.ts";
 import { DEFAULT_ROOM_TIMING, Room, type Connection } from "../server/room.ts";
+import { officePaging } from "../server/paging.ts";
 import { findScenario } from "../server/scenarios.ts";
 import { openSession, type RoomDirectory } from "../server/session.ts";
-import { IDENTITY_TAGS_HEADER } from "./rooms.ts";
+import { IDENTITY_TAGS_HEADER, IDENTITY_USER_HEADER, OFFICE_SCENARIO_HEADER, VISITOR_HEADER } from "./rooms.ts";
 import { DIRECTORY_NAME } from "./directory-object.ts";
 import type { Env } from "./env.ts";
 import { workerLogger } from "./log.ts";
@@ -24,12 +25,19 @@ export class RoomObject extends DurableObject<Env> {
   private listing: RoomListing | null = null;
   private claimedCode: string | null = null;
   private expiry: ReturnType<typeof setTimeout> | null = null;
+  /** Signed-in players with a socket open here, by user id, one count per socket. */
+  private readonly present = new Map<string, number>();
 
   /** Reserves this object for a new room; false when the code is already in use. */
   claim(code: string): boolean {
     if (this.claimedCode !== null || this.room !== null) return false;
     this.claimedCode = code;
     return true;
+  }
+
+  /** Who's connected right now, by user id; the worker asks before letting a deal close in a meeting. */
+  presentUsers(): string[] {
+    return [...this.present.keys()];
   }
 
   override fetch(request: Request): Response {
@@ -45,7 +53,8 @@ export class RoomObject extends DurableObject<Env> {
       },
       close: (closeCode, reason) => socket.close(closeCode, reason),
     };
-    const session = openSession({ connection, rooms: this.directory(code), findScenario, logger: workerLogger, identity: { tags: tagsOf(request) } });
+    const officeScenario = request.headers.get(OFFICE_SCENARIO_HEADER);
+    const session = openSession({ connection, rooms: this.directory(code, officeScenario), findScenario, logger: workerLogger, identity: { tags: tagsOf(request), isVisitor: request.headers.get(VISITOR_HEADER) === "1" } });
     const bytes = new TextEncoder();
     socket.addEventListener("message", (event) => {
       if (typeof event.data !== "string") {
@@ -54,13 +63,27 @@ export class RoomObject extends DurableObject<Env> {
       }
       session.receive(event.data, bytes.encode(event.data).byteLength);
     });
-    socket.addEventListener("close", () => session.end());
-    socket.addEventListener("error", () => session.end());
+    const userId = request.headers.get(IDENTITY_USER_HEADER) ?? "";
+    if (userId) this.present.set(userId, (this.present.get(userId) ?? 0) + 1);
+    let isGone = false;
+    const leave = () => {
+      session.end();
+      if (isGone || !userId) return;
+      isGone = true;
+      const count = (this.present.get(userId) ?? 1) - 1;
+      if (count > 0) this.present.set(userId, count);
+      else this.present.delete(userId);
+    };
+    socket.addEventListener("close", leave);
+    socket.addEventListener("error", leave);
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  /** This object holds at most one room: the one it was claimed for. */
-  private directory(code: string): RoomDirectory {
+  /**
+   * This object holds at most one room: the one it was claimed for. A company office (the worker vouches with
+   * `officeScenario`) opens on the first member's join, and again after it empties out and closes.
+   */
+  private directory(code: string, officeScenario: string | null): RoomDirectory {
     return {
       create: (scenario, visibility) => {
         if (this.room !== null || this.claimedCode !== code) return null;
@@ -69,7 +92,16 @@ export class RoomObject extends DurableObject<Env> {
         workerLogger("info", "room_created", { room: code, scenario: scenario.id, visibility });
         return this.room;
       },
-      find: (candidate) => (this.room?.code === candidate ? this.room : undefined),
+      find: (candidate) => {
+        if (this.room?.code === candidate) return this.room;
+        const scenario = officeScenario && candidate === code && this.room === null ? findScenario(officeScenario) : undefined;
+        if (!scenario) return undefined;
+        this.listing = { visibility: "private", openedAt: Date.now() };
+        // An office is calm when members walk in; the pager goes off a few minutes later.
+        this.room = new Room(code, scenario, DEFAULT_ROOM_TIMING, workerLogger, (room) => this.occupancyChanged(room), officePaging(Math.random));
+        workerLogger("info", "office_opened", { room: code, scenario: scenario.id });
+        return this.room;
+      },
     };
   }
 

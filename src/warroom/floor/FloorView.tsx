@@ -1,6 +1,6 @@
 import { PerformanceMonitor } from "@react-three/drei";
 import { Canvas, useFrame, type ThreeEvent } from "@react-three/fiber";
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type RefObject } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type RefObject } from "react";
 import { edgeHealth, sameNode, type NodeId } from "../health.ts";
 import { alertRate } from "../incident.ts";
 import type { CommsMessage, Scenario } from "../scenario.ts";
@@ -10,10 +10,15 @@ import { AgXToneMapping, NoToneMapping } from "three";
 import { Effects } from "./environment/Effects.tsx";
 import { pinnedQuality, QUALITY, readDeviceHints, startingQuality, type Quality } from "./environment/quality.ts";
 import { Laptop } from "./Laptop.tsx";
-import { layoutHall, obstaclesOf, rowSigns, type Rack } from "./layout.ts";
+import { layoutHall, obstaclesOf, rowSigns, type Footprint, type Rack } from "./layout.ts";
 import { Office } from "./Office.tsx";
 import type { Role } from "../../domain/incident.ts";
-import { BUILDING, DATACENTRE_ORIGIN, officeObstacles, PLAYER_DESK, screenFootprint, spawnFor, WALL_SCREENS, type WallScreen } from "./office.ts";
+import { BUILDING, DATACENTRE_ORIGIN, PEOPLE, screenFootprint, spawnFor, WALL_SCREENS, type Desk, type Person, type WallScreen } from "./office.ts";
+import { CompanyFixtures } from "./company-office/CompanyFixtures.tsx";
+import { useLaptopApps } from "../ui/laptop-apps.ts";
+import { CompanyOfficeContext, OfficePlanContext, type CompanyOfficeVisit } from "./company-office/context.ts";
+import { boardFigures, myDeskIn, officePlan, planObstacles } from "./company-office/plan.ts";
+import { ROOM_KIND_IDS, SERVER_TIER_IDS, type RoomKindId, type ServerTierId } from "../../domain/company/catalog.ts";
 import { whereabouts, type Whereabouts } from "./whereabouts.ts";
 import { useCareer } from "../../app/career-context.ts";
 import { BrewingCup } from "./interactions/BrewingCup.tsx";
@@ -31,7 +36,7 @@ import { BITES_PER_SNACK } from "./interactions/snack.ts";
 import { DeskLeftovers } from "./pantry/DeskLeftovers.tsx";
 import { DeskClutter } from "./pantry/DeskClutter.tsx";
 import { MachineAtWork } from "./pantry/MachineAtWork.tsx";
-import { useSeating } from "./interactions/useSeating.ts";
+import { freeDesks, useSeating } from "./interactions/useSeating.ts";
 import { hasPresenceChanged, presenceOf, type PlayerPresence } from "./interactions/presence.ts";
 import { useSmallTalk } from "./interactions/useSmallTalk.ts";
 import { useStandup } from "./interactions/useStandup.ts";
@@ -64,6 +69,8 @@ type Props = {
   /** Player pressed E at a wall screen. */
   onUseScreen: (screen: WallScreen) => void;
   onToggleLaptop: () => void;
+  /** Opens the laptop on one of the place's own apps (see LaptopAppsContext), by its id. */
+  onOpenApp?: (appId: string) => void;
   /** Fired when the player's zone or nearness to the racks changes — drives the soundscape. */
   onWhereabouts?: (where: Whereabouts) => void;
   /** Fired once per stride while walking. */
@@ -79,6 +86,10 @@ type Props = {
   isPaged?: boolean;
 };
 
+const NO_COLLEAGUES: readonly Person[] = [];
+/** The company laptop app where clocking out (the work-day summary) lives. */
+const OFFICE_APP_ID = "office";
+
 const STRIDE_METRES = 0.72;
 
 const STILL: Intent = { forward: 0, strafe: 0, yawDelta: 0, pitchDelta: 0 };
@@ -86,9 +97,14 @@ const STILL: Intent = { forward: 0, strafe: 0, yawDelta: 0, pitchDelta: 0 };
 const LOOK_SPEED = 0.0045;
 const CLICK_REACH = 4.5;
 const DRAG_SLOP = 6;
-function startFor(role: Role): Player {
-  const spot = spawnFor(role);
+function startFor(role: Role, companyDesk: Desk | null): Player {
+  const spot = companyDesk ? behind(companyDesk) : spawnFor(role);
   return devSpawnOverride() ?? { x: spot.x, z: spot.z, yaw: spot.yaw, pitch: -0.05 };
+}
+
+/** Standing behind your chair, looking at your monitors: where a company member walks in to work. */
+function behind(desk: Desk): { x: number; z: number; yaw: number } {
+  return { x: desk.x, z: desk.z - desk.facing * 1.3, yaw: desk.facing === -1 ? 0 : Math.PI };
 }
 
 /** Development only: `?at=<screen id>` or `?at=x,z,yaw` drops you there (stripped from production builds). */
@@ -103,6 +119,20 @@ function devSpawnOverride(): Player | null {
   return { x: screen.x + nx * 1.6, z: screen.z + nz * 1.6, yaw: Math.atan2(nx, nz), pitch: 0 };
 }
 
+/**
+ * Development only: `?company=bay,bay,server-room:small,medium,large` walks you into a company office
+ * with those rooms and servers, as its founder (stripped from production builds).
+ */
+function devCompanyOverride(): CompanyOfficeVisit | null {
+  if (!import.meta.env.DEV) return null;
+  const spec = new URLSearchParams(window.location.search).get("company");
+  if (spec === null) return null;
+  const [roomList = "", serverList = ""] = spec.split(":");
+  const rooms = roomList.split(",").filter((id): id is RoomKindId => (ROOM_KIND_IDS as readonly string[]).includes(id));
+  const servers = serverList.split(",").filter((id): id is ServerTierId => (SERVER_TIER_IDS as readonly string[]).includes(id));
+  return { company: { name: "Dev Co", category: "ecommerce", fundsCents: 1_234_500, rooms, servers, members: [{ username: "you", role: "infrastructure", payCents: 12_000, isFounder: true, joinedAt: 0, canHire: true }] }, me: "you" };
+}
+
 type Controls = {
   keys: Set<string>;
   stick: { x: number; y: number };
@@ -112,9 +142,19 @@ type Controls = {
 };
 
 /** Walkable server hall. Each rack is a live object in the same simulation as the terminal. */
-export default function FloorView({ cluster, scenario, role, selected, comms, isLaptopOpen, isOverlayOpen, panic, laptopScreenRef, onInspect, onUseScreen, onToggleLaptop, onWhereabouts, onStep, teammates = [], onPresence, selfAvatarSeed, isPaged = false }: Props) {
+export default function FloorView({ cluster, scenario, role, selected, comms, isLaptopOpen, isOverlayOpen, panic, laptopScreenRef, onInspect, onUseScreen, onToggleLaptop, onOpenApp, onWhereabouts, onStep, teammates = [], onPresence, selfAvatarSeed, isPaged = false }: Props) {
   const wrapper = useRef<HTMLDivElement>(null);
-  const [start] = useState(() => startFor(role));
+  // A company's own office (only the rooms it bought, only its members), or the whole building.
+  const [devOffice] = useState(devCompanyOverride);
+  const office = useContext(CompanyOfficeContext) ?? devOffice;
+  const company = office?.company ?? null;
+  const plan = useMemo(() => officePlan(company), [company]);
+  const board = useMemo(() => (company ? boardFigures(company) : null), [company]);
+  const hasOfficeApp = useLaptopApps().some((app) => app.id === OFFICE_APP_ID);
+  const myDesk = useMemo(() => myDeskIn(plan, office?.me ?? null), [office?.me, plan]);
+  const free = useMemo(() => freeDesks(plan.desks, plan.hasColleagues), [plan]);
+  const walls = useMemo(() => planObstacles(plan), [plan]);
+  const [start] = useState(() => startFor(role, company ? myDesk : null));
   const isLaptopOpenRef = useRef(isLaptopOpen);
   // Only the laptop (not overlays or the note wall) shows on your body for teammates.
   const isOnLaptopRef = useRef(isLaptopOpen);
@@ -151,7 +191,7 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
   const [focusedKey, setFocusedKey] = useState<string | null>(null);
   const getPlayer = useCallback(() => controls.current.player, []);
   const career = useCareer();
-  const seating = useSeating(getPlayer);
+  const seating = useSeating(getPlayer, free, myDesk);
   const readStance = seating.readStance;
   const hands = useHands();
   const readHolding = hands.holding;
@@ -171,11 +211,16 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
       ...WALL_SCREENS.map((screen) => ({ key: screen.id, footprint: screenFootprint(screen), verb: "Discuss at", label: screen.title.split(" · ")[0], use: () => onUseScreen(screen) })),
       ...seating.usables,
       ...hands.usables,
-      ...smallTalk.usables,
+      // Small talk and the stand-up are with the office's colleagues; a company's office has none.
+      ...(plan.hasColleagues ? smallTalk.usables : []),
       ...noteWall.usables,
-      ...standup.usables,
+      ...(plan.hasColleagues ? standup.usables : []),
+      // Clocking out is done at the office: the punch clock opens the laptop on the company's office app.
+      ...(plan.fixtures && hasOfficeApp && onOpenApp
+        ? [{ key: "punch-clock", footprint: plan.fixtures.punchClock, verb: "Clock out", label: "", use: () => onOpenApp(OFFICE_APP_ID) }]
+        : []),
     ],
-    [hands.usables, inspect, noteWall.usables, onUseScreen, racks, seating.usables, smallTalk.usables, standup.usables],
+    [hands.usables, hasOfficeApp, inspect, noteWall.usables, onOpenApp, onUseScreen, plan.fixtures, plan.hasColleagues, racks, seating.usables, smallTalk.usables, standup.usables],
   );
   // Sitting, the only thing to do with E is get up again.
   const focused = seating.standUsable ?? usables.find((usable) => usable.key === focusedKey) ?? null;
@@ -287,9 +332,9 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
       event.stopPropagation();
       const { player, dragDistance } = controls.current;
       if (dragDistance > DRAG_SLOP || isLaptopOpen) return;
-      if (Math.hypot(PLAYER_DESK.x - player.x, PLAYER_DESK.z - player.z) <= CLICK_REACH) onToggleLaptop();
+      if (Math.hypot(myDesk.x - player.x, myDesk.z - player.z) <= CLICK_REACH) onToggleLaptop();
     },
-    [isLaptopOpen, onToggleLaptop],
+    [isLaptopOpen, myDesk, onToggleLaptop],
   );
   const rig = useMemo<RigControl>(
     () => ({ stance: seating.readStance, takeTeleport: seating.takeTeleport, pace: hands.pace, standUp: seating.stand }),
@@ -304,9 +349,10 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
       const { player, dragDistance } = controls.current;
       if (dragDistance > DRAG_SLOP) return;
       const distance = Math.hypot(rack.footprint.x - player.x, rack.footprint.z - player.z);
-      if (distance <= CLICK_REACH) inspect(rack);
+      // A shut data centre still runs production: you read its racks through the glass, from wherever you can see them.
+      if (distance <= CLICK_REACH || !plan.isDataCentreOpen) inspect(rack);
     },
-    [inspect],
+    [inspect, plan.isDataCentreOpen],
   );
 
   const capacity = cluster.database.maxConnections - cluster.database.reservedConnections;
@@ -345,14 +391,25 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
       >
         <color attach="background" args={[0, 0, 0]} />
         <PerformanceMonitor onDecline={stepDown} onFallback={stepDown} />
+        <OfficePlanContext value={plan}>
         <Office panic={panic} reduceMotion={reduceMotion} hasShadows={settings.hasShadows} />
-        <People comms={comms} now={cluster.t} getPlayer={getPlayer} reduceMotion={reduceMotion} panic={panic} teammates={teammates} conversation={smallTalk.conversation} />
+        <CompanyFixtures board={board} />
+        <People
+          comms={comms}
+          now={cluster.t}
+          getPlayer={getPlayer}
+          reduceMotion={reduceMotion}
+          panic={panic}
+          teammates={teammates}
+          conversation={smallTalk.conversation}
+          people={plan.hasColleagues ? PEOPLE : NO_COLLEAGUES}
+        />
         <Teammates teammates={teammates} reduceMotion={reduceMotion} />
         <SelfBody seed={selfAvatarSeed} getPlayer={getPlayer} getStance={seating.readStance} reduceMotion={reduceMotion} />
-        <MyDesk role={role} onOpenTerminal={openTerminalAtDesk} />
+        <MyDesk role={role} desk={myDesk} onOpenTerminal={openTerminalAtDesk} />
         <PinnedNotes notes={noteWall.notes} />
         {cup.kind === "brewing" && hands.machine && <BrewingCup machine={hands.machine} reduceMotion={reduceMotion} />}
-        <MachineAtWork getPlayer={getPlayer} isPlayerBrewing={cup.kind === "brewing"} reduceMotion={reduceMotion} />
+        {plan.hasColleagues && <MachineAtWork getPlayer={getPlayer} isPlayerBrewing={cup.kind === "brewing"} reduceMotion={reduceMotion} />}
         <HeldCup isHeld={cup.kind === "holding"} sips={cup.kind === "holding" ? SIPS_PER_CUP - cup.sipsLeft : 0} isHandsBusy={isLaptopOpen} reduceMotion={reduceMotion} />
         <HeldSnack
           item={snack.kind === "holding" ? snack.item : null}
@@ -360,8 +417,8 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
           isHandsBusy={isLaptopOpen}
           reduceMotion={reduceMotion}
         />
-        <DeskLeftovers leftovers={hands.leftovers} />
-        <DeskClutter />
+        <DeskLeftovers leftovers={hands.leftovers} desk={myDesk} />
+        {plan.hasColleagues && <DeskClutter />}
         {racks.map((rack) => (
           <RackModel
             key={rack.key}
@@ -379,7 +436,8 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
         <Beacon health={edgeHealth(cluster, scenario)} reduceMotion={reduceMotion} x={DATACENTRE_ORIGIN.x} z={DATACENTRE_ORIGIN.z} />
         <Laptop isOpen={isLaptopOpen} reduceMotion={reduceMotion} screenRef={laptopScreenRef} />
         {settings.hasEffects && <Effects />}
-        <PlayerRig start={start} racks={racks} usables={usables} readIntent={readIntent} onMove={onPlayerMove} onFocus={setFocusedKey} tremor={reduceMotion ? 0 : panic} control={rig} reduceMotion={reduceMotion} />
+        <PlayerRig start={start} racks={racks} walls={walls} usables={usables} readIntent={readIntent} onMove={onPlayerMove} onFocus={setFocusedKey} tremor={reduceMotion ? 0 : panic} control={rig} reduceMotion={reduceMotion} />
+        </OfficePlanContext>
       </Canvas>
 
       {!isBusy && <Stick onMove={moveStick} />}
@@ -392,7 +450,7 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
         <LifeHud
           held={cup.kind === "holding" ? "coffee" : snack.kind === "holding" ? "snack" : null}
           onConsume={hands.consume}
-          standup={standup.notice}
+          standup={plan.hasColleagues ? standup.notice : null}
           wellbeing={hands.wellbeing}
           reduceMotion={reduceMotion}
         />
@@ -447,6 +505,8 @@ function rememberControlsLearned(): void {
 type RigProps = {
   start: Player;
   racks: readonly Rack[];
+  /** Everything static in this office: walls, desk clusters, furniture, the company's racks. */
+  walls: readonly Footprint[];
   usables: readonly Usable[];
   /** Pulls (and consumes) this frame's movement intent from whoever owns the input. */
   readIntent: (seconds: number) => Intent;
@@ -458,10 +518,10 @@ type RigProps = {
   reduceMotion: boolean;
 };
 
-function PlayerRig({ start, racks, usables, readIntent, onMove, onFocus, tremor, control, reduceMotion }: RigProps) {
+function PlayerRig({ start, racks, walls, usables, readIntent, onMove, onFocus, tremor, control, reduceMotion }: RigProps) {
   const player = useRef(start);
   const lastFocus = useRef<string | null>(null);
-  const obstacles = useMemo(() => [...officeObstacles(), ...obstaclesOf(racks)], [racks]);
+  const obstacles = useMemo(() => [...walls, ...obstaclesOf(racks)], [racks, walls]);
   const glide = useRef<{ from: Vector3; startedAt: number } | null>(null);
   const target = useMemo(() => new Vector3(), []);
 

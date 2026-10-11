@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { isPlausibleProgress } from "./audit.ts";
+import { isPlausibleProgress, NO_PROMISED_MONEY } from "./audit.ts";
 import { INCIDENT_CENTS_PER_POINT_BY_TIER, payRef } from "./economy.ts";
 import { earn, emptyProgress, type Progress } from "./progress.ts";
-import { earnGrant, hasBoughtSolution, purchaseRef, solutionPriceCents, spend, type SolutionPurchase } from "./purchases.ts";
+import { earnDividend, earnGrant, hasBoughtSolution, invest, purchaseRef, solutionPriceCents, spend, type SolutionPurchase } from "./purchases.ts";
 
 const AT = Date.UTC(2026, 9, 10, 12);
 const tierOf = (id: string) => (id === "scaled-to-zero" ? 1 : id === "checkout-meltdown" ? 5 : undefined);
@@ -100,5 +100,33 @@ describe("earnGrant", () => {
     expect(once.earnedCents.grant).toBe(50_000);
     expect(once.ledger.at(-1)).toMatchObject({ reason: "grant", ref: "grant:g1", note: "Grant · for testing" });
     expect(earnGrant(once, { id: "g1", amountCents: 50_000, note: "for testing" }, AT)).toBe(once);
+  });
+});
+
+describe("investing and dividends", () => {
+  it("invests once under the server's ref and refuses more than the wallet holds", () => {
+    const rich = richPlayer(1).wallet;
+    const first = invest(rich, "company:invest:offer-1", 20_000, AT);
+    if (!first.ok) throw new Error("expected the investment to go through");
+    expect(first.wallet.balanceCents).toBe(rich.balanceCents - 20_000);
+    expect(first.wallet.spentCents.invest).toBe(20_000);
+    const again = invest(first.wallet, "company:invest:offer-1", 20_000, AT);
+    expect(again.ok && again.wallet).toBe(first.wallet);
+    expect(invest(rich, "company:invest:offer-2", rich.balanceCents + 1, AT)).toEqual({ ok: false, shortByCents: 1 });
+  });
+
+  it("accepts only investments and dividends the server promised, at their exact amounts", () => {
+    const before = richPlayer(1);
+    const spent = invest(before.wallet, "company:invest:offer-1", 20_000, AT);
+    if (!spent.ok) throw new Error("no investment");
+    const invested = { ...before, wallet: spent.wallet };
+    const promisedInvestment = { ...NO_PROMISED_MONEY, investments: new Map([["company:invest:offer-1", 20_000]]) };
+    expect(isPlausibleProgress(before, invested, 60, tierOf, promisedInvestment)).toBe(true);
+    expect(isPlausibleProgress(before, invested, 60, tierOf)).toBe(false);
+
+    const paid = { ...before, wallet: earnDividend(before.wallet, { id: "d1", amountCents: 1_500, workDay: 7 }, AT) };
+    expect(isPlausibleProgress(before, paid, 60, tierOf, { ...NO_PROMISED_MONEY, dividends: new Map([["dividend:d1", 1_500]]) })).toBe(true);
+    expect(isPlausibleProgress(before, paid, 60, tierOf, { ...NO_PROMISED_MONEY, dividends: new Map([["dividend:d1", 1_000]]) })).toBe(false);
+    expect(isPlausibleProgress(before, paid, 60, tierOf)).toBe(false);
   });
 });

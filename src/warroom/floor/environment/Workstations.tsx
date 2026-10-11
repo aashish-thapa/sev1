@@ -1,7 +1,8 @@
 import { useLayoutEffect, useMemo, useRef } from "react";
 import { BoxGeometry, CanvasTexture, CylinderGeometry, MeshBasicMaterial, MeshStandardMaterial, SRGBColorSpace, type BufferGeometry, type InstancedMesh, type Material, type Matrix4 } from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { DESK, DESKS, seatOf, type Desk } from "../office.ts";
+import { DESK, seatOf, type Desk } from "../office.ts";
+import { useOfficePlan } from "../company-office/context.ts";
 import { tokenColor } from "../tokens.ts";
 import { FINISHES, type FinishMaterials } from "./finishes.ts";
 import { MONITOR, MONITOR_Z, onDesk, SCREEN, SEAT_HEIGHT, TOP_THICKNESS } from "./deskLayout.ts";
@@ -40,6 +41,7 @@ function chairGeometries(): { fabric: BufferGeometry; frame: BufferGeometry } {
 
 /** Every desk, chair, monitor and keyboard in the building, as a handful of instanced meshes. */
 export function Workstations({ finishes }: { finishes: FinishMaterials }) {
+  const { desks } = useOfficePlan();
   const code = useMemo(() => codeTexture(), []);
   const materials = useMemo(() => {
     const fabricBase = finishes.carpet;
@@ -75,7 +77,7 @@ export function Workstations({ finishes }: { finishes: FinishMaterials }) {
     const surface = DESK.height;
     // Occupant-relative offsets: +dz is away from the occupant, toward the shared middle of the cluster.
     const monitorZ = MONITOR_Z;
-    const each = (dx: number, y: number, dz: number): Placed[] => DESKS.map((desk) => ({ desk, matrix: onDesk(desk, dx, y, dz) }));
+    const each = (dx: number, y: number, dz: number): Placed[] => desks.map((desk) => ({ desk, matrix: onDesk(desk, dx, y, dz) }));
     return {
       top: each(0, surface - TOP_THICKNESS / 2, 0),
       legs: [...each(-(DESK.width / 2 - 0.04), (surface - TOP_THICKNESS) / 2, 0), ...each(DESK.width / 2 - 0.04, (surface - TOP_THICKNESS) / 2, 0)],
@@ -86,12 +88,12 @@ export function Workstations({ finishes }: { finishes: FinishMaterials }) {
       foot: each(0, surface + 0.006, monitorZ + 0.02),
       keyboard: each(0, surface + 0.008, -0.12),
       mouse: each(0.3, surface + 0.011, -0.12),
-      chair: DESKS.map((desk) => {
+      chair: desks.map((desk) => {
         const seat = seatOf(desk);
         return { desk, matrix: onDesk(desk, 0, 0, (seat.z - desk.z) * desk.facing) };
       }),
     };
-  }, []);
+  }, [desks]);
 
   return (
     <>
@@ -119,7 +121,8 @@ function Instanced({ geometry, material, placed, hasShadow = true }: { geometry:
     mesh.instanceMatrix.needsUpdate = true;
     mesh.computeBoundingSphere();
   }, [placed]);
-  return <instancedMesh ref={ref} args={[geometry, material, placed.length]} castShadow={hasShadow} receiveShadow={hasShadow} />;
+  // The instance count is fixed at creation, so a different number of desks needs a new mesh.
+  return <instancedMesh key={placed.length} ref={ref} args={[geometry, material, placed.length]} castShadow={hasShadow} receiveShadow={hasShadow} />;
 }
 
 /** An editor full of code, drawn once and shared by every monitor in the building. */

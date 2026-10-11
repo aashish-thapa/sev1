@@ -3,15 +3,16 @@ import { AccountContext } from "../../app/useAccount.ts";
 import type { Role } from "../../domain/incident.ts";
 import { formatCents } from "../../domain/economy.ts";
 import type { CompanyApi, CompanyOutcome } from "../../storage/company-api.ts";
-import type { Interview, InterviewAnswers, MyCompany, PendingPayout, Posting } from "../../storage/company-protocol.ts";
+import type { Interview, InterviewAnswers, MyCompany, PendingDividend, PendingPayout, Posting } from "../../storage/company-protocol.ts";
+import { InvestorPanel } from "./InvestorPanel.tsx";
 import { ROLE_INFO } from "../../domain/roles.ts";
 import { InterviewView } from "../work/InterviewView.tsx";
 import { CompanyDirectory } from "./CompanyDirectory.tsx";
 import { MyApplications } from "./MyApplications.tsx";
-import type { Task } from "../../domain/work/task.ts";
 import { companyErrorText } from "./errors.ts";
 import { FoundCompany } from "./FoundCompany.tsx";
-import { Headquarters } from "./Headquarters.tsx";
+import { CompanyCard } from "./CompanyCard.tsx";
+import { Deals } from "./Deals.tsx";
 import { Invitations } from "./Invitations.tsx";
 
 export type CompanyPageProps = {
@@ -25,15 +26,17 @@ export type CompanyPageProps = {
   /** Earns a booked salary into the wallet; claiming the same payout twice does nothing. */
   claimPayout: (payout: PendingPayout) => void;
   onSignUp: () => void;
-  /** Daily-work tasks for the HQ's board. */
-  tasks: readonly Task[];
-  /** The local day, YYYY-MM-DD. */
-  day: string;
+  /** Joins the company's office room at `code`. */
+  enterOffice: (code: string) => void;
+  invest: (investRef: string, cents: number) => boolean;
+  /** Walk into a company's office for an investment meeting (yours or theirs). */
+  enterMeeting: (code: string, companyId: string) => void;
+  claimDividend: (dividend: PendingDividend) => void;
 };
 
 /** Startup mode: found a company, answer offers, or run the one you're in. Accounts only. */
 export function CompanyPage(props: CompanyPageProps) {
-  const { api, isSignedIn, claimPayout } = props;
+  const { api, isSignedIn, claimPayout, claimDividend } = props;
   const sync = useContext(AccountContext)?.sync ?? "local";
   const [mine, setMine] = useState<CompanyOutcome<MyCompany> | null>(null);
   // After a wallet move (funding) the company is re-read once that save has gone "saving" and then "saved",
@@ -79,8 +82,10 @@ export function CompanyPage(props: CompanyPageProps) {
 
   // Pay the server booked lands in the wallet as soon as the page sees it.
   useEffect(() => {
-    if (mine?.ok) for (const payout of mine.value.payouts) claimPayout(payout);
-  }, [mine, claimPayout]);
+    if (!mine?.ok) return;
+    for (const payout of mine.value.payouts) claimPayout(payout);
+    for (const dividend of mine.value.dividends) claimDividend(dividend);
+  }, [mine, claimPayout, claimDividend]);
 
   useEffect(() => {
     if (awaiting.current === "move" && sync === "saving") awaiting.current = "save";
@@ -107,6 +112,16 @@ export function CompanyPage(props: CompanyPageProps) {
   if (!mine.ok) return <p className="admin__note">{companyErrorText(mine.error, mine.message)}</p>;
 
   const { company, invitations, applications } = mine.value;
+  const investing = {
+    ownCompanyId: company?.id ?? null,
+    proposals: mine.value.proposals,
+    propose: async (companyId: string, amountCents: number, equityBps: number) => {
+      const sent = await api.propose(companyId, { amountCents, equityBps });
+      if (!sent.ok) return companyErrorText(sent.error, sent.message);
+      void refresh();
+      return null;
+    },
+  };
   if (interview) {
     return (
       <section className="company" aria-label="Interview">
@@ -129,7 +144,7 @@ export function CompanyPage(props: CompanyPageProps) {
       )}
       {company === null && <MyApplications applications={applications} />}
       {/* Without a company, joining one is the likelier first step: most players can't afford to found yet. */}
-      {company === null && <CompanyDirectory api={api} onApply={(posting, name) => void apply(posting, name)} myApplications={applications} />}
+      {company === null && <CompanyDirectory api={api} onApply={(posting, name) => void apply(posting, name)} myApplications={applications} investing={investing} />}
       {invitations.length > 0 && <Invitations api={api} invitations={invitations} hasCompany={company !== null} onAnswered={refresh} />}
       {company === null ? (
         <FoundCompany
@@ -161,9 +176,20 @@ export function CompanyPage(props: CompanyPageProps) {
           </button>
         </section>
       ) : (
-        <Headquarters api={api} company={company} username={props.username} onChanged={refresh} tasks={props.tasks} day={props.day} />
+        <CompanyCard api={api} company={company} username={props.username} enterOffice={props.enterOffice} onLeft={refresh} />
       )}
-      {company !== null && <CompanyDirectory api={api} onApply={null} myApplications={applications} />}
+      <Deals api={api} deals={mine.value.deals} username={props.username} enterMeeting={props.enterMeeting} />
+      <InvestorPanel
+        api={api}
+        offers={mine.value.investmentOffers}
+        holdings={mine.value.holdings}
+        proposals={mine.value.proposals}
+        walletCents={props.walletCents}
+        invest={props.invest}
+        onMoved={() => setAwaitingSave(true)}
+        onChanged={refresh}
+      />
+      {company !== null && <CompanyDirectory api={api} onApply={null} myApplications={applications} investing={investing} />}
     </section>
   );
 }

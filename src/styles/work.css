@@ -202,6 +202,21 @@
   border-color: var(--color-ink-2);
 }
 
+/* The patch you've picked, while the answer can still change. */
+.task__choice[aria-pressed="true"] {
+  border-color: var(--color-accent);
+  box-shadow: inset 3px 0 0 var(--color-accent);
+  background: var(--color-paper-2);
+  color: var(--color-ink);
+}
+
+/* The verdict you've picked on a review. */
+.task__actions .button[aria-pressed="true"] {
+  border-color: var(--color-accent);
+  background: var(--color-paper-2);
+  color: var(--color-ink);
+}
+
 .task__choice-mark {
   color: var(--color-muted);
 }

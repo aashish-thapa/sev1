@@ -100,3 +100,14 @@ describe("hintsUsed", () => {
     expect(hintsUsedOn(spendHint(used, tomorrow), tomorrow)).toBe(1);
   });
 });
+
+describe("first saves carrying older correct answers", () => {
+  it("accepts correct cards from before cards paid, up to what the save's own history shows, and names what it refuses", async () => {
+    const { progressProblem } = await import("./audit.ts");
+    const legacy = { ...emptyProgress(), correctCards: 12, history: [{ day: parseLocalDate("2026-10-08"), correct: 7, total: 10 }, { day: parseLocalDate("2026-10-09"), correct: 5, total: 10 }] };
+    expect(progressProblem(emptyProgress(), legacy, 3600)).toBeNull();
+    expect(progressProblem(emptyProgress(), { ...legacy, correctCards: 40 }, 3600)).toBe("correct_cards_unpaid");
+    // Once the account holds a copy, new correct answers must be paid for again.
+    expect(progressProblem(legacy, { ...legacy, correctCards: 13, wallet: { ...legacy.wallet, nextSeq: 1 } }, 3600)).not.toBeNull();
+  });
+});

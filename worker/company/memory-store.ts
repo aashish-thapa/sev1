@@ -18,6 +18,14 @@ export class MemoryCompanyStore implements CompanyStore, CompanyBank {
   readonly servers: { companyId: string; id: string; tier: ServerTierId }[] = [];
   readonly ledger: Line[] = [];
   readonly payouts = new Map<string, { id: string; companyId: string; userId: string; workDay: number; amountCents: number; claimedAt: number | null }>();
+  /** Dividends a winning settlement booked; the memory investor store claims them. */
+  readonly dividendPayouts = new Map<string, { id: string; companyId: string; userId: string; workDay: number; amountCents: number; claimedAt: number | null }>();
+  /** The work log a winning settlement marks counted, as D1 does in the same batch. */
+  private readonly work: { markSettled(ids: readonly string[], workDay: number): void } | undefined;
+
+  constructor(work?: { markSettled(ids: readonly string[], workDay: number): void }) {
+    this.work = work;
+  }
 
   addUser(id: string, username: string): void {
     this.usernames.set(id, username);
@@ -69,13 +77,14 @@ export class MemoryCompanyStore implements CompanyStore, CompanyBank {
       servers: this.servers.filter((server) => server.companyId === companyId).map((server) => server.tier),
       pendingInvitations: [...this.invitations.values()].filter((invitation) => invitation.companyId === companyId && invitation.status === "pending"),
       ledger: lines.map(({ at, workDay, reason, amountCents, note }) => ({ at, workDay, reason, amountCents, note })),
+      lifetimeRevenueCents: lines.filter((line) => line.reason === "revenue").reduce((sum, line) => sum + line.amountCents, 0),
     };
   }
 
   async found(company: CompanyRow, founder: { role: Role; payCents: number }): Promise<boolean> {
     if (this.members.some((member) => member.userId === company.founderId)) return false;
     this.companies.set(company.id, company);
-    this.members.push({ companyId: company.id, userId: company.founderId, username: this.usernames.get(company.founderId) ?? "", role: founder.role, payCents: founder.payCents, isFounder: true, joinedAt: company.createdAt });
+    this.members.push({ companyId: company.id, userId: company.founderId, username: this.usernames.get(company.founderId) ?? "", role: founder.role, payCents: founder.payCents, isFounder: true, joinedAt: company.createdAt, canHire: false });
     return true;
   }
 
@@ -133,7 +142,7 @@ export class MemoryCompanyStore implements CompanyStore, CompanyBank {
 
   async accept(invitation: InvitationRow, at: number): Promise<boolean> {
     if (this.members.some((member) => member.userId === invitation.userId)) return false;
-    this.members.push({ companyId: invitation.companyId, userId: invitation.userId, username: invitation.username, role: invitation.role, payCents: invitation.payCents, isFounder: false, joinedAt: at });
+    this.members.push({ companyId: invitation.companyId, userId: invitation.userId, username: invitation.username, role: invitation.role, payCents: invitation.payCents, isFounder: false, joinedAt: at, canHire: false });
     const stored = this.invitations.get(invitation.id);
     if (stored) this.invitations.set(invitation.id, { ...stored, status: "accepted" });
     return true;
@@ -144,9 +153,26 @@ export class MemoryCompanyStore implements CompanyStore, CompanyBank {
     if (stored?.status === "pending") this.invitations.set(invitationId, { ...stored, status: "declined" });
   }
 
-  async setMember(companyId: string, userId: string, role: Role, payCents: number): Promise<void> {
+  async setMember(companyId: string, userId: string, role: Role, payCents: number, canHire?: boolean): Promise<void> {
     const index = this.members.findIndex((member) => member.companyId === companyId && member.userId === userId);
-    if (index >= 0) this.members[index] = { ...this.members[index], role, payCents };
+    if (index >= 0) this.members[index] = { ...this.members[index], role, payCents, canHire: canHire ?? this.members[index].canHire };
+  }
+
+  async removeMember(companyId: string, userId: string): Promise<boolean> {
+    const index = this.members.findIndex((member) => member.companyId === companyId && member.userId === userId && !member.isFounder);
+    if (index < 0) return false;
+    this.members.splice(index, 1);
+    return true;
+  }
+
+  /** Every line in a company's books, oldest first, for its valuation. */
+  bookLines(companyId: string): readonly BookLine[] {
+    return this.ledger.filter((line) => line.companyId === companyId);
+  }
+
+  /** Revenue lines, for the directory's ranking. */
+  revenueLines(companyId: string): readonly BookLine[] {
+    return this.ledger.filter((line) => line.companyId === companyId && line.reason === "revenue");
   }
 
   async settle(day: SettledDay): Promise<boolean> {
@@ -157,7 +183,16 @@ export class MemoryCompanyStore implements CompanyStore, CompanyBank {
     for (const payout of day.payouts) {
       if (!this.payouts.has(payout.id)) this.payouts.set(payout.id, { ...payout, companyId: day.companyId, workDay: day.fromWorkDay + 1, claimedAt: null });
     }
+    for (const dividend of day.dividends) {
+      if (!this.dividendPayouts.has(dividend.id)) this.dividendPayouts.set(dividend.id, { ...dividend, companyId: day.companyId, workDay: day.fromWorkDay + 1, claimedAt: null });
+    }
+    this.work?.markSettled(day.workIds, day.fromWorkDay + 1);
     return true;
+  }
+
+  /** Books a line written by another part of the books (an investment), once per ref. */
+  credit(companyId: string, line: Omit<Line, "companyId">): void {
+    this.book(companyId, line);
   }
 
   private book(companyId: string, line: Omit<Line, "companyId">): void {

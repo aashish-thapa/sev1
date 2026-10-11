@@ -44,7 +44,9 @@ export type Payment =
   /** A company paying you for a work day: the server booked it, the save claims it once (ref `payroll:<payoutId>`). */
   | { readonly kind: "payroll"; readonly ref: string; readonly amountCents: number; readonly workDay: number }
   /** Money an admin granted (test money): the server issued it, the save claims it once (ref `grant:<grantId>`). */
-  | { readonly kind: "grant"; readonly ref: string; readonly amountCents: number; readonly note: string };
+  | { readonly kind: "grant"; readonly ref: string; readonly amountCents: number; readonly note: string }
+  /** Your share of a company's weekly profit as an investor: booked by the server, claimed once (ref `dividend:<payoutId>`). */
+  | { readonly kind: "dividend"; readonly ref: string; readonly amountCents: number; readonly workDay: number };
 
 /** Stable identities for earnings (all times epoch milliseconds). */
 export const payRef = {
@@ -58,6 +60,8 @@ export const payRef = {
   payroll: (payoutId: string) => `payroll:${payoutId}`,
   /** One grant an admin issued to you. */
   grant: (grantId: string) => `grant:${grantId}`,
+  /** One dividend a company booked for you as an investor. */
+  dividend: (payoutId: string) => `dividend:${payoutId}`,
 } as const;
 
 /** The scenario an incident payout was for, read back from its `payRef.incident` ref; null for any other ref. */
@@ -66,10 +70,10 @@ export function scenarioOfIncident(ref: string): string | null {
   return match ? match[1] : null;
 }
 
-const REASONS = ["salary", "card", "incident", "payroll", "grant"] as const satisfies readonly Payment["kind"][];
+const REASONS = ["salary", "card", "incident", "payroll", "grant", "dividend"] as const satisfies readonly Payment["kind"][];
 export type PayReason = (typeof REASONS)[number];
 /** What money can be spent on; purchases are negative ledger lines (see purchases.ts). */
-export const SPEND_REASONS = ["solution", "company"] as const;
+export const SPEND_REASONS = ["solution", "company", "invest"] as const;
 export type SpendReason = (typeof SPEND_REASONS)[number];
 
 const Cents = z.int().nonnegative();
@@ -89,8 +93,8 @@ const LedgerEntrySchema = z.object({
 });
 
 // Payroll and company spending came with startup mode; older saves start them at zero.
-const PerReason = z.object({ salary: Cents, card: Cents, incident: Cents, payroll: Cents.default(0), grant: Cents.default(0) });
-const PerSpend = z.object({ solution: Cents, company: Cents.default(0) });
+const PerReason = z.object({ salary: Cents, card: Cents, incident: Cents, payroll: Cents.default(0), grant: Cents.default(0), dividend: Cents.default(0) });
+const PerSpend = z.object({ solution: Cents, company: Cents.default(0), invest: Cents.default(0) });
 
 export const WalletSchema = z.object({
   balanceCents: Cents,
@@ -99,8 +103,8 @@ export const WalletSchema = z.object({
   /** Lifetime count of paid units per reason: active minutes, correct cards, incidents. */
   paidUnits: PerReason,
   /** Lifetime cents spent per purchase kind; saves from before spending start at zero. */
-  spentCents: PerSpend.default({ solution: 0, company: 0 }),
-  boughtUnits: PerSpend.default({ solution: 0, company: 0 }),
+  spentCents: PerSpend.default({ solution: 0, company: 0, invest: 0 }),
+  boughtUnits: PerSpend.default({ solution: 0, company: 0, invest: 0 }),
   /** The seq the next ledger entry gets; entries at or past a previous wallet's value are new to it. */
   nextSeq: z.int().nonnegative(),
   /** Newest last, capped at LEDGER_LIMIT. */
@@ -113,10 +117,10 @@ export type Wallet = z.output<typeof WalletSchema>;
 export function emptyWallet(): Wallet {
   return {
     balanceCents: 0,
-    earnedCents: { salary: 0, card: 0, incident: 0, payroll: 0, grant: 0 },
-    paidUnits: { salary: 0, card: 0, incident: 0, payroll: 0, grant: 0 },
-    spentCents: { solution: 0, company: 0 },
-    boughtUnits: { solution: 0, company: 0 },
+    earnedCents: { salary: 0, card: 0, incident: 0, payroll: 0, grant: 0, dividend: 0 },
+    paidUnits: { salary: 0, card: 0, incident: 0, payroll: 0, grant: 0, dividend: 0 },
+    spentCents: { solution: 0, company: 0, invest: 0 },
+    boughtUnits: { solution: 0, company: 0, invest: 0 },
     nextSeq: 0,
     ledger: [],
   };
@@ -135,6 +139,7 @@ export function amountOf(payment: Payment): number {
       return payment.points >= INCIDENT_MIN_POINTS ? Math.round(payment.points) * INCIDENT_CENTS_PER_POINT_BY_TIER[payment.tier] : 0;
     case "payroll":
     case "grant":
+    case "dividend":
       return Math.max(0, Math.floor(payment.amountCents));
   }
 }
@@ -155,6 +160,8 @@ function noteOf(payment: Payment): string {
       return `Company pay · work day ${payment.workDay}`;
     case "grant":
       return (payment.note ? `Grant · ${payment.note}` : "Grant from the team").slice(0, 120);
+    case "dividend":
+      return `Dividend · work day ${payment.workDay}`;
   }
 }
 

@@ -61,3 +61,9 @@ export function recordTaken(log: PantryLog, id: ConsumableId, day: string): Pant
 export function pantryCostCents(taken: Readonly<Record<string, number>>): number {
   return CONSUMABLES.reduce((sum, item) => sum + (taken[item.id] ?? 0) * item.unitCostCents, 0);
 }
+
+/** What one day's logged servings cost (YYYY-MM-DD); 0 for a day nothing was taken. */
+export function pantryCostOn(log: PantryLog, day: string): number {
+  const entry = log.days.find((candidate) => candidate.day === day);
+  return entry ? pantryCostCents(entry.taken) : 0;
+}

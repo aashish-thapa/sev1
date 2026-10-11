@@ -35,6 +35,13 @@ describe("protocol parsing", () => {
     expect(parsed).toEqual({ ok: true, message: { type: "join", roomCode: "ABCD", name: "Maya", role: "security", badge: null } });
   });
 
+  it("reads a quiet office's page, and treats a welcome without a phase as a live incident", () => {
+    expect(parseClientMessage(JSON.stringify({ type: "page" }))).toEqual({ ok: true, message: { type: "page" } });
+    const welcome = { type: "welcome", roomCode: "ABCD", playerId: "p1", resumeToken: "t", isResumed: false, scenarioId: "s", players: [], comms: [], history: [] };
+    expect(parseServerMessage(JSON.stringify(welcome))).toMatchObject({ ok: true, message: { phase: "incident" } });
+    expect(parseServerMessage(JSON.stringify({ type: "phase", phase: "quiet" }))).toEqual({ ok: true, message: { type: "phase", phase: "quiet" } });
+  });
+
   it("takes a badge from the catalog and turns down one that isn't", () => {
     const join = (badge: string) => parseClientMessage(JSON.stringify({ type: "join", roomCode: "ABCD", name: "Maya", role: "security", badge }));
     expect(join("streak-7")).toMatchObject({ ok: true, message: { badge: "streak-7" } });

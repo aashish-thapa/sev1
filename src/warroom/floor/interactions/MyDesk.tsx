@@ -3,12 +3,14 @@ import type { ThreeEvent } from "@react-three/fiber";
 import type { Role } from "../../../domain/incident.ts";
 import { promptFor } from "../../shell/prompt.ts";
 import { MONITOR, MONITOR_Z, onDesk, SCREEN, SCREEN_Y, SEAT_HEIGHT } from "../environment/deskLayout.ts";
-import { DESK, PLAYER_DESK, seatOf } from "../office.ts";
+import { DESK, seatOf, type Desk } from "../office.ts";
 import { tokenColor } from "../tokens.ts";
 import { cardTexture } from "./textures.ts";
 
 type Props = {
   role: Role;
+  /** The desk that's yours in this office. */
+  desk: Desk;
   /** Click on your monitor: bring up your terminal. */
   onOpenTerminal: (event: ThreeEvent<MouseEvent>) => void;
 };
@@ -17,9 +19,9 @@ type Props = {
  * What makes the desk yours, without a word of text: your jacket over the chair, your mug, a
  * sticky note on the bezel, and your own shell on the monitor — click it (or press L) to start typing.
  */
-export function MyDesk({ role, onOpenTerminal }: Props) {
-  const frame = useMemo(() => onDesk(PLAYER_DESK, 0, 0, 0), []);
-  const chairFrame = useMemo(() => onDesk(PLAYER_DESK, 0, 0, (seatOf(PLAYER_DESK).z - PLAYER_DESK.z) * PLAYER_DESK.facing), []);
+export function MyDesk({ role, desk, onOpenTerminal }: Props) {
+  const frame = useMemo(() => onDesk(desk, 0, 0, 0), [desk]);
+  const chairFrame = useMemo(() => onDesk(desk, 0, 0, (seatOf(desk).z - desk.z) * desk.facing), [desk]);
   const terminal = useMemo(
     () =>
       cardTexture({

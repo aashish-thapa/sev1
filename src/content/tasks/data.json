@@ -176,5 +176,236 @@
       "cause": "Nothing wrong: the column order matches the query, and it's built concurrently.",
       "why": "user_id first serves the filter and created_at DESC serves the sort. It runs outside a transaction as CONCURRENTLY requires, and the comment covers the invalid-index case, which is exactly what bit the orders migration."
     }
+  },
+  {
+    "kind": "code-fix",
+    "id": "data-fix-count-column-skips-nulls",
+    "role": "data",
+    "difficulty": 1,
+    "categories": [],
+    "title": "Signups chart shows a third of real signups",
+    "ticket": "Growth: the signups chart says 41 for yesterday, but 130 accounts were created. Days with a referral campaign look about right.",
+    "file": {
+      "path": "models/daily_signups.sql",
+      "language": "sql",
+      "lines": [
+        "SELECT",
+        "  date_trunc('day', created_at) AS day,",
+        "  COUNT(referral_code) AS signups,",
+        "  COUNT(DISTINCT referral_code) AS referral_codes_used",
+        "FROM users",
+        "WHERE created_at >= now() - interval '7 days'",
+        "GROUP BY 1",
+        "ORDER BY 1"
+      ]
+    },
+    "failing": {
+      "test": "daily_signups: three users on 2026-10-09, one with a referral code",
+      "output": [
+        "expected signups = 3",
+        "     got signups = 1"
+      ]
+    },
+    "bugLine": 2,
+    "fixes": [
+      "  COUNT(*) AS signups,",
+      "  COUNT(DISTINCT referral_code) AS signups,",
+      "  SUM(CASE WHEN referral_code IS NOT NULL THEN 1 ELSE 0 END) AS signups,"
+    ],
+    "fixAnswer": 0,
+    "explanation": {
+      "cause": "COUNT(referral_code) counts only rows where referral_code is not NULL, so users who signed up without a code vanish.",
+      "why": "COUNT(*) counts every row in the group. The DISTINCT version and the CASE sum both still count only users with a code."
+    }
+  },
+  {
+    "kind": "code-fix",
+    "id": "data-fix-dropna-not-assigned",
+    "role": "data",
+    "difficulty": 1,
+    "categories": [],
+    "title": "Contacts export still has rows with no email",
+    "ticket": "Marketing: the CRM import keeps rejecting our nightly export because some rows have no email. clean_contacts is supposed to drop those.",
+    "file": {
+      "path": "pipelines/crm/clean_contacts.py",
+      "language": "py",
+      "lines": [
+        "import pandas as pd",
+        "",
+        "def clean_contacts(df: pd.DataFrame) -> pd.DataFrame:",
+        "    \"\"\"Contacts we can email: has an address, one row per address.\"\"\"",
+        "    df = df.copy()",
+        "    df[\"email\"] = df[\"email\"].str.strip().str.lower()",
+        "    df.dropna(subset=[\"email\"])",
+        "    df = df.drop_duplicates(subset=[\"email\"])",
+        "    return df"
+      ]
+    },
+    "failing": {
+      "test": "test_clean_contacts_drops_rows_without_email",
+      "output": [
+        "input: 4 rows, 2 with email=None, 1 with phone=None",
+        "expected len(result) == 2",
+        "     got len(result) == 3",
+        "  extra row: email=nan"
+      ]
+    },
+    "bugLine": 6,
+    "fixes": [
+      "    df = df.dropna(subset=[\"email\"])",
+      "    df.dropna(subset=[\"email\"], inplace=False)",
+      "    df = df.dropna()",
+      "    df.dropna(subset=[\"email\"]).copy()"
+    ],
+    "fixAnswer": 0,
+    "explanation": {
+      "cause": "dropna returns a new frame and the result is thrown away, so df still has the rows with no email.",
+      "why": "Assigning the result keeps the filtered frame. inplace=False and .copy() still discard it, and dropna() with no subset also drops the valid contact that has no phone."
+    }
+  },
+  {
+    "kind": "code-fix",
+    "id": "data-fix-rolling-feature-sees-label",
+    "role": "data",
+    "difficulty": 3,
+    "categories": [
+      "ecommerce",
+      "social",
+      "saas"
+    ],
+    "title": "Purchase model is brilliant offline and useless live",
+    "ticket": "The buys-today model scored 0.97 AUC offline and 0.58 in its first week live. Feature importance says purchases_7d does almost all the work.",
+    "file": {
+      "path": "features/purchase_features.sql",
+      "language": "sql",
+      "lines": [
+        "-- One row per user per day, zero-filled. The model scores each user at 00:00.",
+        "SELECT",
+        "  user_id,",
+        "  day,",
+        "  AVG(purchases) OVER (",
+        "    PARTITION BY user_id ORDER BY day",
+        "    ROWS BETWEEN 6 PRECEDING AND CURRENT ROW",
+        "  ) AS purchases_7d,",
+        "  (purchases > 0)::int AS label_buys_today",
+        "FROM user_daily"
+      ]
+    },
+    "failing": {
+      "test": "purchase_features: user buys once, on 2026-10-09, after a quiet month",
+      "output": [
+        "day=2026-10-09 label_buys_today=1",
+        "expected purchases_7d = 0.00 (all that's known at 00:00)",
+        "     got purchases_7d = 0.14"
+      ]
+    },
+    "bugLine": 6,
+    "fixes": [
+      "    ROWS BETWEEN 7 PRECEDING AND 1 PRECEDING",
+      "    ROWS BETWEEN 7 PRECEDING AND CURRENT ROW",
+      "    RANGE BETWEEN 6 PRECEDING AND CURRENT ROW",
+      "    ROWS BETWEEN 1 FOLLOWING AND 7 FOLLOWING"
+    ],
+    "fixAnswer": 0,
+    "explanation": {
+      "cause": "The window ends at CURRENT ROW, so purchases_7d includes the purchases of the very day the label describes.",
+      "why": "At 00:00 the model can't know today's purchases, but in training it could, so it learned to read the answer. Ending the frame at 1 PRECEDING uses only the seven finished days; the other frames still include today or look further ahead."
+    }
+  },
+  {
+    "kind": "pr-review",
+    "id": "data-pr-backfill-append",
+    "role": "data",
+    "difficulty": 3,
+    "categories": [],
+    "title": "Backfill: append the day instead of overwriting the table",
+    "author": "Tomas Lindqvist",
+    "description": "Backfilling 2026-10-03 last week emptied the whole mart, because overwrite replaced every partition, not just that day. Switching to append so a backfill only ever writes the day it was asked for.",
+    "path": "pipelines/marts/daily_totals.py",
+    "language": "py",
+    "diff": [
+      {
+        "op": " ",
+        "text": "def backfill(spark, day: str) -> None:"
+      },
+      {
+        "op": " ",
+        "text": "    events = spark.table(\"raw.events\").where(F.col(\"event_date\") == day)"
+      },
+      {
+        "op": " ",
+        "text": "    totals = events.groupBy(\"account_id\", \"event_date\").count()"
+      },
+      {
+        "op": "-",
+        "text": "    totals.write.mode(\"overwrite\").insertInto(\"marts.daily_totals\")"
+      },
+      {
+        "op": "+",
+        "text": "    # overwrite wiped every other day's partition, so append just this day"
+      },
+      {
+        "op": "+",
+        "text": "    totals.write.mode(\"append\").insertInto(\"marts.daily_totals\")"
+      }
+    ],
+    "verdict": "request-changes",
+    "flaw": 5,
+    "explanation": {
+      "cause": "Append adds the day's rows every time it runs, so a retried or re-run backfill counts that day twice.",
+      "why": "The scheduler retries failed tasks, and a task that dies after the write appends again. Keeping overwrite with spark.sql.sources.partitionOverwriteMode set to dynamic replaces only the day's partition, so reruns are safe."
+    }
+  },
+  {
+    "kind": "pr-review",
+    "id": "data-pr-not-exists-unsubscribes",
+    "role": "data",
+    "difficulty": 3,
+    "categories": [
+      "ecommerce",
+      "social",
+      "saas"
+    ],
+    "title": "Digest audience: NOT IN to NOT EXISTS",
+    "author": "Grace Okafor",
+    "description": "Monday's weekly digest went to nobody. unsubscribes.user_id became nullable when we added logged-out unsubscribes, and a single NULL there makes the NOT IN filter match no one. NOT EXISTS skips the NULL rows.",
+    "path": "models/digest_audience.sql",
+    "language": "sql",
+    "diff": [
+      {
+        "op": " ",
+        "text": "SELECT u.id, u.email"
+      },
+      {
+        "op": " ",
+        "text": "FROM users u"
+      },
+      {
+        "op": "-",
+        "text": "WHERE u.id NOT IN (SELECT user_id FROM unsubscribes)"
+      },
+      {
+        "op": "+",
+        "text": "WHERE NOT EXISTS ("
+      },
+      {
+        "op": "+",
+        "text": "  SELECT 1 FROM unsubscribes s WHERE s.user_id = u.id"
+      },
+      {
+        "op": "+",
+        "text": ")"
+      },
+      {
+        "op": " ",
+        "text": "  AND u.email_verified"
+      }
+    ],
+    "verdict": "approve",
+    "flaw": null,
+    "explanation": {
+      "cause": "Nothing wrong: NOT EXISTS is the right replacement when the subquery column can be NULL.",
+      "why": "x NOT IN (..., NULL) is never true, so one logged-out unsubscribe emptied the audience. NOT EXISTS checks each user's own rows, a NULL user_id never matches, and unsubscribed users are still excluded."
+    }
   }
 ]

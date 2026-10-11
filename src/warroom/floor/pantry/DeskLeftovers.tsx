@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { onDesk } from "../environment/deskLayout.ts";
 import type { Leftover } from "../interactions/useLeftovers.ts";
-import { DESK, PLAYER_DESK } from "../office.ts";
+import { DESK, type Desk } from "../office.ts";
 import { PaperCup, SnackLeftover } from "./Items.tsx";
 
 /** Spots on the right of your desk, in the desk's own frame (+x is your left), front to back. */
@@ -13,8 +13,8 @@ const SPOTS = [
 ] as const;
 
 /** What you've finished today, left where you'd leave it: next to the keyboard. */
-export function DeskLeftovers({ leftovers }: { leftovers: readonly Leftover[] }) {
-  const frame = useMemo(() => onDesk(PLAYER_DESK, 0, DESK.height, 0), []);
+export function DeskLeftovers({ leftovers, desk }: { leftovers: readonly Leftover[]; desk: Desk }) {
+  const frame = useMemo(() => onDesk(desk, 0, DESK.height, 0), [desk]);
   return (
     <group matrix={frame} matrixAutoUpdate={false}>
       {leftovers.map((leftover, index) => {

@@ -4,9 +4,9 @@ import type { LocalDate } from "../domain/calendar.ts";
 import { careerLevel } from "../domain/career.ts";
 import { ROLE_IDS, ROLES, roleOf, type IncidentCard, type Role } from "../domain/incident.ts";
 import { paidTier, payRef } from "../domain/economy.ts";
-import { earnGrant, earnPayroll, fundCompany as fundCompanyFrom, hasBoughtSolution, spend, type SpendOutcome } from "../domain/purchases.ts";
+import { earnDividend, earnGrant, earnPayroll, fundCompany as fundCompanyFrom, hasBoughtSolution, invest as investFrom, spend, type SpendOutcome } from "../domain/purchases.ts";
 import type { Tier } from "../domain/tier.ts";
-import type { PendingPayout } from "../storage/company-protocol.ts";
+import type { PendingDividend, PendingPayout } from "../storage/company-protocol.ts";
 import type { PendingGrant } from "../storage/account-protocol.ts";
 import { hasEarned } from "../domain/achievements.ts";
 import {
@@ -87,6 +87,10 @@ export type ShiftGame = {
   fundCompany(fundingRef: string, cents: number): boolean;
   /** Earns a payout the company booked, once; an already-claimed payout changes nothing. */
   claimPayout(payout: PendingPayout): void;
+  /** Puts money into a company under the ref its accepted offer issued; false when the balance is short. Repeats are no-ops. */
+  invest(investRef: string, cents: number): boolean;
+  /** Earns a dividend a company booked for you as an investor, once. */
+  claimDividend(dividend: PendingDividend): void;
   /** Earns money an admin granted into the wallet, once per grant; the next save claims it on the server. */
   claimGrant(grant: PendingGrant): void;
   /** Allowance hints opened today (Pro's daily free hints). */
@@ -214,6 +218,21 @@ export function useShiftGame({ library, store, today: clock, now = Date.now }: G
     },
     [commit, now, progress],
   );
+  const invest = useCallback(
+    (investRef: string, cents: number): boolean => {
+      const outcome = investFrom(progress.wallet, investRef, cents, now());
+      if (outcome.ok && outcome.wallet !== progress.wallet) commit({ ...progress, wallet: outcome.wallet });
+      return outcome.ok;
+    },
+    [commit, now, progress],
+  );
+  const claimDividend = useCallback(
+    (dividend: PendingDividend) => {
+      const wallet = earnDividend(progress.wallet, dividend, now());
+      if (wallet !== progress.wallet) commit({ ...progress, wallet });
+    },
+    [commit, now, progress],
+  );
   const claimGrant = useCallback(
     (grant: PendingGrant) => {
       const wallet = earnGrant(progress.wallet, grant, now());
@@ -264,6 +283,8 @@ export function useShiftGame({ library, store, today: clock, now = Date.now }: G
     buySolution,
     fundCompany,
     claimPayout,
+    invest,
+    claimDividend,
     claimGrant,
     paySalary,
     takeFromPantry: takeFromPantryNow,

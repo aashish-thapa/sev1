@@ -1,7 +1,12 @@
-import type { ApiError } from "../../storage/account-protocol.ts";
+import type { ApiError, COMPANY_ERRORS } from "../../storage/account-protocol.ts";
 
-/** What each company refusal means, in the player's words; the server's own message is the fallback. */
-export const COMPANY_ERROR_TEXT: Readonly<Partial<Record<ApiError | "unreachable", string>>> = {
+type CompanyError = (typeof COMPANY_ERRORS)[number];
+
+/**
+ * What each refusal means, in the player's words. Every company code must have text (a new one
+ * fails the build); for other codes the server's own message is the fallback.
+ */
+export const COMPANY_ERROR_TEXT: Readonly<Record<CompanyError, string> & Partial<Record<ApiError | "unreachable", string>>> = {
   signed_out: "Sign in first: companies belong to accounts.",
   not_in_company: "You’re not in a company.",
   not_founder: "Only the founder can do that.",
@@ -17,6 +22,30 @@ export const COMPANY_ERROR_TEXT: Readonly<Partial<Record<ApiError | "unreachable
   already_invited: "That player already has an offer from you.",
   invitation_not_found: "That offer is gone; it may have been withdrawn.",
   already_settled_today: "Today’s work day is already closed. Come back tomorrow.",
+  not_hiring: "Only the founder and hiring managers can do that.",
+  posting_closed: "That role has closed.",
+  already_applied: "You’ve already interviewed for that role.",
+  below_level: "That role wants a higher career level than yours. Play more shifts and War Rooms to climb.",
+  interview_expired: "The interview’s time ran out, so the answers weren’t counted.",
+  interview_not_found: "That interview is gone. Apply again to start a new one.",
+  application_not_found: "That application is gone; it may already be decided.",
+  no_questions: "This role has no interview questions at that level yet.",
+  already_answered: "You’ve already answered that one today.",
+  self_offer: "You can’t invest in yourself.",
+  below_minimum_investment: "An investment starts at $500.",
+  too_much_equity: "One offer can’t sell more than 49%.",
+  founder_control: "That would leave you under 51%; the founder keeps control.",
+  offer_not_found: "That offer is gone.",
+  not_enough_money: "Your wallet doesn’t have that much.",
+  already_proposed: "You already have a proposal with them.",
+  proposal_not_found: "That proposal is gone.",
+  cannot_fire_founder: "The founder can’t be fired.",
+  founder_cannot_leave: "Founders can’t leave their own company yet.",
+  deal_closed: "That deal is already settled.",
+  terms_changed: "The terms changed; read them again.",
+  not_together: "Agree when you’re both in the meeting.",
+  deal_not_found: "That deal is gone.",
+  not_on_board: "That task isn’t on today’s board.",
   rate_limited: "Too many tries. Wait a moment.",
   unreachable: "Couldn’t reach the company server.",
 };

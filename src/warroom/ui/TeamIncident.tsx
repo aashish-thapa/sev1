@@ -1,4 +1,5 @@
-import { useMemo } from "react";
+import { useContext, useMemo } from "react";
+import { CompanyOfficeContext } from "../floor/company-office/context.ts";
 import { SpeakingContext } from "../../multiplayer/voice/context.ts";
 import { useVoice, type VoiceRoom } from "../../multiplayer/voice/useVoice.ts";
 import type { Role } from "../../domain/incident.ts";
@@ -56,6 +57,10 @@ export function TeamIncident({ room, scenario, role, overlay, onUseScreen, onClo
     : null;
   const voice = useVoice(voiceRoom);
 
+  // A visitor (an investor at a meeting) isn't on this company's staff, so they don't start its incidents.
+  const office = useContext(CompanyOfficeContext);
+  const isVisitor = office !== null && !office.company.members.some((member) => member.username === office.me);
+
   if (!room.incident || !team) {
     return (
       <main className="paged">
@@ -88,8 +93,9 @@ export function TeamIncident({ room, scenario, role, overlay, onUseScreen, onClo
       <LiveIncident
         scenario={scenario}
         role={role}
-        isPaged
-        onPage={() => {}}
+        // A company office is calm until its pager goes off; "Page me" asks the room to start now.
+        isPaged={room.phase === "incident"}
+        onPage={isVisitor ? undefined : room.page}
         onClosed={onClosed}
         onLeave={onLeave}
         onUseScreen={onUseScreen}

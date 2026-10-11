@@ -11,6 +11,7 @@ import { calmScenario, calmView, panicOf } from "./mood.ts";
 import { IncidentHud } from "./IncidentHud.tsx";
 import { InspectPanel } from "./InspectPanel.tsx";
 import { LaptopScreen, type LaptopTab } from "./LaptopScreen.tsx";
+import { useLaptopApps } from "./laptop-apps.ts";
 import { ServiceMap } from "./ServiceMap.tsx";
 import { Terminal } from "./Terminal.tsx";
 import { loadFloor } from "./floorLoader.ts";
@@ -23,7 +24,8 @@ type Props = {
   scenario: Scenario;
   role: Role;
   isPaged: boolean;
-  onPage: () => void;
+  /** Absent when you can't start the incident yourself (a visitor to someone's office). */
+  onPage?: () => void;
   onClosed: (incident: Incident) => void;
   onLeave: () => void;
   onUseScreen: (screen: WallScreen) => void;
@@ -153,7 +155,9 @@ function Immersive({ scenario, incident, comms, hud, selected, onSelect, termina
   const [where, setWhere] = useState<Whereabouts>({ zone: "desk", surface: "carpet", rackProximity: 0 });
   const screenRef = useRef<HTMLDivElement>(null);
   const [isLaptopOpen, setLaptopOpen] = useState(false);
-  const [tab, setTab] = useState<LaptopTab>("terminal");
+  const apps = useLaptopApps();
+  // At a place with its own apps, the laptop opens on the first of them while things are quiet.
+  const [tab, setTab] = useState<LaptopTab>(() => (apps[0] && !isPaged ? `app:${apps[0].id}` : "terminal"));
   const [focusSignal, setFocusSignal] = useState(0);
   const settleTimer = useRef<number | undefined>(undefined);
 
@@ -164,7 +168,13 @@ function Immersive({ scenario, incident, comms, hud, selected, onSelect, termina
     settleTimer.current = window.setTimeout(() => setFocusSignal((value) => value + 1), LAPTOP_SETTLE_MS);
   }, []);
   const closeLaptop = useCallback(() => setLaptopOpen(false), []);
-  const toggleLaptop = useCallback(() => (isLaptopOpen ? closeLaptop() : openLaptop("terminal")), [closeLaptop, isLaptopOpen, openLaptop]);
+  // Paged, the laptop opens on the shell; otherwise back where you were, or on the place's first app.
+  const quietTab: LaptopTab = tab.startsWith("app:") ? tab : apps[0] ? `app:${apps[0].id}` : "terminal";
+  const toggleLaptop = useCallback(
+    () => (isLaptopOpen ? closeLaptop() : openLaptop(isPaged ? "terminal" : quietTab)),
+    [closeLaptop, isLaptopOpen, isPaged, openLaptop, quietTab],
+  );
+  const openApp = useCallback((appId: string) => openLaptop(`app:${appId}`), [openLaptop]);
   const inspect = useCallback(
     (node: NodeId) => {
       onSelect(node);
@@ -235,6 +245,7 @@ function Immersive({ scenario, incident, comms, hud, selected, onSelect, termina
           isPaged={isPaged}
           onPresence={team?.onPresence}
           onToggleLaptop={toggleLaptop}
+          onOpenApp={openApp}
         />
       </Suspense>
       {hud}

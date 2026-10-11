@@ -18,6 +18,35 @@ export const COMPANY_ERRORS = [
   "already_invited",
   "invitation_not_found",
   "already_settled_today",
+  // Hiring.
+  "not_hiring",
+  "posting_closed",
+  "already_applied",
+  "below_level",
+  "interview_expired",
+  "interview_not_found",
+  "application_not_found",
+  "no_questions",
+  // Daily work.
+  "not_on_board",
+  "already_answered",
+  // Investors.
+  "self_offer",
+  "below_minimum_investment",
+  "too_much_equity",
+  "founder_control",
+  "offer_not_found",
+  "not_enough_money",
+  // Proposals and staffing.
+  "already_proposed",
+  "proposal_not_found",
+  "cannot_fire_founder",
+  "founder_cannot_leave",
+  // Investments agreed in a meeting.
+  "deal_closed",
+  "terms_changed",
+  "not_together",
+  "deal_not_found",
 ] as const;
 
 export const API_ERRORS = [

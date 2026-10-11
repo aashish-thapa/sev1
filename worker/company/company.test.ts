@@ -62,13 +62,13 @@ class MemoryAccounts implements AccountStore {
   }
 }
 
-function world() {
+function world(pantryOf?: (userId: string, day: string) => Promise<number>) {
   let now = START;
   let ids = 0;
   const store = new MemoryCompanyStore();
   // Every seed run is a tier-1 War Room, so the audit can price its pay.
-  const accounts = new AccountService(new MemoryAccounts(store), () => now, () => 1, store);
-  const companies = new CompanyService({ store, now: () => now, newId: () => `id-${(ids += 1)}`, isOverLimit: async () => false });
+  const accounts = new AccountService(new MemoryAccounts(store), () => now, { bank: store, tierOf: () => 1 });
+  const companies = new CompanyService({ store, now: () => now, newId: () => `id-${(ids += 1)}`, isOverLimit: async () => false, pantryOf });
   const user = (id: string, username: string): User => {
     store.addUser(id, username);
     return { id, username, passwordHash: "", createdAt: START - DAY_MS, tags: [] };
@@ -149,6 +149,8 @@ describe("staff", () => {
     expect(offer).toMatchObject({ companyName: "Acme Ops", from: "maya", role: "frontend", payCents: 20_000 });
     expect((await setup.companies.accept(sam, offer.id)).ok).toBe(true);
     expect(await setup.companies.invite(sam, { username: "lena", role: "data", payCents: 20_000 })).toEqual({ ok: false, problem: "not_founder" });
+    // Sam works here now: a new offer to him means nothing until he leaves.
+    expect(await setup.companies.invite(founder, { username: "sam", role: "data", payCents: 20_000 })).toEqual({ ok: false, problem: "already_in_company" });
 
     const [lenaOffer] = (await setup.companies.mine(lena)).invitations;
     expect((await setup.companies.decline(lena, lenaOffer.id)).ok).toBe(true);
@@ -163,9 +165,9 @@ describe("work days and payroll", () => {
     const founder = setup.user("u1", "maya");
     const { progress } = await foundedCompany(setup, founder);
 
-    const settled = await setup.companies.settle(founder, { tasksShipped: 2 });
+    const settled = await setup.companies.settle(founder);
     expect(settled.ok).toBe(true);
-    expect(await setup.companies.settle(founder, { tasksShipped: 2 })).toEqual({ ok: false, problem: "already_settled_today" });
+    expect(await setup.companies.settle(founder)).toEqual({ ok: false, problem: "already_settled_today" });
 
     const [payout] = (await setup.companies.mine(founder)).payouts;
     expect(payout.amountCents).toBeGreaterThan(0);
@@ -180,7 +182,18 @@ describe("work days and payroll", () => {
     expect((await setup.accounts.saveProgress(founder, twice)).ok).toBe(false);
 
     setup.advance(DAY_MS);
-    expect((await setup.companies.settle(founder, { tasksShipped: 0 })).ok).toBe(true);
+    expect((await setup.companies.settle(founder)).ok).toBe(true);
+  });
+
+  it("charges the company for what its members took from the pantry that day", async () => {
+    const asked: string[] = [];
+    const setup = world(async (userId, day) => (asked.push(`${userId}:${day}`), 235));
+    const founder = setup.user("u1", "maya");
+    await foundedCompany(setup, founder);
+    const settled = await setup.companies.settle(founder);
+    if (!settled.ok) throw new Error("settle failed");
+    expect(settled.value.lines.filter((line) => line.reason === "pantry").map((line) => line.amountCents)).toEqual([-235]);
+    expect(asked).toEqual([`u1:${new Date(setup.now()).toISOString().slice(0, 10)}`]);
   });
 
   it("refuses payroll the server never booked, or for the wrong amount", () => {

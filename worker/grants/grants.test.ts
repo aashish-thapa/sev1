@@ -59,7 +59,7 @@ function setup() {
   let ids = 0;
   const store = new MemoryGrantStore((userId) => [...users.values()].find((user) => user.id === userId)?.username ?? "");
   const desk = new GrantDesk({ store, findUser: async (username) => users.get(username) ?? null, now: () => NOW, newId: () => `grant-${(ids += 1)}`, isOverLimit: async () => false });
-  const accounts = new AccountService(new MemoryAccounts(store), () => NOW + 60_000, undefined, undefined, store);
+  const accounts = new AccountService(new MemoryAccounts(store), () => NOW + 60_000, { grants: store });
   return { store, desk, accounts };
 }
 

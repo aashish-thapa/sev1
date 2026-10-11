@@ -209,5 +209,398 @@
       "cause": "Nothing wrong: the probe checks an endpoint that reflects real readiness, with sane timings.",
       "why": "A readiness probe only takes a pod out of the load balancer, it never restarts it, so a strict check is safe here. The trap to avoid would be pointing a liveness probe at a dependency."
     }
+  },
+  {
+    "kind": "pr-review",
+    "id": "infra-pr-service-selector-typo",
+    "role": "infrastructure",
+    "difficulty": 1,
+    "categories": [],
+    "title": "Expose payments-api inside the cluster",
+    "author": "Kofi Mensah",
+    "description": "The ledger worker needs to call payments-api directly instead of going out through the public ingress. Adds a ClusterIP Service on port 80 in front of the existing Deployment.",
+    "path": "deploy/payments-api/k8s.yaml",
+    "language": "yaml",
+    "diff": [
+      {
+        "op": " ",
+        "text": "  template:"
+      },
+      {
+        "op": " ",
+        "text": "    metadata:"
+      },
+      {
+        "op": " ",
+        "text": "      labels:"
+      },
+      {
+        "op": " ",
+        "text": "        app: payments-api"
+      },
+      {
+        "op": " ",
+        "text": "    spec:"
+      },
+      {
+        "op": " ",
+        "text": "      containers:"
+      },
+      {
+        "op": " ",
+        "text": "        - name: payments-api"
+      },
+      {
+        "op": " ",
+        "text": "          image: registry.internal/payments-api:v4.2.0"
+      },
+      {
+        "op": " ",
+        "text": "          ports:"
+      },
+      {
+        "op": " ",
+        "text": "            - containerPort: 8080"
+      },
+      {
+        "op": "+",
+        "text": "---"
+      },
+      {
+        "op": "+",
+        "text": "apiVersion: v1"
+      },
+      {
+        "op": "+",
+        "text": "kind: Service"
+      },
+      {
+        "op": "+",
+        "text": "metadata:"
+      },
+      {
+        "op": "+",
+        "text": "  name: payments-api"
+      },
+      {
+        "op": "+",
+        "text": "spec:"
+      },
+      {
+        "op": "+",
+        "text": "  selector:"
+      },
+      {
+        "op": "+",
+        "text": "    app: payment-api"
+      },
+      {
+        "op": "+",
+        "text": "  ports:"
+      },
+      {
+        "op": "+",
+        "text": "    - port: 80"
+      },
+      {
+        "op": "+",
+        "text": "      targetPort: 8080"
+      }
+    ],
+    "verdict": "request-changes",
+    "flaw": 17,
+    "explanation": {
+      "cause": "The Service selects app: payment-api, but the pods are labelled app: payments-api, so it matches nothing.",
+      "why": "A Service with no matching pods has no endpoints: the ledger worker would get connection refused on every call. The selector has to match the pod template labels exactly."
+    }
+  },
+  {
+    "kind": "code-fix",
+    "id": "infra-fix-py-snapshot-prune-inverted",
+    "role": "infrastructure",
+    "difficulty": 2,
+    "categories": [],
+    "title": "Snapshot pruning deleted this week and kept last spring",
+    "ticket": "We went to restore orders-db from a snapshot and the newest one was 15 days old. The nightly prune job runs with RETAIN_DAYS=14, and its log shows it deleting snapshots taken the day before.",
+    "file": {
+      "path": "ops/prune_snapshots.py",
+      "language": "py",
+      "lines": [
+        "def prune_snapshots(client, volume_id: str, retain_days: int, now: datetime) -> list[str]:",
+        "    cutoff = now - timedelta(days=retain_days)",
+        "    deleted = []",
+        "    for snap in client.list_snapshots(volume_id=volume_id):",
+        "        if snap.tags.get(\"keep\") == \"true\":",
+        "            continue",
+        "        if snap.created_at > cutoff:",
+        "            client.delete_snapshot(snap.id)",
+        "            deleted.append(snap.id)",
+        "    return deleted"
+      ]
+    },
+    "failing": {
+      "test": "test_prune_keeps_snapshots_inside_retention (retain_days=14)",
+      "output": [
+        "FAILED tests/test_prune.py::test_prune_keeps_snapshots_inside_retention",
+        ">       assert deleted == [\"snap-0301\", \"snap-0315\"]",
+        "E       AssertionError: assert ['snap-1003', 'snap-1009'] == ['snap-0301', 'snap-0315']"
+      ]
+    },
+    "bugLine": 6,
+    "fixes": [
+      "        if snap.created_at < cutoff:",
+      "        if snap.created_at >= cutoff:",
+      "        if snap.created_at > now - timedelta(days=retain_days + 1):",
+      "        if snap.created_at > cutoff and snap.state == \"completed\":"
+    ],
+    "fixAnswer": 0,
+    "explanation": {
+      "cause": "cutoff is the oldest moment worth keeping, so anything created after it is inside the retention window. The comparison deleted those and kept the old ones.",
+      "why": "The job quietly removed every recent restore point while hoarding stale ones. Snapshots older than the cutoff are the ones to delete; flipping to >= or nudging the cutoff by a day still deletes the newest."
+    }
+  },
+  {
+    "kind": "code-fix",
+    "id": "infra-fix-go-backoff-no-jitter",
+    "role": "infrastructure",
+    "difficulty": 3,
+    "categories": [],
+    "title": "Retries hit ledger-db in waves after every failover",
+    "ticket": "ledger-db failed over for 20 seconds and then fell over twice more. Its connection graph shows spikes of 40k requests at exactly 100ms, 200ms, 400ms and 800ms after each failure, one per retry, from every API pod at once.",
+    "file": {
+      "path": "internal/retry/backoff.go",
+      "language": "go",
+      "lines": [
+        "const (",
+        "\tbaseDelay = 100 * time.Millisecond",
+        "\tmaxDelay  = 10 * time.Second",
+        ")",
+        "",
+        "// Backoff is how long a client waits before retry attempt n, counting from 0.",
+        "func Backoff(attempt int) time.Duration {",
+        "\td := baseDelay << attempt",
+        "\tif d <= 0 || d > maxDelay {",
+        "\t\td = maxDelay",
+        "\t}",
+        "\treturn d",
+        "}"
+      ]
+    },
+    "failing": {
+      "test": "TestBackoffSpreadsClients",
+      "output": [
+        "--- FAIL: TestBackoffSpreadsClients (0.00s)",
+        "    backoff_test.go:28: 1000 calls to Backoff(3) returned 1 distinct value (800ms)",
+        "    backoff_test.go:29: want delays spread across [0s, 800ms)"
+      ]
+    },
+    "bugLine": 11,
+    "fixes": [
+      "\treturn time.Duration(rand.Int63n(int64(d)))",
+      "\treturn d + time.Duration(rand.Intn(10))",
+      "\treturn time.Duration(rand.Int63n(int64(baseDelay)))",
+      "\treturn d * time.Duration(1+rand.Intn(2))"
+    ],
+    "fixAnswer": 0,
+    "explanation": {
+      "cause": "The backoff grows and is capped, but it has no jitter: every client that failed at the same moment retries at the same moment.",
+      "why": "Synchronized retries arrive as one spike per attempt and knock the recovering database over again. Full jitter picks a random delay up to the backoff; ten nanoseconds of noise is still lockstep, a delay under baseDelay drops the growth, and doubling just makes two spikes."
+    }
+  },
+  {
+    "kind": "pr-review",
+    "id": "infra-pr-iam-wildcard-delete",
+    "role": "infrastructure",
+    "difficulty": 3,
+    "categories": [],
+    "title": "Give the backup job its own IAM policy",
+    "author": "Ana Ruiz",
+    "description": "Moves db-backup off the shared ops role. It writes nightly dumps and prunes anything past 30 days. ListBucket can't be limited to a key prefix through the Resource field anyway, so the prune statement uses a wildcard to keep it simple.",
+    "path": "iam/policies/db-backup.json",
+    "language": "json",
+    "diff": [
+      {
+        "op": "+",
+        "text": "{"
+      },
+      {
+        "op": "+",
+        "text": "  \"Version\": \"2012-10-17\","
+      },
+      {
+        "op": "+",
+        "text": "  \"Statement\": ["
+      },
+      {
+        "op": "+",
+        "text": "    {"
+      },
+      {
+        "op": "+",
+        "text": "      \"Sid\": \"WriteNightlyDumps\","
+      },
+      {
+        "op": "+",
+        "text": "      \"Effect\": \"Allow\","
+      },
+      {
+        "op": "+",
+        "text": "      \"Action\": [\"s3:PutObject\", \"s3:AbortMultipartUpload\"],"
+      },
+      {
+        "op": "+",
+        "text": "      \"Resource\": \"arn:aws:s3:::orders-db-backups/nightly/*\""
+      },
+      {
+        "op": "+",
+        "text": "    },"
+      },
+      {
+        "op": "+",
+        "text": "    {"
+      },
+      {
+        "op": "+",
+        "text": "      \"Sid\": \"PruneOldDumps\","
+      },
+      {
+        "op": "+",
+        "text": "      \"Effect\": \"Allow\","
+      },
+      {
+        "op": "+",
+        "text": "      \"Action\": [\"s3:ListBucket\", \"s3:DeleteObject\"],"
+      },
+      {
+        "op": "+",
+        "text": "      \"Resource\": \"arn:aws:s3:::*\""
+      },
+      {
+        "op": "+",
+        "text": "    }"
+      },
+      {
+        "op": "+",
+        "text": "  ]"
+      },
+      {
+        "op": "+",
+        "text": "}"
+      }
+    ],
+    "verdict": "request-changes",
+    "flaw": 13,
+    "explanation": {
+      "cause": "arn:aws:s3:::* matches every bucket and every object in the account, and the same statement grants s3:DeleteObject.",
+      "why": "A bug or a leaked credential in the backup job could now delete any object anywhere, including the backups it exists to protect. Scope the statement to the backups bucket ARN for ListBucket and orders-db-backups/nightly/* for DeleteObject."
+    }
+  },
+  {
+    "kind": "pr-review",
+    "id": "infra-pr-burn-rate-alert",
+    "role": "infrastructure",
+    "difficulty": 3,
+    "categories": [],
+    "title": "Page on error budget burn instead of raw 5xx count",
+    "author": "Jonas Weber",
+    "description": "The old alert paged at 5 errors a second whatever the traffic, so it fired every Saturday peak and slept through quiet-hour outages. This pages when checkout-api burns its 99.9% budget 14.4x too fast over both the last hour and the last 5 minutes. Slow-burn ticket alert follows.",
+    "path": "monitoring/rules/checkout-api.yaml",
+    "language": "yaml",
+    "diff": [
+      {
+        "op": " ",
+        "text": "groups:"
+      },
+      {
+        "op": " ",
+        "text": "  - name: checkout-api"
+      },
+      {
+        "op": " ",
+        "text": "    rules:"
+      },
+      {
+        "op": "-",
+        "text": "      - alert: CheckoutHighErrorRate"
+      },
+      {
+        "op": "-",
+        "text": "        expr: sum(rate(http_requests_total{service=\"checkout-api\",code=~\"5..\"}[5m])) > 5"
+      },
+      {
+        "op": "-",
+        "text": "        for: 5m"
+      },
+      {
+        "op": "+",
+        "text": "      - alert: CheckoutErrorBudgetFastBurn"
+      },
+      {
+        "op": "+",
+        "text": "        expr: |"
+      },
+      {
+        "op": "+",
+        "text": "          ("
+      },
+      {
+        "op": "+",
+        "text": "            sum by (service) (rate(http_requests_total{service=\"checkout-api\",code=~\"5..\"}[1h]))"
+      },
+      {
+        "op": "+",
+        "text": "            /"
+      },
+      {
+        "op": "+",
+        "text": "            sum by (service) (rate(http_requests_total{service=\"checkout-api\"}[1h]))"
+      },
+      {
+        "op": "+",
+        "text": "          ) > (14.4 * 0.001)"
+      },
+      {
+        "op": "+",
+        "text": "          and"
+      },
+      {
+        "op": "+",
+        "text": "          ("
+      },
+      {
+        "op": "+",
+        "text": "            sum by (service) (rate(http_requests_total{service=\"checkout-api\",code=~\"5..\"}[5m]))"
+      },
+      {
+        "op": "+",
+        "text": "            /"
+      },
+      {
+        "op": "+",
+        "text": "            sum by (service) (rate(http_requests_total{service=\"checkout-api\"}[5m]))"
+      },
+      {
+        "op": "+",
+        "text": "          ) > (14.4 * 0.001)"
+      },
+      {
+        "op": "+",
+        "text": "        for: 2m"
+      },
+      {
+        "op": " ",
+        "text": "        labels:"
+      },
+      {
+        "op": " ",
+        "text": "          severity: page"
+      }
+    ],
+    "verdict": "approve",
+    "flaw": null,
+    "explanation": {
+      "cause": "Nothing wrong: both windows divide errors by total requests for the same service, and 14.4 x 0.001 is the standard fast-burn threshold for a 99.9% SLO.",
+      "why": "The long window proves the burn is real, the short one stops the page lingering after recovery, and the and matches because both sides aggregate by service. At 14.4x, 2% of a 30-day budget is gone in an hour, which is worth waking someone."
+    }
   }
 ]

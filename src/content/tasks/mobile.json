@@ -191,5 +191,296 @@
       "cause": "Nothing wrong: decoding moves to a background queue and UIKit is only touched on main.",
       "why": "preparingForDisplay() forces the decode early, the weak capture avoids keeping a reused cell alive, and the image view is set on the main queue as UIKit requires."
     }
+  },
+  {
+    "kind": "code-fix",
+    "id": "mobile-fix-swift-version-string-compare",
+    "role": "mobile",
+    "difficulty": 1,
+    "categories": [],
+    "title": "Users on the newest version are told to update",
+    "ticket": "Everyone who installed 7.10.0 today is stuck on the forced-update screen. Tapping Update opens the store, which says they already have the latest version.",
+    "file": {
+      "path": "App/Startup/UpdateGate.swift",
+      "language": "swift",
+      "lines": [
+        "import Foundation",
+        "",
+        "struct UpdateGate {",
+        "    /// From remote config, e.g. \"7.9.0\".",
+        "    let minimumVersion: String",
+        "",
+        "    func requiresUpdate(current: String) -> Bool {",
+        "        return current < minimumVersion",
+        "    }",
+        "}"
+      ]
+    },
+    "failing": {
+      "test": "UpdateGateTests.testNewerVersionIsNotBlocked",
+      "output": [
+        "XCTAssertFalse failed: requiresUpdate(current: \"7.10.0\") with minimum \"7.9.0\" returned true"
+      ]
+    },
+    "bugLine": 7,
+    "fixes": [
+      "        return current.compare(minimumVersion, options: .numeric) == .orderedAscending",
+      "        return current <= minimumVersion",
+      "        return current.compare(minimumVersion, options: .numeric) == .orderedDescending",
+      "        return current.compare(minimumVersion) == .orderedAscending"
+    ],
+    "fixAnswer": 0,
+    "explanation": {
+      "cause": "Comparing version strings with < compares them character by character, so \"7.10.0\" sorts before \"7.9.0\" because '1' comes before '9'.",
+      "why": "A numeric compare reads each run of digits as a number, so 10 is greater than 9. compare() without .numeric is the same character-by-character order as <, and the descending check blocks only newer builds."
+    }
+  },
+  {
+    "kind": "pr-review",
+    "id": "mobile-pr-recycled-favorite-heart",
+    "role": "mobile",
+    "difficulty": 2,
+    "categories": [
+      "ecommerce"
+    ],
+    "title": "Show favorite hearts on the product list",
+    "author": "Priya Raman",
+    "description": "Favorites shipped on the detail screen last release. This shows a filled heart on list rows for favorited products and lets you toggle it from the list. TalkBack reads the right action for each state.",
+    "path": "app/src/main/java/shop/catalog/ProductAdapter.kt",
+    "language": "kotlin",
+    "diff": [
+      {
+        "op": " ",
+        "text": "override fun onBindViewHolder(holder: ProductHolder, position: Int) {"
+      },
+      {
+        "op": " ",
+        "text": "    val product = getItem(position)"
+      },
+      {
+        "op": " ",
+        "text": "    holder.name.text = product.name"
+      },
+      {
+        "op": " ",
+        "text": "    holder.price.text = priceFormat.format(product.price)"
+      },
+      {
+        "op": "+",
+        "text": "    if (product.isFavorite) holder.heart.setImageResource(R.drawable.ic_heart_filled)"
+      },
+      {
+        "op": "+",
+        "text": "    holder.heart.contentDescription = holder.itemView.context.getString("
+      },
+      {
+        "op": "+",
+        "text": "        if (product.isFavorite) R.string.unfavorite else R.string.favorite)"
+      },
+      {
+        "op": "+",
+        "text": "    holder.heart.setOnClickListener { onFavoriteToggled(product.id) }"
+      },
+      {
+        "op": " ",
+        "text": "}"
+      }
+    ],
+    "verdict": "request-changes",
+    "flaw": 4,
+    "explanation": {
+      "cause": "The heart is set to filled for favorites but never set back to outlined for everything else.",
+      "why": "RecyclerView reuses row views, so a row that once showed a favorite keeps its filled heart when it is rebound to a product that isn't one. Scroll a little and random products look favorited. Every bind has to set both states, as the content description line does."
+    }
+  },
+  {
+    "kind": "code-fix",
+    "id": "mobile-fix-kotlin-globalscope-fragment",
+    "role": "mobile",
+    "difficulty": 3,
+    "categories": [
+      "fintech"
+    ],
+    "title": "Quote screen crashes after you open a news story",
+    "ticket": "Crash spike in 5.2.0: open a stock, tap a news story under the chart, wait a few seconds. NullPointerException in QuoteFragment.getBinding. Only happens while markets are open and prices are streaming.",
+    "file": {
+      "path": "app/src/main/java/markets/quote/QuoteFragment.kt",
+      "language": "kotlin",
+      "lines": [
+        "class QuoteFragment : Fragment(R.layout.fragment_quote) {",
+        "    private var _binding: FragmentQuoteBinding? = null",
+        "    private val binding get() = _binding!!",
+        "    private val viewModel: QuoteViewModel by viewModels()",
+        "",
+        "    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {",
+        "        _binding = FragmentQuoteBinding.bind(view)",
+        "        GlobalScope.launch(Dispatchers.Main) {",
+        "            viewModel.prices.collect { binding.price.text = it.formatted }",
+        "        }",
+        "    }",
+        "",
+        "    override fun onDestroyView() {",
+        "        _binding = null",
+        "        super.onDestroyView()",
+        "    }",
+        "}"
+      ]
+    },
+    "failing": {
+      "test": "QuoteFragmentTest.keepsStreamingSafelyOnTheBackStack",
+      "output": [
+        "java.lang.NullPointerException",
+        "    at markets.quote.QuoteFragment.getBinding(QuoteFragment.kt:3)",
+        "    at markets.quote.QuoteFragment$onViewCreated$1$1.emit(QuoteFragment.kt:9)"
+      ]
+    },
+    "bugLine": 7,
+    "fixes": [
+      "        viewLifecycleOwner.lifecycleScope.launch {",
+      "        lifecycleScope.launch {",
+      "        CoroutineScope(Dispatchers.Main).launch {",
+      "        GlobalScope.launch(Dispatchers.Main.immediate) {"
+    ],
+    "fixAnswer": 0,
+    "explanation": {
+      "cause": "The price collector runs in GlobalScope, so it keeps going after the fragment's view is destroyed and reads the binding that onDestroyView set to null.",
+      "why": "Opening a story puts the fragment on the back stack: its view is destroyed but the fragment lives on. Only the view lifecycle's scope is cancelled in onDestroyView. The fragment's own lifecycleScope outlives the view, and a fresh CoroutineScope is cancelled by nothing."
+    }
+  },
+  {
+    "kind": "pr-review",
+    "id": "mobile-pr-concurrent-token-refresh",
+    "role": "mobile",
+    "difficulty": 3,
+    "categories": [],
+    "title": "Retry a request once after refreshing an expired token",
+    "author": "Mateo Ruiz",
+    "description": "When the access token expires mid-session every call fails until the app is relaunched. This refreshes and retries a 401 once with the new token. Reminder for reviewers: the auth server rotates the refresh token on every use and revokes the session if a used one comes back.",
+    "path": "Networking/APIClient.swift",
+    "language": "swift",
+    "diff": [
+      {
+        "op": " ",
+        "text": "func send(_ request: URLRequest) async throws -> Data {"
+      },
+      {
+        "op": "-",
+        "text": "    var authed = request"
+      },
+      {
+        "op": "-",
+        "text": "    authed.setValue(\"Bearer \\(await tokens.access)\", forHTTPHeaderField: \"Authorization\")"
+      },
+      {
+        "op": "-",
+        "text": "    return try await session.data(for: authed).0"
+      },
+      {
+        "op": "+",
+        "text": "    let token = await tokens.access"
+      },
+      {
+        "op": "+",
+        "text": "    let (data, response) = try await session.data(for: request.bearer(token))"
+      },
+      {
+        "op": "+",
+        "text": "    guard (response as? HTTPURLResponse)?.statusCode == 401 else { return data }"
+      },
+      {
+        "op": "+",
+        "text": "    try await tokens.refresh()"
+      },
+      {
+        "op": "+",
+        "text": "    let fresh = await tokens.access"
+      },
+      {
+        "op": "+",
+        "text": "    return try await session.data(for: request.bearer(fresh)).0"
+      },
+      {
+        "op": " ",
+        "text": "}"
+      }
+    ],
+    "verdict": "request-changes",
+    "flaw": 7,
+    "explanation": {
+      "cause": "Every request that gets a 401 calls refresh() on its own, so when the token expires with several requests in flight, each one rotates the refresh token.",
+      "why": "The second refresh sends a refresh token the first one already used. The server treats that as reuse and revokes the session, logging the user out on the exact path meant to keep them in. Refresh only if the access token is still the one this request sent, and share one in-flight refresh."
+    }
+  },
+  {
+    "kind": "pr-review",
+    "id": "mobile-pr-keychain-after-first-unlock",
+    "role": "mobile",
+    "difficulty": 3,
+    "categories": [],
+    "title": "Let background refresh read the session token while locked",
+    "author": "Hana Okafor",
+    "description": "Background refresh fails with errSecInteractionNotAllowed (-25308) whenever the phone is locked, so the inbox is stale every morning. The token becomes readable after the first unlock since boot and still never leaves the device in backups. Existing items move to the new class on the next save, because save updates before it adds.",
+    "path": "Auth/SessionKeychain.swift",
+    "language": "swift",
+    "diff": [
+      {
+        "op": " ",
+        "text": "func save(token: String) throws {"
+      },
+      {
+        "op": " ",
+        "text": "    let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,"
+      },
+      {
+        "op": " ",
+        "text": "                                kSecAttrService as String: service,"
+      },
+      {
+        "op": " ",
+        "text": "                                kSecAttrAccount as String: \"session\"]"
+      },
+      {
+        "op": " ",
+        "text": "    let attributes: [String: Any] = [kSecValueData as String: Data(token.utf8),"
+      },
+      {
+        "op": "-",
+        "text": "                                     kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlocked]"
+      },
+      {
+        "op": "+",
+        "text": "                                     kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly]"
+      },
+      {
+        "op": " ",
+        "text": "    var status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)"
+      },
+      {
+        "op": " ",
+        "text": "    if status == errSecItemNotFound {"
+      },
+      {
+        "op": " ",
+        "text": "        status = SecItemAdd(query.merging(attributes) { $1 } as CFDictionary, nil)"
+      },
+      {
+        "op": " ",
+        "text": "    }"
+      },
+      {
+        "op": " ",
+        "text": "    guard status == errSecSuccess else { throw KeychainError(status) }"
+      },
+      {
+        "op": " ",
+        "text": "}"
+      }
+    ],
+    "verdict": "approve",
+    "flaw": null,
+    "explanation": {
+      "cause": "Nothing wrong: AfterFirstUnlockThisDeviceOnly is the standard class for a token that background work must read.",
+      "why": "WhenUnlocked makes the item unreadable whenever the screen is locked, which is exactly when background refresh runs. The new class stays encrypted until the first unlock after boot, ThisDeviceOnly keeps it out of backups, and SecItemUpdate moves existing items to the new class."
+    }
   }
 ]

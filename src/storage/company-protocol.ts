@@ -30,7 +30,7 @@ export type FoundRequest = z.input<typeof FoundRequestSchema>;
 /** Spend exactly `seedCents` from the wallet with ref `fundingRef`; the next save funds the company. */
 export const FoundResponseSchema = z.object({ companyId: z.string(), fundingRef: z.string(), seedCents: Cents });
 
-export const LEDGER_REASONS = ["seed", "revenue", "room-upkeep", "server-upkeep", "contractor", "payroll", "room-purchase", "server-purchase"] as const;
+export const LEDGER_REASONS = ["seed", "revenue", "room-upkeep", "server-upkeep", "contractor", "pantry", "payroll", "room-purchase", "server-purchase", "investment", "dividend"] as const;
 
 export const CompanyMemberSchema = z.object({
   username: z.string(),
@@ -77,6 +77,13 @@ export const CompanySchema = z.object({
   postings: z.array(z.lazy(() => PostingSchema)).default([]),
   /** Applicants to this company's postings; only the founder and hiring managers get them. */
   applications: z.array(z.lazy(() => ApplicationSchema)).default([]),
+  /** Who owns the company. */
+  capTable: z.lazy(() => CapTableSchema).nullable().default(null),
+  /** Offers the founder has out to investors; only the founder gets them. */
+  investmentOffers: z.array(z.lazy(() => InvestmentOfferSchema)).default([]),
+  trackers: z.lazy(() => TrackersSchema).nullable().default(null),
+  /** Players asking to invest; only the founder gets them. */
+  investmentProposals: z.array(z.lazy(() => InvestmentProposalSchema)).default([]),
 });
 export type Company = z.output<typeof CompanySchema>;
 
@@ -103,6 +110,16 @@ export const MyCompanySchema = z.object({
   payouts: z.array(PendingPayoutSchema),
   /** Postings you've interviewed for, and where each stands. */
   applications: z.array(z.lazy(() => MyApplicationSchema)).default([]),
+  /** Investment offers made to you, waiting for an answer. */
+  investmentOffers: z.array(z.lazy(() => ReceivedOfferSchema)).default([]),
+  /** Your stakes in companies, in or out of the one you work at. */
+  holdings: z.array(z.lazy(() => HoldingSchema)).default([]),
+  /** Dividends booked for you and not yet in your wallet; claimed like payroll. */
+  dividends: z.array(z.lazy(() => PendingDividendSchema)).default([]),
+  /** Your proposals to invest, waiting for a founder's answer. */
+  proposals: z.array(z.lazy(() => MyProposalSchema)).default([]),
+  /** Investments being negotiated in person, as founder or investor. */
+  deals: z.array(z.lazy(() => DealSchema)).default([]),
 });
 export type MyCompany = z.output<typeof MyCompanySchema>;
 
@@ -115,7 +132,8 @@ export const SetMemberRequestSchema = z.object({ username: z.string(), role: Rol
  * POST /api/company/workday body: tasks the member shipped today. Phase 1 trusts it within a cap
  * (the server clamps it); phase 2 records each finished task on the server instead.
  */
-export const SettleRequestSchema = z.object({ tasksShipped: z.int().nonnegative().max(50) });
+/** Shipped work is counted from the server's own record; `tasksShipped` is accepted from older clients and ignored. */
+export const SettleRequestSchema = z.object({ tasksShipped: z.int().nonnegative().max(50).optional() });
 export type SettleRequest = z.input<typeof SettleRequestSchema>;
 
 /** POST /api/company/workday: what the settled day booked. */
@@ -167,6 +185,14 @@ export const CompanySummarySchema = z.object({
   lifetimeRevenueCents: Cents,
   /** Open postings only. */
   postings: z.array(PostingSchema).max(20),
+  /** What it's worth now (see domain/company/valuation.ts); older servers omit it. */
+  valuationCents: Cents.default(0),
+  /** Worth at each of the last 30 work days, oldest first: the market's view of how it's doing. */
+  valuationHistory: z.array(z.object({ workDay: Count, valuationCents: Cents })).max(30).default([]),
+  /** Change over the last 7 work days in basis points; null until it has a week behind it. */
+  weekChangeBps: z.int().nullable().default(null),
+  /** What the latest closed investment said the company was worth, and when; null before any. */
+  lastRound: z.object({ valuationCents: Cents, workDay: Count, at: z.number() }).nullable().default(null),
 });
 export type CompanySummary = z.output<typeof CompanySummarySchema>;
 
@@ -217,3 +243,149 @@ export const InterviewResultSchema = z.object({
   application: MyApplicationSchema,
 });
 export type InterviewResult = z.output<typeof InterviewResultSchema>;
+
+// ── Daily work, recorded on the server ─────────────────────────────
+
+export const WORK_PATH = "/api/company/work";
+
+const TaskQuestionSchema = z.discriminatedUnion("kind", [CodeFixQuestionSchema, ReviewQuestionSchema]);
+
+export const WorkResultSchema = z.object({
+  outcome: z.enum(["shipped", "wrong-line", "wrong-fix", "correct", "shipped-a-bug", "blocked-a-good-pr"]),
+  isDone: z.boolean(),
+  reveal: z.object({ line: z.int().nonnegative().nullable(), cause: z.string(), why: z.string() }),
+});
+export type WorkResult = z.output<typeof WorkResultSchema>;
+
+/** One task on today's board; `result` is set once it's been answered (one attempt each). */
+export const WorkItemSchema = z.object({ question: TaskQuestionSchema, result: WorkResultSchema.nullable() });
+export type WorkItem = z.output<typeof WorkItemSchema>;
+
+/** GET /api/company/work: your board for the UTC day. */
+export const WorkBoardSchema = z.object({
+  day: z.string(),
+  items: z.array(WorkItemSchema).max(5),
+  /** Shipped by every member since the last closed work day: what closing the day will count. */
+  shippedSinceClose: Count,
+});
+export type WorkBoard = z.output<typeof WorkBoardSchema>;
+
+/** POST /api/company/work/:taskId: one answer, graded once. Returns the graded WorkItem. */
+export const WorkAnswerSchema = InterviewAnswerSchema;
+export type WorkAnswer = z.input<typeof WorkAnswerSchema>;
+
+// ── Investors ──────────────────────────────────────────────────────
+
+export const OFFERS_PATH = "/api/company/offers";
+const Bps = z.int().min(0).max(10_000);
+
+export const CapTableSchema = z.object({
+  founder: z.string(),
+  founderBps: Bps,
+  holders: z.array(z.object({ username: z.string(), bps: Bps, investedCents: Cents })).max(50),
+});
+export type CapTableWire = z.output<typeof CapTableSchema>;
+
+/** An offer the founder made: money in for a share of the company. */
+export const InvestmentOfferSchema = z.object({
+  id: z.string(),
+  investor: z.string(),
+  amountCents: Cents,
+  equityBps: Bps,
+  createdAt: z.number(),
+});
+export type InvestmentOffer = z.output<typeof InvestmentOfferSchema>;
+
+/** POST /api/company/offers (founder only). */
+export const OfferRequestSchema = z.object({ investor: z.string().trim().min(1).max(24), amountCents: Cents, equityBps: Bps });
+export type OfferRequest = z.input<typeof OfferRequestSchema>;
+
+/** An offer as the investor sees it, with what it says the company is worth. */
+export const ReceivedOfferSchema = InvestmentOfferSchema.extend({
+  companyId: z.string(),
+  companyName: z.string(),
+  category: CategoryIdSchema,
+  levelTitle: z.string(),
+  founder: z.string(),
+  valuationCents: Cents,
+});
+export type ReceivedOffer = z.output<typeof ReceivedOfferSchema>;
+
+/** POST /api/offers/:id/accept: the spend that pays for the stake; the client spends it with reason "invest". */
+export const AcceptOfferResponseSchema = z.object({ investRef: z.string(), amountCents: Cents });
+export type AcceptOfferResponse = z.output<typeof AcceptOfferResponseSchema>;
+
+export const HoldingSchema = z.object({ companyId: z.string(), companyName: z.string(), bps: Bps, investedCents: Cents });
+export type Holding = z.output<typeof HoldingSchema>;
+
+export const PendingDividendSchema = z.object({ id: z.string(), companyId: z.string(), companyName: z.string(), workDay: Count, amountCents: Cents });
+export type PendingDividend = z.output<typeof PendingDividendSchema>;
+
+const WindowSchema = z.object({ earningsCents: Cents, expensesCents: Cents, expensesByReason: z.record(z.string(), Cents) });
+
+/** Investment, inventory, and earnings and running costs over 7 and 30 work days; computed on the server from the books. */
+export const TrackersSchema = z.object({
+  investedCents: Cents,
+  inventory: z.array(z.object({ item: z.string(), count: Count, costCents: Cents })),
+  inventoryCents: Cents,
+  last7: WindowSchema,
+  last30: WindowSchema,
+});
+export type TrackersWire = z.output<typeof TrackersSchema>;
+
+/** POST /api/companies/:companyId/proposals: a player asks to invest; the founder accepts (it becomes an offer to them) or declines. */
+export const ProposalRequestSchema = z.object({ amountCents: Cents, equityBps: Bps });
+export type ProposalRequest = z.input<typeof ProposalRequestSchema>;
+
+/** A proposal as the founder sees it. */
+export const InvestmentProposalSchema = z.object({ id: z.string(), investor: z.string(), amountCents: Cents, equityBps: Bps, createdAt: z.number() });
+export type InvestmentProposal = z.output<typeof InvestmentProposalSchema>;
+
+/** A proposal as the player who made it sees it. */
+export const MyProposalSchema = InvestmentProposalSchema.extend({ companyId: z.string(), companyName: z.string() });
+export type MyProposal = z.output<typeof MyProposalSchema>;
+
+// ── Deals: investments agreed in a meeting ─────────────────────────
+
+export const DEALS_PATH = "/api/deals";
+
+const TermsSchema = z.object({ amountCents: Cents, equityBps: Bps });
+
+/**
+ * An investment being negotiated face to face in the company's office (see domain/company/deal.ts).
+ * Accepting a proposal or making an offer opens one; it closes when both agree to the same terms.
+ */
+export const DealSchema = z.object({
+  id: z.string(),
+  companyId: z.string(),
+  companyName: z.string(),
+  founder: z.string(),
+  investor: z.string(),
+  terms: TermsSchema,
+  stage: z.enum(["talking", "agreed", "walked-away"]),
+  /** Who has agreed to the terms on the table, while talking. */
+  agreed: z.array(z.enum(["founder", "investor"])).max(2),
+  /** Once agreed: the spend the investor's wallet makes for exactly these terms. */
+  investRef: z.string().nullable(),
+  createdAt: z.number(),
+});
+export type DealWire = z.output<typeof DealSchema>;
+
+/** POST /api/deals/:id/terms: new terms on the table (either side). Clears both agreements. */
+export const DealTermsRequestSchema = TermsSchema;
+/** POST /api/deals/:id/agree: agree to these terms, exactly as read; refused if they changed. */
+export const DealAgreeRequestSchema = TermsSchema;
+export type DealTerms = z.input<typeof TermsSchema>;
+
+/** POST /api/deals/:id/meeting: the office room to meet in; the investor gets in while the deal is open. */
+export const MeetingResponseSchema = z.object({ code: z.string().min(1) });
+export type MeetingResponse = z.output<typeof MeetingResponseSchema>;
+
+/** GET /api/companies/:id/office: what a visitor's floor needs to draw that office; public, so no money in it. */
+export const officeLayoutPath = (companyId: string) => `${COMPANIES_PATH}/${encodeURIComponent(companyId)}/office`;
+export const OfficeLayoutSchema = z.object({
+  layout: CompanySchema.pick({ name: true, category: true, rooms: true, servers: true }).extend({
+    members: z.array(CompanyMemberSchema.pick({ username: true, role: true, isFounder: true, joinedAt: true })),
+  }),
+});
+export type OfficeLayout = z.output<typeof OfficeLayoutSchema>["layout"];

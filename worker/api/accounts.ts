@@ -1,6 +1,7 @@
 import { z } from "zod";
+import type { Logger } from "../../server/log.ts";
 import { featuredBadge } from "../../src/domain/achievements.ts";
-import { isPlausibleProgress, NO_PROMISED_MONEY, type PromisedMoney, type TierOf } from "../../src/domain/audit.ts";
+import { NO_PROMISED_MONEY, progressProblem, type PromisedMoney, type TierOf } from "../../src/domain/audit.ts";
 import { careerLevel } from "../../src/domain/career.ts";
 import { payRef } from "../../src/domain/economy.ts";
 import { shownTags } from "../../src/domain/tags.ts";
@@ -8,7 +9,7 @@ import { emptyProgress, ProgressSchema, type Progress } from "../../src/domain/p
 import type { Account, SyncedProgress } from "../../src/storage/account-protocol.ts";
 import { LEADERBOARD_SIZE, type Leaderboard } from "../../src/storage/leaderboard-protocol.ts";
 import { hashPassword, verifyPassword } from "./password.ts";
-import type { AccountStore, CompanyBank, GrantBank, LedgerRow, PendingGrant, SaveMoves, Standing, User } from "./store.ts";
+import type { AccountStore, CompanyBank, GrantBank, InvestorBank, LedgerRow, PendingGrant, SaveMoves, Standing, User } from "./store.ts";
 import { hashToken, newSessionToken } from "./tokens.ts";
 
 export const SESSION_SECONDS = 30 * 24 * 60 * 60;
@@ -36,6 +37,18 @@ export type SaveResult = { readonly ok: true; readonly updatedAt: number } | { r
 
 type Clock = () => number;
 
+/** What the account service can lean on; anything missing simply isn't vouched for (purchases, company money, grants). */
+export type AccountPorts = {
+  readonly tierOf?: TierOf;
+  readonly bank?: CompanyBank;
+  readonly grants?: GrantBank;
+  readonly investors?: InvestorBank;
+  readonly logger?: Logger;
+};
+
+/** How much play from before an account existed its first save may bring, however far back its history claims to go. */
+const FIRST_SAVE_FLOOR_SECONDS = 7 * 24 * 60 * 60;
+
 /** Seeds, payroll and grant claims new in this save, for the server's books to settle alongside it. */
 function saveMovesOf(previous: Progress, next: Progress): SaveMoves {
   const fresh = next.wallet.ledger.filter((entry) => entry.seq >= previous.wallet.nextSeq);
@@ -43,11 +56,14 @@ function saveMovesOf(previous: Progress, next: Progress): SaveMoves {
     fundingRefs: fresh.filter((entry) => entry.reason === "company").map((entry) => entry.ref),
     payoutIds: fresh.filter((entry) => entry.reason === "payroll").map((entry) => entry.ref.slice(PAYROLL_REF_PREFIX.length)),
     grantIds: fresh.filter((entry) => entry.reason === "grant").map((entry) => entry.ref.slice(GRANT_REF_PREFIX.length)),
+    investRefs: fresh.filter((entry) => entry.reason === "invest").map((entry) => entry.ref),
+    dividendIds: fresh.filter((entry) => entry.reason === "dividend").map((entry) => entry.ref.slice(DIVIDEND_REF_PREFIX.length)),
   };
 }
 
 const PAYROLL_REF_PREFIX = payRef.payroll("");
 const GRANT_REF_PREFIX = payRef.grant("");
+const DIVIDEND_REF_PREFIX = payRef.dividend("");
 
 /** What the client may know about an account. */
 export function accountOf(user: User): Account {
@@ -70,13 +86,19 @@ export class AccountService {
   private readonly bank: CompanyBank | undefined;
   /** Admin grants issued to each player; without it, grant money in a save is refused. */
   private readonly grants: GrantBank | undefined;
+  /** Investments each player agreed to and dividends booked for them; without it, both are refused. */
+  private readonly investors: InvestorBank | undefined;
 
-  constructor(store: AccountStore, now: Clock, tierOf?: TierOf, bank?: CompanyBank, grants?: GrantBank) {
+  private readonly logger: Logger | undefined;
+
+  constructor(store: AccountStore, now: Clock, ports: AccountPorts = {}) {
     this.store = store;
     this.now = now;
-    this.tierOf = tierOf;
-    this.bank = bank;
-    this.grants = grants;
+    this.tierOf = ports.tierOf;
+    this.bank = ports.bank;
+    this.grants = ports.grants;
+    this.investors = ports.investors;
+    this.logger = ports.logger;
   }
 
   /** Creates the account and, when it's plausible, keeps the progress earned before signing up. */
@@ -86,7 +108,9 @@ export class AccountService {
     if (!(await this.store.createUser(user))) return { ok: false, failure: "username_taken" };
 
     let progress: SyncedProgress | null = null;
-    if (anonymous && isPlausibleProgress(emptyProgress(), anonymous, this.anonymousSeconds(anonymous), this.tierOf)) {
+    const problem = anonymous ? progressProblem(emptyProgress(), anonymous, this.firstSaveSeconds(user, anonymous), this.tierOf) : null;
+    if (anonymous && problem) this.logger?.("warn", "signup_progress_refused", { user: user.id, problem });
+    if (anonymous && !problem) {
       progress = { progress: anonymous, updatedAt: this.now() };
       await this.store.saveProgress(user.id, { body: JSON.stringify(anonymous), updatedAt: progress.updatedAt }, standingOf(anonymous), this.creditsSince(emptyProgress(), anonymous));
     }
@@ -127,11 +151,15 @@ export class AccountService {
   /** Accepts the save only if its wallet could have been earned since the last one; otherwise hands back what's stored. */
   async saveProgress(user: User, next: Progress): Promise<SaveResult> {
     const current = await this.progressOf(user);
-    const since = current?.updatedAt ?? user.createdAt;
-    const elapsedSeconds = Math.max(0, (this.now() - since) / 1000);
+    const elapsedSeconds = current ? Math.max(0, (this.now() - current.updatedAt) / 1000) : this.firstSaveSeconds(user, next);
     const previous = current?.progress ?? emptyProgress();
     const promised = await this.promisedTo(user);
-    if (!isPlausibleProgress(previous, next, elapsedSeconds, this.tierOf, promised)) return { ok: false, current };
+    const problem = progressProblem(previous, next, elapsedSeconds, this.tierOf, promised);
+    if (problem) {
+      this.logger?.("warn", "save_refused", { user: user.id, problem, isFirstSave: current === null });
+      return { ok: false, current };
+    }
+    if (!current) this.logger?.("info", "first_save", { user: user.id, balanceCents: next.wallet.balanceCents, correctCards: next.correctCards });
     const updatedAt = this.now();
     await this.store.saveProgress(user.id, { body: JSON.stringify(next), updatedAt }, standingOf(next), this.creditsSince(previous, next), saveMovesOf(previous, next));
     return { ok: true, updatedAt };
@@ -144,8 +172,18 @@ export class AccountService {
 
   /** Everything the server has promised this player's wallet and not yet seen claimed. */
   private async promisedTo(user: User): Promise<PromisedMoney> {
-    const [company, grants] = await Promise.all([this.bank ? this.bank.claimsFor(user.id, this.now()) : NO_PROMISED_MONEY, this.pendingGrants(user)]);
-    return { fundings: company.fundings, payouts: company.payouts, grants: new Map(grants.map((grant) => [payRef.grant(grant.id), grant.amountCents])) };
+    const [company, grants, investing] = await Promise.all([
+      this.bank ? this.bank.claimsFor(user.id, this.now()) : NO_PROMISED_MONEY,
+      this.pendingGrants(user),
+      this.investors ? this.investors.claimsFor(user.id, this.now()) : NO_PROMISED_MONEY,
+    ]);
+    return {
+      fundings: company.fundings,
+      payouts: company.payouts,
+      grants: new Map(grants.map((grant) => [payRef.grant(grant.id), grant.amountCents])),
+      investments: investing.investments,
+      dividends: investing.dividends,
+    };
   }
 
   /** The account's balance by the server's books, which startup-mode spending will draw on. */
@@ -180,6 +218,16 @@ export class AccountService {
   private async isOverLimit(key: string, limit: number): Promise<boolean> {
     const windowStart = Math.floor(this.now() / ATTEMPT_WINDOW_MS) * ATTEMPT_WINDOW_MS;
     return (await this.store.countAttempt(key, windowStart)) > limit;
+  }
+
+  /**
+   * An account's first save may carry play from before it signed up (guest play, or saves an older server refused).
+   * The account's own age always counts; the save's history may add up to a week before it — that history is the
+   * client's word, so it never buys more than that.
+   */
+  private firstSaveSeconds(user: User, next: Progress): number {
+    const accountAgeSeconds = Math.max(0, (this.now() - user.createdAt) / 1000);
+    return Math.max(accountAgeSeconds, Math.min(this.anonymousSeconds(next), FIRST_SAVE_FLOOR_SECONDS));
   }
 
   private anonymousSeconds(progress: Progress): number {

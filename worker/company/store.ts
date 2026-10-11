@@ -1,6 +1,5 @@
 /** What the company service needs from storage: D1 in production, memory in tests. Money moves are conditional writes. */
 import type { CategoryId, RoomKindId, ServerTierId } from "../../src/domain/company/catalog.ts";
-import type { LedgerReason } from "../../src/domain/company/rules.ts";
 import type { Role } from "../../src/domain/incident.ts";
 import type { LEDGER_REASONS, PendingPayout, ReceivedInvitation } from "../../src/storage/company-protocol.ts";
 
@@ -22,7 +21,16 @@ export type CompanyRow = {
   readonly createdAt: number;
 };
 
-export type MemberRow = { readonly userId: string; readonly username: string; readonly role: Role; readonly payCents: number; readonly isFounder: boolean; readonly joinedAt: number };
+export type MemberRow = {
+  readonly userId: string;
+  readonly username: string;
+  readonly role: Role;
+  readonly payCents: number;
+  readonly isFounder: boolean;
+  readonly joinedAt: number;
+  /** May open postings and hire; the founder always may. */
+  readonly canHire: boolean;
+};
 
 export type InvitationRow = {
   readonly id: string;
@@ -46,6 +54,8 @@ export type CompanyView = {
   readonly pendingInvitations: readonly InvitationRow[];
   /** Newest last. */
   readonly ledger: readonly BookLine[];
+  /** Every revenue line ever booked; with work days, it sets the company's level. */
+  readonly lifetimeRevenueCents: number;
 };
 
 /** Something bought from company funds: booked only if the funds still cover it when written. */
@@ -59,8 +69,12 @@ export type SettledDay = {
   readonly fromWorkDay: number;
   readonly today: string;
   readonly at: number;
-  readonly lines: readonly { readonly ref: string; readonly reason: LedgerReason; readonly amountCents: number; readonly userId: string | null; readonly note: string | null }[];
+  readonly lines: readonly { readonly ref: string; readonly reason: BookReason; readonly amountCents: number; readonly userId: string | null; readonly note: string | null }[];
   readonly payouts: readonly { readonly id: string; readonly userId: string; readonly amountCents: number }[];
+  /** Investors' share of the week's profit, on the days that close a week. */
+  readonly dividends: readonly { readonly id: string; readonly userId: string; readonly amountCents: number }[];
+  /** Shipped work rows this day counts; marked counted only if this settlement wins the day. */
+  readonly workIds: readonly string[];
 };
 
 export interface CompanyStore {
@@ -84,7 +98,13 @@ export interface CompanyStore {
   /** Joins the company and closes the offer; false when the player already belongs to a company. */
   accept(invitation: InvitationRow, at: number): Promise<boolean>;
   decline(invitationId: string): Promise<void>;
-  setMember(companyId: string, userId: string, role: Role, payCents: number): Promise<void>;
+  /** `canHire` undefined leaves the member's hiring permission as it is. */
+  setMember(companyId: string, userId: string, role: Role, payCents: number, canHire?: boolean): Promise<void>;
+  /**
+   * Takes a member off the staff (fired or leaving), freeing their desk. Never the founder; false when they
+   * weren't a member. Booked payouts and any stake they hold are untouched.
+   */
+  removeMember(companyId: string, userId: string): Promise<boolean>;
   /** False when another settlement got there first. */
   settle(day: SettledDay): Promise<boolean>;
 }

@@ -1,3 +1,4 @@
+import { workerLogger } from "./log.ts";
 import { findScenario } from "../server/scenarios.ts";
 import { AccountService, ATTEMPT_WINDOW_MS } from "./api/accounts.ts";
 import { D1AccountStore } from "./api/d1-store.ts";
@@ -11,9 +12,22 @@ import { DIRECTORY_NAME } from "./directory-object.ts";
 import type { Env } from "./env.ts";
 import { routeRoomSocket } from "./rooms.ts";
 import { D1CompanyStore } from "./company/d1-store.ts";
-import { handleCompany, INVITATIONS_PATH } from "./company/routes.ts";
+import { APPLICATIONS_PATH, APPLY_PATH, handleCompany, handleDirectory, INTERVIEWS_PATH, INVITATIONS_PATH, OFFICE_LAYOUT, PROPOSALS_PATH, RECEIVED_OFFERS_PATH } from "./company/routes.ts";
+import { D1ProposalStore } from "./company/proposal-d1-store.ts";
+import { ProposalService } from "./company/proposals.ts";
+import { D1InvestorStore } from "./company/investor-d1-store.ts";
+import { InvestingService } from "./company/investing.ts";
+import { CompanyDirectory } from "./company/directory.ts";
+import { HiringService } from "./company/hiring.ts";
+import { WorkService } from "./company/work.ts";
+import { D1WorkStore } from "./company/work-d1-store.ts";
+import { D1CompanyDirectory, D1HiringStore } from "./company/hiring-d1-store.ts";
+import { TASKS } from "./company/tasks.ts";
 import { CompanyService } from "./company/service.ts";
-import { COMPANY_PATH } from "../src/storage/company-protocol.ts";
+import { COMPANIES_PATH, COMPANY_PATH, DEALS_PATH, TOP_COMPANIES_PATH } from "../src/storage/company-protocol.ts";
+import { careerLevel } from "../src/domain/career.ts";
+import { emptyProgress, ProgressSchema, type Progress } from "../src/domain/progress.ts";
+import type { AccountStore } from "./api/store.ts";
 import { D1AdminStore } from "./admin/d1-store.ts";
 import { ADMIN_PREFIX, handleAdmin } from "./admin/routes.ts";
 import { AdminService } from "./admin/service.ts";
@@ -21,6 +35,12 @@ import { D1GrantStore } from "./grants/d1-store.ts";
 import { GrantDesk } from "./grants/service.ts";
 import { shownTags } from "../src/domain/tags.ts";
 import { sessionTokenOf } from "./api/http.ts";
+import { pantryCostOn } from "../src/domain/pantry.ts";
+import { CompanyOffice } from "./company/office.ts";
+import { D1DealStore } from "./company/deal-d1-store.ts";
+import { dealWireOf, DealService } from "./company/deals.ts";
+import { D1OfficeRoomStore } from "./company/office-d1-store.ts";
+import { TEAM_SCENARIO } from "../src/warroom/scenarios/index.ts";
 
 /** Billing exists only once every Stripe value is configured; until then its routes answer 503. */
 function billingFor(env: Env, store: D1EntitlementStore): BillingService | null {
@@ -37,13 +57,41 @@ const COMPANY_WRITES_PER_WINDOW = 60;
 /** Grants one admin may issue per attempt window: plenty for testing, a ceiling on a stuck retry loop. */
 const GRANTS_PER_WINDOW = 30;
 
+/** The progress the server last accepted for a player; a player with none (or an unreadable save) starts as an intern. */
+async function savedProgressOf(store: Pick<AccountStore, "loadProgress">, userId: string): Promise<Progress> {
+  const saved = await store.loadProgress(userId);
+  if (!saved) return emptyProgress();
+  try {
+    const parsed = ProgressSchema.safeParse(JSON.parse(saved.body));
+    return parsed.success ? parsed.data : emptyProgress();
+  } catch (error) {
+    if (error instanceof SyntaxError) return emptyProgress();
+    throw error;
+  }
+}
+
+/** A company's private room: codes live in D1 and are held in the room host when first assigned. */
+function officeFor(env: Env): CompanyOffice {
+  const deals = new D1DealStore(env.DB);
+  return new CompanyOffice(new D1OfficeRoomStore(env.DB), (code) => env.ROOMS.getByName(code).claim(code), Math.random, (companyId, userId) => deals.isTalkingWith(companyId, userId));
+}
+
 /** Composition root: rooms, the account API, and everything else from the built site. */
 export default {
   async fetch(request, env) {
     const { pathname } = new URL(request.url);
     if (pathname === "/rooms") {
       const accounts = new AccountService(new D1AccountStore(env.DB), Date.now);
-      return routeRoomSocket(request, env, Math.random, async (socket) => shownTags((await accounts.userFor(sessionTokenOf(socket)))?.tags ?? []));
+      const user = await accounts.userFor(sessionTokenOf(request));
+      const office = officeFor(env);
+      return routeRoomSocket(
+        request,
+        env,
+        Math.random,
+        async () => ({ userId: user?.id ?? null, tags: shownTags(user?.tags ?? []) }),
+        (_socket, code) => office.access(code, user?.id ?? null),
+        TEAM_SCENARIO.id,
+      );
     }
     if (pathname === PUBLIC_ROOMS_PATH && request.method === "GET") {
       const list: PublicRoomList = { rooms: await env.DIRECTORY.getByName(DIRECTORY_NAME).list() };
@@ -53,20 +101,85 @@ export default {
       const companyStore = new D1CompanyStore(env.DB);
       const accountStore = new D1AccountStore(env.DB);
       const grantStore = new D1GrantStore(env.DB);
+      const investorStore = new D1InvestorStore(env.DB);
       const isOverLimit = (limit: number) => async (key: string) => {
         const windowStart = Math.floor(Date.now() / ATTEMPT_WINDOW_MS) * ATTEMPT_WINDOW_MS;
         return (await accountStore.countAttempt(key, windowStart)) > limit;
       };
-      const accounts = new AccountService(accountStore, Date.now, (id) => findScenario(id)?.tier, companyStore, grantStore);
+      const accounts = new AccountService(accountStore, Date.now, { tierOf: (id) => findScenario(id)?.tier, bank: companyStore, grants: grantStore, investors: investorStore, logger: workerLogger });
       const entitlements = new D1EntitlementStore(env.DB);
-      if (pathname === COMPANY_PATH || pathname.startsWith(`${COMPANY_PATH}/`) || pathname.startsWith(`${INVITATIONS_PATH}/`)) {
+      if (pathname === COMPANIES_PATH || pathname === TOP_COMPANIES_PATH || OFFICE_LAYOUT.test(pathname)) {
+        return handleDirectory(request, new CompanyDirectory(new D1CompanyDirectory(env.DB), (id) => companyStore.companyById(id)));
+      }
+      if (pathname === COMPANY_PATH || [COMPANY_PATH, COMPANIES_PATH, INVITATIONS_PATH, APPLY_PATH, INTERVIEWS_PATH, APPLICATIONS_PATH, RECEIVED_OFFERS_PATH, PROPOSALS_PATH, DEALS_PATH].some((prefix) => pathname.startsWith(`${prefix}/`))) {
+        const hiringStore = new D1HiringStore(env.DB);
+        const proposalStore = new D1ProposalStore(env.DB);
+        const workStore = new D1WorkStore(env.DB);
+        const dealStore = new D1DealStore(env.DB);
+        const office = officeFor(env);
+        const balanceOf = async (userId: string) => (await savedProgressOf(accountStore, userId)).wallet.balanceCents;
         const companies = new CompanyService({
           store: companyStore,
           now: Date.now,
           newId: () => crypto.randomUUID(),
           isOverLimit: isOverLimit(COMPANY_WRITES_PER_WINDOW),
+          hiring: hiringStore,
+          work: workStore,
+          pantryOf: async (userId, day) => pantryCostOn((await savedProgressOf(accountStore, userId)).pantry, day),
+          investors: investorStore,
+          proposals: proposalStore,
+          dealsOf: async (userId) => (await dealStore.openFor(userId)).map(dealWireOf),
         });
-        return handleCompany(request, accounts, companies);
+        const hiring = new HiringService({
+          store: hiringStore,
+          companies: companyStore,
+          company: companies,
+          tasks: TASKS,
+          careerOf: async (userId) => careerLevel(await savedProgressOf(accountStore, userId)),
+          now: Date.now,
+          newId: () => crypto.randomUUID(),
+          isOverLimit: isOverLimit(COMPANY_WRITES_PER_WINDOW),
+        });
+        const work = new WorkService({
+          store: workStore,
+          company: companies,
+          tasks: TASKS,
+          now: Date.now,
+          newId: () => crypto.randomUUID(),
+          isOverLimit: isOverLimit(COMPANY_WRITES_PER_WINDOW),
+        });
+        const investing = new InvestingService({
+          investors: investorStore,
+          companies: companyStore,
+          company: companies,
+          now: Date.now,
+          isOverLimit: isOverLimit(COMPANY_WRITES_PER_WINDOW),
+          balanceOf,
+        });
+        const deals = new DealService({
+          deals: dealStore,
+          companies: companyStore,
+          company: companies,
+          investing,
+          investors: investorStore,
+          meetingRoomOf: (companyId) => office.roomOf(companyId),
+          presence: async (code) => new Set(await env.ROOMS.getByName(code).presentUsers()),
+          balanceOf,
+          now: Date.now,
+          newId: () => crypto.randomUUID(),
+          isOverLimit: isOverLimit(COMPANY_WRITES_PER_WINDOW),
+        });
+        const proposals = new ProposalService({
+          proposals: proposalStore,
+          investors: investorStore,
+          companies: companyStore,
+          company: companies,
+          deals,
+          now: Date.now,
+          newId: () => crypto.randomUUID(),
+          isOverLimit: isOverLimit(COMPANY_WRITES_PER_WINDOW),
+        });
+        return handleCompany(request, accounts, companies, hiring, office, work, investing, proposals, deals);
       }
       if (pathname.startsWith(ADMIN_PREFIX)) {
         const store = new D1AccountStore(env.DB);

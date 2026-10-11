@@ -57,6 +57,17 @@ export function earnPayroll(wallet: Wallet, payout: { readonly id: string; reado
   return pay(wallet, { kind: "payroll", ref: payRef.payroll(payout.id), amountCents: payout.amountCents, workDay: payout.workDay }, at);
 }
 
+/** Puts money into a company as an investor, under the ref the server issued when the offer was accepted. */
+export function invest(wallet: Wallet, investRef: string, cents: number, at: number): SpendOutcome {
+  if (!Number.isInteger(cents) || cents <= 0) return { ok: false, shortByCents: 0 };
+  return charge(wallet, { reason: "invest", ref: investRef, cents, note: "Invested in a company" }, at);
+}
+
+/** An investor's share of a company's weekly profit, earned into the wallet once under `dividend:<id>`. */
+export function earnDividend(wallet: Wallet, payout: { readonly id: string; readonly amountCents: number; readonly workDay: number }, at: number): Wallet {
+  return pay(wallet, { kind: "dividend", ref: payRef.dividend(payout.id), amountCents: payout.amountCents, workDay: payout.workDay }, at);
+}
+
 /** Money an admin granted, earned into the wallet once under `grant:<id>`. */
 export function earnGrant(wallet: Wallet, grant: { readonly id: string; readonly amountCents: number; readonly note: string }, at: number): Wallet {
   return pay(wallet, { kind: "grant", ref: payRef.grant(grant.id), amountCents: grant.amountCents, note: grant.note }, at);

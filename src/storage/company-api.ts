@@ -10,9 +10,18 @@ import {
   InterviewSchema,
   POSTINGS_PATH,
   TOP_COMPANIES_PATH,
+  WORK_PATH,
+  OFFERS_PATH,
+  DEALS_PATH,
+  MeetingResponseSchema,
+  AcceptOfferResponseSchema,
+  WorkBoardSchema,
+  WorkItemSchema,
   FoundResponseSchema,
   InviteRequestSchema,
   MyCompanySchema,
+  OfficeLayoutSchema,
+  officeLayoutPath,
   SetMemberRequestSchema,
   WorkDaySettlementSchema,
   type CompanySummary,
@@ -21,6 +30,14 @@ import {
   type InterviewAnswers,
   type InterviewResult,
   type OpenPostingRequest,
+  type WorkAnswer,
+  type AcceptOfferResponse,
+  type OfferRequest,
+  type ProposalRequest,
+  type DealTerms,
+  type OfficeLayout,
+  type WorkBoard,
+  type WorkItem,
   type MyCompany,
   type SettleRequest,
   type WorkDaySettlement,
@@ -49,6 +66,36 @@ export interface CompanyApi {
   /** Graded on the server; the application is created with its score. */
   answerInterview(interviewId: string, answers: InterviewAnswers): Promise<CompanyOutcome<InterviewResult>>;
   decide(applicationId: string, decision: "hire" | "reject"): Promise<CompanyOutcome<unknown>>;
+  /** The code of the company's own office room: members only, the same for every member, never listed. */
+  enterOffice(): Promise<CompanyOutcome<{ code: string }>>;
+  /** Your board for the UTC day, with each answered task's result. */
+  work(signal?: AbortSignal): Promise<CompanyOutcome<WorkBoard>>;
+  /** One attempt per task, graded on the server. */
+  answerWork(answer: WorkAnswer): Promise<CompanyOutcome<WorkItem>>;
+  /** Founder only: offer a player a stake for money. */
+  makeOffer(request: OfferRequest): Promise<CompanyOutcome<unknown>>;
+  cancelOffer(offerId: string): Promise<CompanyOutcome<unknown>>;
+  /** Returns the spend that pays for the stake; it counts once the wallet spends it and saves. */
+  acceptOffer(offerId: string): Promise<CompanyOutcome<AcceptOfferResponse>>;
+  declineOffer(offerId: string): Promise<CompanyOutcome<unknown>>;
+  /** Ask a company's founder to let you invest; accepted, it becomes an offer to you. */
+  propose(companyId: string, request: ProposalRequest): Promise<CompanyOutcome<unknown>>;
+  withdrawProposal(proposalId: string): Promise<CompanyOutcome<unknown>>;
+  /** Founder only. */
+  answerProposal(proposalId: string, answer: "accept" | "decline"): Promise<CompanyOutcome<unknown>>;
+  /** Founder only; never the founder. */
+  fire(username: string): Promise<CompanyOutcome<unknown>>;
+  /** Any member but the founder. */
+  leave(): Promise<CompanyOutcome<unknown>>;
+  /** The office room where a deal is negotiated; either party gets in while it's open. */
+  dealMeeting(dealId: string): Promise<CompanyOutcome<{ code: string }>>;
+  /** New terms on the table; both agreements clear. */
+  tableTerms(dealId: string, terms: DealTerms): Promise<CompanyOutcome<unknown>>;
+  /** Agree to the terms exactly as read; refused if they changed or you're not both in the meeting. */
+  agreeDeal(dealId: string, terms: DealTerms): Promise<CompanyOutcome<unknown>>;
+  walkAway(dealId: string): Promise<CompanyOutcome<unknown>>;
+  /** Another company's office layout, for walking into it as a visitor (public; no money in it). */
+  officeLayout(companyId: string): Promise<CompanyOutcome<OfficeLayout>>;
 }
 
 const ErrorSchema = z.object({ error: z.enum(API_ERRORS), message: z.string().optional() });
@@ -103,7 +150,61 @@ export class HttpCompanyApi implements CompanyApi {
   decide(applicationId: string, decision: "hire" | "reject") {
     return call(`/api/applications/${encodeURIComponent(applicationId)}/${decision}`, "POST", {}, Anything);
   }
+  enterOffice() {
+    return call(`${COMPANY_PATH}/office`, "POST", {}, OfficeSchema);
+  }
+  work(signal?: AbortSignal) {
+    return call(WORK_PATH, "GET", undefined, WorkBoardSchema, signal);
+  }
+  answerWork(answer: WorkAnswer) {
+    return call(`${WORK_PATH}/${encodeURIComponent(answer.taskId)}`, "POST", answer, WorkItemSchema);
+  }
+  makeOffer(request: OfferRequest) {
+    return call(OFFERS_PATH, "POST", request, Anything, undefined, crypto.randomUUID());
+  }
+  cancelOffer(offerId: string) {
+    return call(`${OFFERS_PATH}/${encodeURIComponent(offerId)}/cancel`, "POST", {}, Anything);
+  }
+  acceptOffer(offerId: string) {
+    return call(`/api/offers/${encodeURIComponent(offerId)}/accept`, "POST", {}, AcceptOfferResponseSchema);
+  }
+  declineOffer(offerId: string) {
+    return call(`/api/offers/${encodeURIComponent(offerId)}/decline`, "POST", {}, Anything);
+  }
+  propose(companyId: string, request: ProposalRequest) {
+    return call(`${COMPANIES_PATH}/${encodeURIComponent(companyId)}/proposals`, "POST", request, Anything, undefined, crypto.randomUUID());
+  }
+  withdrawProposal(proposalId: string) {
+    return call(`/api/proposals/${encodeURIComponent(proposalId)}/withdraw`, "POST", {}, Anything);
+  }
+  answerProposal(proposalId: string, answer: "accept" | "decline") {
+    return call(`${COMPANY_PATH}/proposals/${encodeURIComponent(proposalId)}/${answer}`, "POST", {}, Anything);
+  }
+  fire(username: string) {
+    return call(`${COMPANY_PATH}/members/${encodeURIComponent(username)}/fire`, "POST", {}, Anything);
+  }
+  leave() {
+    return call(`${COMPANY_PATH}/leave`, "POST", {}, Anything);
+  }
+  dealMeeting(dealId: string) {
+    return call(`${DEALS_PATH}/${encodeURIComponent(dealId)}/meeting`, "POST", {}, MeetingResponseSchema);
+  }
+  tableTerms(dealId: string, terms: DealTerms) {
+    return call(`${DEALS_PATH}/${encodeURIComponent(dealId)}/terms`, "POST", terms, Anything);
+  }
+  agreeDeal(dealId: string, terms: DealTerms) {
+    return call(`${DEALS_PATH}/${encodeURIComponent(dealId)}/agree`, "POST", terms, Anything);
+  }
+  async officeLayout(companyId: string) {
+    const outcome = await call(officeLayoutPath(companyId), "GET", undefined, OfficeLayoutSchema);
+    return outcome.ok ? { ok: true as const, value: outcome.value.layout } : outcome;
+  }
+  walkAway(dealId: string) {
+    return call(`${DEALS_PATH}/${encodeURIComponent(dealId)}/walk-away`, "POST", {}, Anything);
+  }
 }
+
+const OfficeSchema = z.object({ code: z.string().min(1) });
 
 function companies(outcome: CompanyOutcome<z.output<typeof CompanyListSchema>>): CompanyOutcome<readonly CompanySummary[]> {
   return outcome.ok ? { ok: true, value: outcome.value.companies } : outcome;

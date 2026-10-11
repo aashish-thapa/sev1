@@ -176,5 +176,277 @@
       "cause": "Nothing wrong: limits apply before the password check and the refusal looks like any wrong password.",
       "why": "Counting by username and IP slows both single-account guessing and spraying, and the identical error doesn't reveal which usernames exist or are locked."
     }
+  },
+  {
+    "kind": "code-fix",
+    "id": "security-fix-reset-expiry-inverted",
+    "role": "security",
+    "difficulty": 2,
+    "categories": [],
+    "title": "Old password reset links work, fresh ones say expired",
+    "ticket": "Support: customers clicking a reset link straight away get 'This link has expired'. One user says a link from an email in March still let them change their password today.",
+    "file": {
+      "path": "src/auth/passwordReset.ts",
+      "language": "ts",
+      "lines": [
+        "export async function resetPassword(token: string, newPassword: string) {",
+        "  const reset = await db.passwordResets.findOne({ tokenHash: sha256(token) });",
+        "  if (!reset || reset.usedAt !== null) throw new ResetError(\"invalid_token\");",
+        "  if (reset.expiresAt > new Date()) throw new ResetError(\"expired_token\");",
+        "  await users.setPassword(reset.userId, newPassword);",
+        "  await db.passwordResets.update(reset.id, { usedAt: new Date() });",
+        "}"
+      ]
+    },
+    "failing": {
+      "test": "passwordReset \u203a a token past expiresAt is refused",
+      "output": [
+        "reset created 2026-03-02T09:14:00Z, expiresAt 2026-03-02T10:14:00Z",
+        "Expected: ResetError(\"expired_token\")",
+        "Received: resolved (password changed for u_4410)"
+      ]
+    },
+    "bugLine": 3,
+    "fixes": [
+      "  if (reset.expiresAt < new Date()) throw new ResetError(\"expired_token\");",
+      "  if (reset.expiresAt > Date.now()) throw new ResetError(\"expired_token\");",
+      "  if (reset.expiresAt <= reset.createdAt) throw new ResetError(\"expired_token\");",
+      "  if (!reset.expiresAt) throw new ResetError(\"expired_token\");"
+    ],
+    "fixAnswer": 0,
+    "explanation": {
+      "cause": "The expiry comparison was inverted, so it refused links still in their window and accepted every link past it.",
+      "why": "A reset link is a password in an inbox that may be read by someone else later; it must stop working after its window. Comparing against Date.now() keeps the same inverted test, and checking against createdAt or presence never looks at the clock at all."
+    }
+  },
+  {
+    "kind": "pr-review",
+    "id": "security-pr-cors-reflect-origin",
+    "role": "security",
+    "difficulty": 2,
+    "categories": [],
+    "title": "Allow the partner dashboard to call the API",
+    "author": "Priya Raman",
+    "description": "The partner dashboard on its own domain gets CORS errors calling /api with the signed-in user's session. This lists the partner origin next to ours and keeps credentials on.",
+    "path": "src/server/cors.ts",
+    "language": "ts",
+    "diff": [
+      {
+        "op": "+",
+        "text": "const ALLOWED_ORIGINS = new Set([\"https://app.example.com\", \"https://dashboard.partner.example.net\"]);"
+      },
+      {
+        "op": " ",
+        "text": ""
+      },
+      {
+        "op": " ",
+        "text": "app.use("
+      },
+      {
+        "op": " ",
+        "text": "  cors({"
+      },
+      {
+        "op": "-",
+        "text": "    origin: \"https://app.example.com\","
+      },
+      {
+        "op": "+",
+        "text": "    origin: (origin, callback) => callback(null, origin ?? false),"
+      },
+      {
+        "op": " ",
+        "text": "    credentials: true,"
+      },
+      {
+        "op": " ",
+        "text": "  }),"
+      },
+      {
+        "op": " ",
+        "text": ");"
+      }
+    ],
+    "verdict": "request-changes",
+    "flaw": 5,
+    "explanation": {
+      "cause": "The origin callback reflects whatever Origin the browser sends; ALLOWED_ORIGINS is declared but never consulted.",
+      "why": "With credentials on, any website a signed-in user visits can call the API as them and read the responses. The callback should return the origin only when ALLOWED_ORIGINS.has(origin)."
+    }
+  },
+  {
+    "kind": "code-fix",
+    "id": "security-fix-path-prefix-check",
+    "role": "security",
+    "difficulty": 3,
+    "categories": [],
+    "title": "File download serves files from a sibling folder",
+    "ticket": "Pentest finding (high): /files/ blocks ../etc/passwd as expected, but a name that climbs into /srv/app/uploads-archive is served. That folder holds exported payroll CSVs.",
+    "file": {
+      "path": "src/api/files.ts",
+      "language": "ts",
+      "lines": [
+        "const UPLOAD_ROOT = path.resolve(\"/srv/app/uploads\");",
+        "",
+        "router.get(\"/files/:name\", requireSession, async (req, res) => {",
+        "  const filePath = path.resolve(UPLOAD_ROOT, req.params.name);",
+        "  if (!filePath.startsWith(UPLOAD_ROOT)) {",
+        "    res.status(400).json({ error: \"bad_path\" });",
+        "    return;",
+        "  }",
+        "  res.sendFile(filePath);",
+        "});"
+      ]
+    },
+    "failing": {
+      "test": "files \u203a a name resolving outside UPLOAD_ROOT is refused",
+      "output": [
+        "GET /files/..%2Fuploads-archive%2Fpayroll-2026-09.csv",
+        "resolved: /srv/app/uploads-archive/payroll-2026-09.csv",
+        "Expected status: 400",
+        "Received status: 200"
+      ]
+    },
+    "bugLine": 4,
+    "fixes": [
+      "  if (!filePath.startsWith(UPLOAD_ROOT + path.sep)) {",
+      "  if (!path.normalize(filePath).startsWith(UPLOAD_ROOT)) {",
+      "  if (!filePath.startsWith(path.resolve(UPLOAD_ROOT))) {",
+      "  if (filePath.indexOf(UPLOAD_ROOT) === -1) {"
+    ],
+    "fixAnswer": 0,
+    "explanation": {
+      "cause": "A plain string prefix check treats /srv/app/uploads-archive as inside /srv/app/uploads because the names share their first characters.",
+      "why": "Containment has to end at a directory boundary, so the prefix must include the trailing separator. path.resolve already normalizes, so normalizing or resolving again changes nothing, and indexOf is looser still."
+    }
+  },
+  {
+    "kind": "pr-review",
+    "id": "security-pr-delete-files-before-authz",
+    "role": "security",
+    "difficulty": 3,
+    "categories": [],
+    "title": "Remove a project's stored files when it is deleted",
+    "author": "Marco Silva",
+    "description": "Deleting a project left its uploads in the bucket forever. This deletes the project's storage prefix as part of the delete and records the action in the audit log.",
+    "path": "src/api/projects.ts",
+    "language": "ts",
+    "diff": [
+      {
+        "op": " ",
+        "text": "router.delete(\"/api/projects/:id\", requireSession, async (req, res) => {"
+      },
+      {
+        "op": " ",
+        "text": "  const project = await db.projects.findOne({ id: req.params.id });"
+      },
+      {
+        "op": " ",
+        "text": "  if (!project) return res.status(404).end();"
+      },
+      {
+        "op": "+",
+        "text": "  await storage.deletePrefix(`projects/${project.id}/`);"
+      },
+      {
+        "op": " ",
+        "text": "  if (project.ownerId !== req.session.userId) return res.status(404).end();"
+      },
+      {
+        "op": " ",
+        "text": "  await db.projects.delete(project.id);"
+      },
+      {
+        "op": "+",
+        "text": "  await audit.record(req.session.userId, \"project.delete\", project.id);"
+      },
+      {
+        "op": " ",
+        "text": "  res.status(204).end();"
+      },
+      {
+        "op": " ",
+        "text": "});"
+      }
+    ],
+    "verdict": "request-changes",
+    "flaw": 3,
+    "explanation": {
+      "cause": "The files are deleted before the ownership check, so any signed-in user can wipe another project's uploads.",
+      "why": "The request still gets a 404, which hides that the damage is done. Every side effect has to come after the authorization check, so the new line belongs below the ownerId test."
+    }
+  },
+  {
+    "kind": "pr-review",
+    "id": "security-pr-webhook-signature",
+    "role": "security",
+    "difficulty": 3,
+    "categories": [],
+    "title": "Verify signatures on the payments webhook",
+    "author": "Ada Okafor",
+    "description": "Anyone who found /webhooks/payments could post fake 'paid' events. The provider signs `${timestamp}.${rawBody}` with our shared secret. This checks the HMAC on the raw bytes and refuses timestamps older than 5 minutes. handle() already dedupes by event id.",
+    "path": "src/api/webhooks.ts",
+    "language": "ts",
+    "diff": [
+      {
+        "op": " ",
+        "text": "router.post(\"/webhooks/payments\", express.raw({ type: \"application/json\" }), async (req, res) => {"
+      },
+      {
+        "op": "+",
+        "text": "  const timestampHeader = req.get(\"X-Timestamp\") ?? \"\";"
+      },
+      {
+        "op": "+",
+        "text": "  const ageSeconds = Math.abs(Date.now() / 1000 - Number(timestampHeader));"
+      },
+      {
+        "op": "+",
+        "text": "  const expected = createHmac(\"sha256\", WEBHOOK_SECRET).update(`${timestampHeader}.`).update(req.body).digest();"
+      },
+      {
+        "op": "+",
+        "text": "  const given = Buffer.from(req.get(\"X-Signature\") ?? \"\", \"hex\");"
+      },
+      {
+        "op": "+",
+        "text": "  if (!(ageSeconds <= 300) || given.length !== expected.length || !timingSafeEqual(given, expected)) {"
+      },
+      {
+        "op": "+",
+        "text": "    res.status(401).end();"
+      },
+      {
+        "op": "+",
+        "text": "    return;"
+      },
+      {
+        "op": "+",
+        "text": "  }"
+      },
+      {
+        "op": " ",
+        "text": "  const event = JSON.parse(req.body.toString(\"utf8\"));"
+      },
+      {
+        "op": " ",
+        "text": "  await payments.handle(event);"
+      },
+      {
+        "op": " ",
+        "text": "  res.status(200).end();"
+      },
+      {
+        "op": " ",
+        "text": "});"
+      }
+    ],
+    "verdict": "approve",
+    "flaw": null,
+    "explanation": {
+      "cause": "Nothing wrong: the HMAC covers the timestamp and the exact raw bytes, and the comparison is constant time.",
+      "why": "Signing the raw body avoids JSON re-serialization mismatches, the length check keeps timingSafeEqual from throwing, and !(age <= 300) also rejects a missing or non-numeric timestamp, since NaN fails every comparison."
+    }
   }
 ]

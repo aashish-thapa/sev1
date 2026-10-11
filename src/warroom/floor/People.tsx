@@ -7,7 +7,7 @@ import { knownTags } from "../../domain/tags.ts";
 import type { Teammate } from "../ui/feed.ts";
 import { loopThrough, WALK_SPEED, type Point } from "./navigation.ts";
 import { carriedAt, walkerPose } from "./people/walkers.ts";
-import { PEOPLE, seatOf, type Person, type Carried } from "./office.ts";
+import { seatOf, type Person, type Carried } from "./office.ts";
 import { Avatar } from "./people/Avatar.tsx";
 import { avatarFor, HEAD_HEIGHT } from "./people/avatars.ts";
 import { motionFor, type Situation } from "./people/behaviour.ts";
@@ -36,11 +36,13 @@ type Props = {
   teammates: readonly Teammate[];
   /** Whoever you're chatting with turns to you, talks, and shows what they said. */
   conversation: Conversation | null;
+  /** The colleagues on this floor; none in a company office, where only its members work. */
+  people: readonly Person[];
 };
 
 type Level = { readonly current: number };
 
-export function People({ comms, now, getPlayer, reduceMotion, panic, teammates, conversation }: Props) {
+export function People({ comms, now, getPlayer, reduceMotion, panic, teammates, conversation, people }: Props) {
   const panicLevel = useRef(panic);
   useEffect(() => {
     panicLevel.current = panic;
@@ -64,7 +66,7 @@ export function People({ comms, now, getPlayer, reduceMotion, panic, teammates, 
   });
   return (
     <>
-      {PEOPLE.map((person) => (
+      {people.map((person) => (
         <PersonModel
           key={person.id}
           person={person}
@@ -81,7 +83,7 @@ export function People({ comms, now, getPlayer, reduceMotion, panic, teammates, 
   );
 }
 
-type PersonProps = Omit<Props, "panic" | "teammates" | "conversation"> & { person: Person; panic: Level; crowd: { readonly current: Crowd }; conversation: Conversation | null };
+type PersonProps = Omit<Props, "panic" | "teammates" | "conversation" | "people"> & { person: Person; panic: Level; crowd: { readonly current: Crowd }; conversation: Conversation | null };
 
 /** A seated head is lower than a standing one; the bubble sits just above either. */
 const SEATED_HEAD = 1.32;

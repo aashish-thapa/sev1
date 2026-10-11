@@ -13,6 +13,7 @@ import type { WallScreen } from "../floor/office.ts";
 import type { useRoom } from "../../multiplayer/useRoom.ts";
 import { SoloIncident } from "./LiveIncident.tsx";
 import { MatchResult, ScorecardTable } from "./MatchDebrief.tsx";
+import { RivalStrip } from "./RivalStrip.tsx";
 import { IncidentHelpContext, type IncidentHelp } from "./incident-help.ts";
 import { TeamIncident } from "./TeamIncident.tsx";
 
@@ -135,7 +136,8 @@ export function WarRoomView({ scenario, role, onFinish, onBuySolution, hints, on
   return (
     <main className="debrief">
       <p className="paged__source">{scenario.title} · debrief</p>
-      {room?.match && <MatchResult match={room.match} team={room.room?.team ?? null} />}
+      {/* A side that closes first waits out the other's overtime here, so it watches the race until it's decided. */}
+      {room?.match && (room.match.stage.name === "decided" ? <MatchResult match={room.match} team={room.room?.team ?? null} /> : <RivalStrip match={room.match} team={room.room?.team ?? null} />)}
       <h1 className="debrief__grade" data-grade={result.grade}>
         {result.grade}
         <span className="debrief__points">{result.points} / 100</span>

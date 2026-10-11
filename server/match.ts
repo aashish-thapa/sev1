@@ -1,6 +1,6 @@
 import type { ServerMessage } from "../src/multiplayer/protocol.ts";
 import type { Scenario } from "../src/warroom/scenario.ts";
-import { decide, MATCH_TIME_LIMIT_MS, OVERTIME_MS, pickTeam, PLAYERS_PER_TEAM, TEAMS, type LaneStanding, type MatchStage, type Team } from "../src/warroom/versus.ts";
+import { decide, MATCH_TIME_LIMIT_MS, OVERTIME_MS, pickTeam, PLAYERS_PER_TEAM, TEAM_LABEL, TEAMS, type LaneStanding, type MatchStage, type Team } from "../src/warroom/versus.ts";
 import type { Logger } from "./log.ts";
 import { Room, type Connection, type JoinOutcome, type JoinRequest, type Kickoff, type RoomTiming } from "./room.ts";
 import type { Venue } from "./venue.ts";
@@ -8,8 +8,6 @@ import type { Venue } from "./venue.ts";
 const REFEREE = "Referee";
 /** How often standings go out while the match is on: often enough to feel live, cheap on the free tier. */
 const STANDINGS_INTERVAL_MS = 1000;
-
-const TEAM_NAME: Readonly<Record<Team, string>> = { red: "Red", blue: "Blue" };
 
 /**
  * Two teams, each in a room of its own, racing the same seeded incident. Both rooms are held quiet
@@ -106,7 +104,7 @@ export class Match implements Venue, Kickoff {
       const first = lanes.find((lane) => lane.finish !== null);
       if (first) {
         this.overtimeEndsAt = now + OVERTIME_MS;
-        this.tell(`${TEAM_NAME[first.team]} closed their incident with ${first.finish?.points ?? 0} points. Overtime: three minutes for everyone else.`);
+        this.tell(`${TEAM_LABEL[first.team]} closed their incident with ${first.finish?.points ?? 0} points. Overtime: three minutes for everyone else.`);
       }
     }
     const isOutOfTime = (this.overtimeEndsAt !== null && now >= this.overtimeEndsAt) || (this.raceEndsAt !== null && now >= this.raceEndsAt);
@@ -114,7 +112,7 @@ export class Match implements Venue, Kickoff {
     if (winner) {
       this.stage = { name: "decided", winner };
       this.stopTimer();
-      this.tell(winner === "draw" ? "It's a draw." : `${TEAM_NAME[winner]} wins.`);
+      this.tell(winner === "draw" ? "It's a draw." : `${TEAM_LABEL[winner]} wins.`);
       this.logger("info", "match_decided", { room: this.code, winner });
       this.onOccupancyChange(this);
     } else if (this.overtimeEndsAt !== null) {

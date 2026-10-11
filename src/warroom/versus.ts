@@ -6,6 +6,8 @@
 export const TEAMS = ["red", "blue"] as const;
 export type Team = (typeof TEAMS)[number];
 
+export const TEAM_LABEL: Readonly<Record<Team, string>> = { red: "Red", blue: "Blue" };
+
 export const PLAYERS_PER_TEAM = 3;
 
 /** Once one side closes its incident, the other has this long to close theirs. */

@@ -1,8 +1,8 @@
 import { ROLE_INFO } from "../../domain/roles.ts";
 import type { RoomView } from "../../multiplayer/useRoom.ts";
-import { outcomeFor, TEAM_LABEL, type MatchOutcome } from "../match-view.ts";
+import { outcomeFor, type MatchOutcome } from "../match-view.ts";
 import { mostValuable, type Scorecard } from "../scorecard.ts";
-import type { Team, Winner } from "../versus.ts";
+import { TEAM_LABEL, type Team, type Winner } from "../versus.ts";
 
 function headline(outcome: MatchOutcome, winner: Winner): string {
   if (outcome === "won") return "Your team won";

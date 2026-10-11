@@ -1,6 +1,6 @@
 import type { RoomView } from "../../multiplayer/useRoom.ts";
-import { formatAlertRate, formatCountdown, LANE_PHASE_LABEL, TEAM_LABEL } from "../match-view.ts";
-import type { Team } from "../versus.ts";
+import { formatAlertRate, formatCountdown, LANE_PHASE_LABEL } from "../match-view.ts";
+import { TEAM_LABEL, type Team } from "../versus.ts";
 
 type Props = {
   match: NonNullable<RoomView["match"]>;

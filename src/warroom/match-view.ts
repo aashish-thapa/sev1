@@ -1,7 +1,5 @@
 import type { LanePhase, Team, Winner } from "./versus.ts";
 
-export const TEAM_LABEL: Readonly<Record<Team, string>> = { red: "Red", blue: "Blue" };
-
 export const LANE_PHASE_LABEL: Readonly<Record<LanePhase, string>> = {
   waiting: "Waiting",
   live: "Firing",

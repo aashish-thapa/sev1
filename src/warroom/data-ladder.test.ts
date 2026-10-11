@@ -653,8 +653,12 @@ describe("the data ladder", () => {
 
   it("climbs one tier per career level, and adds the cross-team incident at Staff", () => {
     expect(ladder.map((scenario) => scenario.tier)).toEqual([1, 2, 3, 4]);
-    for (const level of [0, 1, 2, 3] as const) expect(unlockedWarRooms("data", level)).toEqual(ladder.slice(0, level + 1).toReversed());
-    expect(unlockedWarRooms("data", 4)).toEqual([checkoutMeltdown, ...ladder.toReversed()]);
+    for (const level of [0, 1, 2, 3] as const) {
+      const unlocked = unlockedWarRooms("data", level);
+      expect(unlocked.filter((scenario) => ladder.includes(scenario))).toEqual(ladder.slice(0, level + 1).toReversed());
+      expect(Math.max(...unlocked.map((scenario) => scenario.tier))).toBe(level + 1);
+    }
+    expect(unlockedWarRooms("data", 4)).toEqual([checkoutMeltdown, ...unlockedWarRooms("data", 3)]);
     for (const scenario of ladder) expect(SCENARIOS).toContain(scenario);
   });
 

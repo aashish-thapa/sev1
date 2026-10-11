@@ -116,7 +116,7 @@ describe("the War Room ladder", () => {
   it("only pages an intern SRE with tier-1 incidents", () => {
     const paged = [0, 1, 2, 3].map((rotation) => soloScenarioFor("infrastructure", rotation, 0));
     expect(paged.every((scenario) => scenario.tier === 1)).toBe(true);
-    expect(new Set(paged.map((scenario) => scenario.id)).size).toBe(2);
+    expect(new Set(paged.map((scenario) => scenario.id)).size).toBe(4);
   });
 
   it("opens harder incidents with each promotion, hardest first", () => {
@@ -141,19 +141,24 @@ describe("the War Room ladder", () => {
         expect(Math.max(...own.map((scenario) => scenario.tier))).toBe(level + 1);
       }
     }
-    expect(soloScenarioFor("frontend", 0, 0).id).toBe("web-auto-retry-storm");
-    expect(soloScenarioFor("mobile", 0, 0).id).toBe("ios-retry-config");
-    expect(soloScenarioFor("security", 0, 0).id).toBe("bot-flood-single-ip");
-    expect(soloScenarioFor("data", 0, 0).id).toBe("refund-double-charges");
+    const internFirsts = { infrastructure: "scaled-to-zero", frontend: "web-auto-retry-storm", mobile: "ios-retry-config", security: "bot-flood-single-ip", data: "refund-double-charges" } as const;
+    for (const role of ROLE_IDS) {
+      expect(soloScenarioFor(role, 0, 0).tier).toBe(1);
+      expect(unlockedWarRooms(role, 0).map((scenario) => scenario.id)).toContain(internFirsts[role]);
+    }
   });
 
-  it("keeps infra's own outages by level below Staff, and adds the cross-team incident at Staff", () => {
+  it("keeps infra's own outages by level below Staff, easiest of each tier last, and adds the cross-team incident at Staff", () => {
     const infraHardestFirst = [ordersIndexInvalid, checkoutPoolLeak, oomAfterDeploy, crashOnCheckout, scaledToZero];
-    expect(unlockedWarRooms("infrastructure", 0)).toEqual(infraHardestFirst.slice(3));
-    expect(unlockedWarRooms("infrastructure", 1)).toEqual(infraHardestFirst.slice(2));
-    expect(unlockedWarRooms("infrastructure", 2)).toEqual(infraHardestFirst.slice(1));
-    expect(unlockedWarRooms("infrastructure", 3)).toEqual(infraHardestFirst);
-    expect(unlockedWarRooms("infrastructure", 4)).toEqual([checkoutMeltdown, ...infraHardestFirst]);
+    for (const level of [0, 1, 2, 3] as const) {
+      const unlocked = unlockedWarRooms("infrastructure", level);
+      expect(unlocked.every((scenario) => scenario.tier <= level + 1 && scenario.roles.includes("infrastructure"))).toBe(true);
+      expect(unlocked.map((scenario) => scenario.tier)).toEqual(unlocked.map((scenario) => scenario.tier).toSorted((left, right) => right - left));
+      expect(unlocked.filter((scenario) => infraHardestFirst.includes(scenario))).toEqual(infraHardestFirst.slice(3 - level));
+    }
+    const staff = unlockedWarRooms("infrastructure", 4);
+    expect(staff[0]).toBe(checkoutMeltdown);
+    expect(staff.slice(1)).toEqual(unlockedWarRooms("infrastructure", 3));
   });
 
   it("always pages a solo player with something: the cross-team incident when their level unlocks nothing of their own", () => {
@@ -168,8 +173,9 @@ describe("the War Room ladder", () => {
   });
 
   it("offers every room the cross-team incident first, then what the host has unlocked, once each", () => {
-    expect(roomWarRooms("infrastructure", 0)).toEqual([checkoutMeltdown, crashOnCheckout, scaledToZero]);
-    expect(roomWarRooms("frontend", 0).map((scenario) => scenario.id)).toEqual(["checkout-meltdown", "web-auto-retry-storm"]);
+    expect(roomWarRooms("infrastructure", 0)).toEqual([checkoutMeltdown, ...unlockedWarRooms("infrastructure", 0)]);
+    expect(roomWarRooms("infrastructure", 0)).toEqual(expect.arrayContaining([crashOnCheckout, scaledToZero]));
+    expect(roomWarRooms("frontend", 0).map((scenario) => scenario.id)).toContain("web-auto-retry-storm");
     for (const role of ROLE_IDS) {
       for (const level of LEVELS) {
         const offered = roomWarRooms(role, level);

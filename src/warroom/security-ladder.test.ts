@@ -291,7 +291,11 @@ describe("the security ladder", () => {
   it("climbs one tier per rung, security only, and opens by career level", () => {
     expect(LADDER.map((scenario) => scenario.tier)).toEqual(LADDER.map((_, index) => index + 1));
     for (const scenario of LADDER) expect(scenario.roles).toEqual(["security"]);
-    for (const level of [0, 1, 2, 3] as const) expect(unlockedWarRooms("security", level)).toEqual(LADDER.slice(0, level + 1).toReversed());
+    for (const level of [0, 1, 2, 3] as const) {
+      const unlocked = unlockedWarRooms("security", level);
+      expect(unlocked.filter((scenario) => LADDER.includes(scenario))).toEqual(LADDER.slice(0, level + 1).toReversed());
+      expect(Math.max(...unlocked.map((scenario) => scenario.tier))).toBe(level + 1);
+    }
   });
 });
 

@@ -24,6 +24,26 @@ import { scaledToZero } from "./scaled-to-zero.ts";
 import { staleFraudFeatures } from "./stale-fraud-features.ts";
 import { staleServiceWorker } from "./stale-service-worker.ts";
 import { webAutoRetryStorm } from "./web-auto-retry-storm.ts";
+import { INFRA_TIER1_INCIDENTS } from "./infra-tier1-incidents.ts";
+import { INFRA_TIER2_INCIDENTS } from "./infra-tier2-incidents.ts";
+import { INFRA_TIER3_INCIDENTS } from "./infra-tier3-incidents.ts";
+import { INFRA_TIER4_INCIDENTS } from "./infra-tier4-incidents.ts";
+import { FRONTEND_TIER1_INCIDENTS } from "./frontend-tier1-incidents.ts";
+import { FRONTEND_TIER2_INCIDENTS } from "./frontend-tier2-incidents.ts";
+import { FRONTEND_TIER3_INCIDENTS } from "./frontend-tier3-incidents.ts";
+import { FRONTEND_TIER4_INCIDENTS } from "./frontend-tier4-incidents.ts";
+import { MOBILE_TIER1_INCIDENTS } from "./mobile-tier1-incidents.ts";
+import { MOBILE_TIER2_INCIDENTS } from "./mobile-tier2-incidents.ts";
+import { MOBILE_TIER3_INCIDENTS } from "./mobile-tier3-incidents.ts";
+import { MOBILE_TIER4_INCIDENTS } from "./mobile-tier4-incidents.ts";
+import { SECURITY_TIER1_INCIDENTS } from "./security-tier1-incidents.ts";
+import { SECURITY_TIER2_INCIDENTS } from "./security-tier2-incidents.ts";
+import { SECURITY_TIER3_INCIDENTS } from "./security-tier3-incidents.ts";
+import { SECURITY_TIER4_INCIDENTS } from "./security-tier4-incidents.ts";
+import { DATA_TIER1_INCIDENTS } from "./data-tier1-incidents.ts";
+import { DATA_TIER2_INCIDENTS } from "./data-tier2-incidents.ts";
+import { DATA_TIER3_INCIDENTS } from "./data-tier3-incidents.ts";
+import { DATA_TIER4_INCIDENTS } from "./data-tier4-incidents.ts";
 
 /** Every live incident the game ships; the app and the room server read this one list. */
 export const SCENARIOS: readonly Scenario[] = [
@@ -49,15 +69,60 @@ export const SCENARIOS: readonly Scenario[] = [
   fraudModelRegression,
   fraudThresholdFailOpen,
   staleFraudFeatures,
+  ...INFRA_TIER1_INCIDENTS,
+  ...INFRA_TIER2_INCIDENTS,
+  ...INFRA_TIER3_INCIDENTS,
+  ...INFRA_TIER4_INCIDENTS,
+  ...FRONTEND_TIER1_INCIDENTS,
+  ...FRONTEND_TIER2_INCIDENTS,
+  ...FRONTEND_TIER3_INCIDENTS,
+  ...FRONTEND_TIER4_INCIDENTS,
+  ...MOBILE_TIER1_INCIDENTS,
+  ...MOBILE_TIER2_INCIDENTS,
+  ...MOBILE_TIER3_INCIDENTS,
+  ...MOBILE_TIER4_INCIDENTS,
+  ...SECURITY_TIER1_INCIDENTS,
+  ...SECURITY_TIER2_INCIDENTS,
+  ...SECURITY_TIER3_INCIDENTS,
+  ...SECURITY_TIER4_INCIDENTS,
+  ...DATA_TIER1_INCIDENTS,
+  ...DATA_TIER2_INCIDENTS,
+  ...DATA_TIER3_INCIDENTS,
+  ...DATA_TIER4_INCIDENTS,
 ];
 
 /** Each role's own War Rooms, easiest first. A role's ladder grows as its incidents are written. */
 const LADDERS: Readonly<Record<Role, readonly Scenario[]>> = {
-  infrastructure: [scaledToZero, crashOnCheckout, oomAfterDeploy, checkoutPoolLeak, ordersIndexInvalid],
-  frontend: [webAutoRetryStorm, addressAutocomplete500s, deadKillSwitch, staleServiceWorker],
-  mobile: [iosRetryConfig, androidStagedRollout500s, forcedUpdateWall, pinnedCertRotation],
-  security: [botFloodSingleIp, credentialStuffingHosting, cardTestingSoar, residentialProxyStuffing],
-  data: [refundDoubleCharges, fraudModelRegression, fraudThresholdFailOpen, staleFraudFeatures],
+  infrastructure: [
+    scaledToZero, crashOnCheckout, ...INFRA_TIER1_INCIDENTS,
+    oomAfterDeploy, ...INFRA_TIER2_INCIDENTS,
+    checkoutPoolLeak, ...INFRA_TIER3_INCIDENTS,
+    ordersIndexInvalid, ...INFRA_TIER4_INCIDENTS,
+  ],
+  frontend: [
+    webAutoRetryStorm, ...FRONTEND_TIER1_INCIDENTS,
+    addressAutocomplete500s, ...FRONTEND_TIER2_INCIDENTS,
+    deadKillSwitch, ...FRONTEND_TIER3_INCIDENTS,
+    staleServiceWorker, ...FRONTEND_TIER4_INCIDENTS,
+  ],
+  mobile: [
+    iosRetryConfig, ...MOBILE_TIER1_INCIDENTS,
+    androidStagedRollout500s, ...MOBILE_TIER2_INCIDENTS,
+    forcedUpdateWall, ...MOBILE_TIER3_INCIDENTS,
+    pinnedCertRotation, ...MOBILE_TIER4_INCIDENTS,
+  ],
+  security: [
+    botFloodSingleIp, ...SECURITY_TIER1_INCIDENTS,
+    credentialStuffingHosting, ...SECURITY_TIER2_INCIDENTS,
+    cardTestingSoar, ...SECURITY_TIER3_INCIDENTS,
+    residentialProxyStuffing, ...SECURITY_TIER4_INCIDENTS,
+  ],
+  data: [
+    refundDoubleCharges, ...DATA_TIER1_INCIDENTS,
+    fraudModelRegression, ...DATA_TIER2_INCIDENTS,
+    fraudThresholdFailOpen, ...DATA_TIER3_INCIDENTS,
+    staleFraudFeatures, ...DATA_TIER4_INCIDENTS,
+  ],
 };
 
 export function findScenario(id: string): Scenario | undefined {

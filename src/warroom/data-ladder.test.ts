@@ -375,18 +375,18 @@ describe("tier 1: refund last night's double charges", () => {
     const atPage = pendingRefunds(commerceOf(opened));
     expect(atPage).toBeGreaterThan(5000);
     expect(visibleOrphans(commerceOf(opened))).toBe(Math.floor(commerceOf(opened).ledger.orphanedCaptures));
-    expect(alertRate(scenario, opened.cluster)).toBe(1);
+    expect(alertRate(scenario, opened.cluster)).toBeGreaterThan(0.01);
     expect(opened.cluster.errorRate).toBeLessThan(0.01);
 
     const tenMinutes = playTo(scenario, 600, opened);
     expect(pendingRefunds(commerceOf(tenMinutes))).toBeGreaterThan(atPage + 60);
-    expect(alertRate(scenario, tenMinutes.cluster)).toBe(1);
+    expect(alertRate(scenario, tenMinutes.cluster)).toBeGreaterThan(alertRate(scenario, opened.cluster));
     expect(dataObjective(playTo(scenario, SETTLEMENT_CUTOFF + 1, tenMinutes))?.isMet).toBe(false);
   });
 
   it("refuses to resolve before a refund batch is submitted", () => {
     const early = playTo(scenario, 60, openIncident(scenario));
-    expect(declareResolved(early, scenario).notice).toEqual({ kind: "refused", rate: 1, label: "orphaned charges not refunded" });
+    expect(declareResolved(early, scenario).notice).toEqual({ kind: "refused", rate: expect.any(Number), label: "charges to refund, vs 15 min of checkouts" });
     const previewed = shellOn(scenario, early, "reconcile preview");
     expect(previewed.changed).toBe(false);
     expect(declareResolved(previewed.incident, scenario).notice?.kind).toBe("refused");
@@ -401,6 +401,7 @@ describe("tier 1: refund last night's double charges", () => {
 
   it("tells data the gateway is still trickling orphans in, and a later batch sweeps them up", () => {
     const submitted = scripted(scenario, [[30, "reconcile submit"]], 400);
+    expect(alertRate(scenario, submitted.cluster)).toBeLessThan(0.01);
     expect(shellOn(scenario, submitted, "reconcile preview").text).toMatch(/Trickling in: about 9 new orphaned captures a minute/);
     const swept = shellOn(scenario, submitted, "reconcile submit").incident;
     expect(pendingRefunds(commerceOf(swept))).toBe(0);
@@ -526,6 +527,13 @@ describe("tier 3: the threshold nobody tuned", () => {
 
     const fixed = scripted(scenario, [[30, "models threshold fraud-scorer 0.85"]], 150);
     expect(debrief(failedOpen, scenario, true).points).toBeLessThan(debrief(fixed, scenario, true).points - 30);
+  });
+
+  it("counts a threshold a little above the tuned one as fixed, but not one that waves the ring through", () => {
+    const nearlyTuned = scripted(scenario, [[30, "models threshold fraud-scorer 0.9"]], 60);
+    expect(scenario.isRootCauseFixed(nearlyTuned.cluster)).toBe(true);
+    expect(loss(nearlyTuned)).toBeLessThan(0.01);
+    expect(scenario.isRootCauseFixed(scripted(scenario, [[30, "models threshold fraud-scorer 0.97"]], 60).cluster)).toBe(false);
   });
 
   it("rolling back the model does nothing: the threshold is serving config, not part of a version", () => {

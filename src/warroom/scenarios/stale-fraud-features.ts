@@ -157,9 +157,9 @@ export const staleFraudFeatures: Scenario = {
     { at: 0, from: "PagerDuty", text: "SEV2 triggered — checkout customers lost above 5% for 5m (fraud declines, HTTP 402). Data on-call paged." },
     { at: 30, from: "Maya Okonkwo · Support", text: "Customers with years of orders are being declined. A friend of mine signed up this morning and checked out fine." },
     { at: 75, from: "Dev Raman · ML platform", text: "fraud-scorer v14 went out yesterday at 16:05. Rolling back is one command if it’s the model." },
-    { at: 120, from: "Ingrid Solberg · Data eng", text: "Morning. Migration 0147 on orders-db renamed orders.placed_at to created_at yesterday afternoon. I merged the fix for features_customer_daily at 08:10 (DATA-2210); the DAG picks it up tonight at 02:00 as usual." },
     { at: 180, from: "Rina Nakamura · Risk", text: "Reminder that the BIN-attack bots from last week are still at it, about 40 attempts a second. The scorer eats them." },
     { at: 260, from: "Jonah Reyes · Product", text: "Can we switch fraud checks off until this is sorted? Every decline is a customer we’ll never see again." },
+    { at: 300, from: "Ingrid Solberg · Data eng", text: "Morning. Migration 0147 on orders-db renamed orders.placed_at to created_at yesterday afternoon. I merged the fix for features_customer_daily at 08:10 (DATA-2210); the DAG picks it up tonight at 02:00 as usual." },
     { at: 360, from: "Elena Ruiz · VP Engineering", text: "Declines doubled in the last few minutes. What’s going on?" },
   ],
   hints: [

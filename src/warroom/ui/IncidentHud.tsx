@@ -3,16 +3,19 @@ import { SoundToggle } from "../../ui/SoundToggle.tsx";
 import { useCareer } from "../../app/career-context.ts";
 import { WalletChip } from "../../ui/WalletChip.tsx";
 import { clockAt, type Scenario } from "../scenario.ts";
+import { customerLossRate } from "../sim/commerce-step.ts";
 
 const countFormat = new Intl.NumberFormat("en");
 
 /** Failed checkouts the SLA allows this hour; past it, contracts start paying out credits. */
 const SLA_BUDGET = 9_000;
 
-function SlaClock({ incident, scenario }: { incident: Incident; scenario: Scenario }) {
+function SlaClock({ incident }: { incident: Incident }) {
   const { cluster, phase } = incident;
   const remaining = SLA_BUDGET - cluster.failedCheckouts;
-  const failingPerSecond = cluster.traffic.requestsPerSecond * alertRate(scenario, cluster) * cluster.traffic.checkoutShare;
+  // What failedCheckouts counts: customers lost where commerce runs, failed checkout requests elsewhere.
+  const lostShare = cluster.commerce ? customerLossRate(cluster.commerce, cluster.t) : cluster.errorRate;
+  const failingPerSecond = cluster.traffic.requestsPerSecond * cluster.traffic.checkoutShare * lostShare;
   if (phase.name !== "live") return null;
   if (remaining <= 0) {
     return (
@@ -90,7 +93,7 @@ export function IncidentHud({ incident, scenario, isPaged, onPage, onDeclare, on
           <dt>failed checkouts</dt>
           <dd>{countFormat.format(Math.round(cluster.failedCheckouts))}</dd>
         </div>
-        <SlaClock incident={incident} scenario={scenario} />
+        <SlaClock incident={incident} />
         <WalletChip />
         <div className="hud__action">
           {phase.name === "monitoring" ? (

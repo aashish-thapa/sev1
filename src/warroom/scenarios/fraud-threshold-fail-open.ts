@@ -113,7 +113,8 @@ export const fraudThresholdFailOpen: Scenario = {
   alertMetric: CUSTOMERS_LOST,
   isRootCauseFixed: (state) => {
     const fraud = scorerOf(state);
-    return !!fraud && fraud.mode === "enforce" && Math.abs(fraud.threshold - fraud.tunedThreshold) < 0.005;
+    // Back at, or a little above, where it was tuned; far above it lets the ring through.
+    return !!fraud && fraud.mode === "enforce" && fraud.threshold >= fraud.tunedThreshold - 0.05 && fraud.threshold <= fraud.tunedThreshold + 0.1;
   },
   objectives,
   // A fifth of customers declined until the threshold moves, and 1 in 250 after.

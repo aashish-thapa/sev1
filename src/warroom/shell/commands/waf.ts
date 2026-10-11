@@ -118,7 +118,7 @@ function block(args: readonly string[], context: ShellContext, commerce: Commerc
   const createdBy = operatorName(context.role);
   const paths = protectedPaths(commerce);
   if (ja4 !== undefined) {
-    if (!isJa4(ja4)) return { output: err(`waf: error: "${ja4}" is not a JA4 fingerprint (a_b_c, e.g. t13d1516h2_8daaf6152771_e5627efa2ab1)`) };
+    if (!isJa4(ja4)) return { output: err(`waf: error: "${ja4}" is not a JA4 fingerprint (a_b_c, e.g. t13d1517h2_8daaf6152771_cb7bf5808d99)`) };
     return created(context, { action: "block", expression: `cf.bot_management.ja4 eq "${ja4}" and ${paths}`, createdBy, ...ja4Reach(commerce, ja4) }, commerce);
   }
   if (topCount !== undefined) {

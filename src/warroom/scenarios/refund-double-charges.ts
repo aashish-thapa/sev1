@@ -43,6 +43,13 @@ function unrefundedShare(state: ClusterState): number {
   return visible > 0 ? pendingRefunds(commerce) / visible : 0;
 }
 
+/** Charges still to refund, against a quarter hour of checkouts: a backlog the pager weighs without setting a healthy checkout on fire. */
+function refundBacklog(state: ClusterState): number {
+  const { commerce } = state;
+  const quarterHourOfCheckouts = (commerce?.pulse.organicCheckoutsPerSecond ?? 0) * 15 * 60;
+  return commerce && quarterHourOfCheckouts > 0 ? pendingRefunds(commerce) / quarterHourOfCheckouts : 0;
+}
+
 function objectives(state: ClusterState): readonly Objective[] {
   const batches = state.commerce?.ledger.refundBatches ?? [];
   return [{ role: "data", label: "Refund batch queued before the 00:30 settlement cut-off", isMet: batches.some((batch) => batch.at < SETTLEMENT_CUTOFF) }];
@@ -63,7 +70,7 @@ export const refundDoubleCharges: Scenario = {
   opensAtSecondOfDay: WARM_UP_SECONDS,
   seed: SEED,
   initialState,
-  alertMetric: { label: "orphaned charges not refunded", rate: unrefundedShare },
+  alertMetric: { label: "charges to refund, vs 15 min of checkouts", rate: refundBacklog },
   isRootCauseFixed: (state) => unrefundedShare(state) < 0.05,
   objectives,
   // Only the gateway's slow trickle costs checkouts after the page; the storm's losses happened before it.

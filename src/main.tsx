@@ -4,6 +4,7 @@ import "@fontsource-variable/jetbrains-mono/wght.css";
 import "./styles/tokens.css";
 import "./styles/app.css";
 import "./styles/home.css";
+import "./styles/lobby.css";
 import "./styles/voice.css";
 import "./styles/admin.css";
 import "./styles/company.css";

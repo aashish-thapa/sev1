@@ -1,0 +1,543 @@
+/* Hallmark · redesign: home → game lobby · genre: atmospheric · theme: project tokens (tokens.css)
+ * pre-emit critique: P4 H4 E4 S4 R4 V4
+ * The lobby is a stage, not a page: you stand in the middle, menus sit on the edges, START waits bottom right. */
+
+/* The lobby is full-bleed; it pads for the safe areas itself. */
+#root:has(> .lobby) {
+  padding-inline: 0;
+}
+
+.lobby {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "top top top"
+    "rail stage side"
+    "foot stage play";
+  gap: var(--space-md);
+  min-height: 100dvh;
+  padding: max(var(--space-md), env(safe-area-inset-top)) max(var(--space-lg), env(safe-area-inset-right)) max(var(--space-lg), env(safe-area-inset-bottom))
+    max(var(--space-lg), env(safe-area-inset-left));
+  overflow: clip;
+  background: var(--color-paper);
+}
+
+/* The stage fills the whole lobby behind the menus. */
+.lobby__stage {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+.lobby__backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: saturate(0.85) brightness(0.55) blur(2px);
+  /* Blur fades the image's own edges; overscan hides that. */
+  transform: scale(1.08);
+}
+
+/* Darken the edges so the menus read, and keep the middle open for you. */
+.lobby__stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 38% 60% at 50% 55%, transparent 0%, color-mix(in oklch, var(--color-paper) 55%, transparent) 70%),
+    linear-gradient(to top, color-mix(in oklch, var(--color-paper) 85%, transparent), transparent 35%),
+    linear-gradient(to bottom, color-mix(in oklch, var(--color-paper) 70%, transparent), transparent 20%);
+  pointer-events: none;
+}
+
+.lobby-scene {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  cursor: grab;
+  touch-action: pan-y;
+}
+
+.lobby-scene:active {
+  cursor: grabbing;
+}
+
+.lobby > :not(.lobby__stage) {
+  position: relative;
+  z-index: 2;
+}
+
+/* ── Top: you on the left, your money on the right ─────────────────── */
+
+.lobby__top {
+  grid-area: top;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.lobby__top-end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklch, var(--color-paper) 70%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.player-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+  padding: var(--space-xs) var(--space-md) var(--space-xs) var(--space-xs);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklch, var(--color-paper) 70%, transparent);
+  color: var(--color-ink);
+  text-decoration: none;
+  backdrop-filter: blur(8px);
+}
+
+.player-card:hover {
+  border-color: var(--color-rule-strong);
+}
+
+.player-card:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.player-card__level {
+  display: grid;
+  place-items: center;
+  inline-size: 2.75rem;
+  block-size: 2.75rem;
+  border: 2px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  color: var(--color-accent);
+  font: 700 var(--text-lg) / 1 var(--font-display);
+  font-variant-numeric: tabular-nums;
+}
+
+.player-card__who {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3xs);
+  min-width: 0;
+}
+
+.player-card__name {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-card__title {
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.player-card__xp {
+  display: block;
+  inline-size: 9rem;
+  block-size: 4px;
+  border-radius: 2px;
+  background: var(--color-rule);
+  overflow: hidden;
+}
+
+.player-card__xp > span {
+  display: block;
+  block-size: 100%;
+  background: var(--color-accent);
+}
+
+/* ── Left: the menu ────────────────────────────────────────────────── */
+
+.lobby-rail {
+  grid-area: rail;
+  display: flex;
+  flex-direction: column;
+  align-self: center;
+  gap: var(--space-2xs);
+}
+
+.lobby-rail__item {
+  position: relative;
+  padding: var(--space-xs) var(--space-md);
+  color: var(--color-ink-2);
+  font: 700 var(--text-lg) / 1.1 var(--font-display);
+  letter-spacing: 0.04em;
+  text-decoration: none;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.lobby-rail__item:hover {
+  color: var(--color-ink);
+}
+
+.lobby-rail__item:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.lobby-rail__item[aria-current="page"] {
+  color: var(--color-ink);
+}
+
+.lobby-rail__item[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  inset-block: 20%;
+  inset-inline-start: 0;
+  inline-size: 3px;
+  border-radius: 2px;
+  background: var(--color-accent);
+}
+
+/* ── Right: the top three ──────────────────────────────────────────── */
+
+.top-ranks {
+  grid-area: side;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  inline-size: 15rem;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklch, var(--color-paper) 70%, transparent);
+  color: var(--color-ink);
+  font-size: var(--text-sm);
+  text-decoration: none;
+  backdrop-filter: blur(8px);
+}
+
+.top-ranks:hover {
+  border-color: var(--color-rule-strong);
+}
+
+.top-ranks__title {
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.top-ranks ol {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.top-ranks li {
+  display: grid;
+  grid-template-columns: 1.5rem minmax(0, 1fr) auto;
+  gap: var(--space-xs);
+}
+
+.top-ranks__rank {
+  color: var(--color-accent);
+  font-family: var(--font-mono);
+}
+
+.top-ranks__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.top-ranks__xp {
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Bottom right: how to play, and START ──────────────────────────── */
+
+.mode-card {
+  grid-area: play;
+  align-self: end;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  inline-size: 24rem;
+  padding: var(--space-md);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklch, var(--color-paper) 78%, transparent);
+  backdrop-filter: blur(10px);
+}
+
+.mode-card__roles,
+.mode-card__modes,
+.mode-card__choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3xs);
+}
+
+.mode-card__role,
+.mode-card__mode,
+.mode-card__pill,
+.mode-card__room {
+  min-height: 34px;
+  padding: 0 var(--space-sm);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-ink-2);
+  font: 500 var(--text-xs) / 1 var(--font-body);
+  cursor: pointer;
+}
+
+.mode-card__role:hover,
+.mode-card__mode:hover,
+.mode-card__pill:hover,
+.mode-card__room:hover {
+  border-color: var(--color-rule-strong);
+  color: var(--color-ink);
+}
+
+.mode-card__role:focus-visible,
+.mode-card__mode:focus-visible,
+.mode-card__pill:focus-visible,
+.mode-card__room:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.mode-card__role[aria-checked="true"],
+.mode-card__pill[aria-checked="true"],
+.mode-card__room[aria-pressed="true"] {
+  border-color: var(--color-accent);
+  color: var(--color-ink);
+}
+
+.mode-card__modes {
+  gap: 0;
+  border-bottom: 1px solid var(--color-rule);
+}
+
+.mode-card__mode {
+  flex: 1;
+  min-height: 40px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  font: 700 var(--text-sm) / 1 var(--font-display);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.mode-card__mode[aria-selected="true"] {
+  border-bottom-color: var(--color-accent);
+  color: var(--color-ink);
+}
+
+.mode-card__detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  min-height: 3rem;
+  color: var(--color-muted);
+  font-size: var(--text-sm);
+}
+
+.mode-card__code,
+.mode-card__name {
+  min-height: 40px;
+  padding: 0 var(--space-sm);
+  border: 1px solid var(--color-rule-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-paper-2);
+  color: var(--color-ink);
+  font: 500 var(--text-sm) / 1 var(--font-body);
+}
+
+.mode-card__code {
+  font-family: var(--font-mono);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+}
+
+.mode-card__rooms {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mode-card__room {
+  display: flex;
+  justify-content: space-between;
+  inline-size: 100%;
+}
+
+.mode-card__start {
+  min-height: 64px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--color-accent);
+  color: var(--color-paper);
+  font: 800 var(--text-xl) / 1 var(--font-display);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    filter var(--dur-micro) var(--ease-out),
+    transform var(--dur-micro) var(--ease-out);
+}
+
+.mode-card__start:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.mode-card__start:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.mode-card__start:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 3px;
+}
+
+.mode-card__start:disabled {
+  background: var(--color-rule-strong);
+  color: var(--color-muted);
+  cursor: not-allowed;
+}
+
+.mode-card__error {
+  color: var(--color-critical);
+  font-size: var(--text-sm);
+}
+
+/* ── Bottom left: the guest note ───────────────────────────────────── */
+
+.lobby__guest {
+  grid-area: foot;
+  align-self: end;
+  justify-self: start;
+  max-inline-size: 22rem;
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--color-paper) 75%, transparent);
+  color: var(--color-ink-2);
+  font: 400 var(--text-xs) / 1.4 var(--font-body);
+  text-align: start;
+  cursor: pointer;
+}
+
+.lobby__guest strong {
+  color: var(--color-accent);
+}
+
+/* ── Panels: Career, Company, Ranks, Dashboard open over the stage ─── */
+
+.lobby__panel {
+  grid-column: 2 / 4;
+  grid-row: 2 / 4;
+  min-width: 0;
+  max-block-size: calc(100dvh - 7rem);
+  padding: var(--space-lg);
+  overflow-y: auto;
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklch, var(--color-paper) 94%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+.lobby__account {
+  position: absolute;
+  inset-block-start: 5rem;
+  inset-inline-end: var(--space-lg);
+  z-index: 3;
+  inline-size: min(26rem, calc(100% - 2 * var(--space-lg)));
+  padding: var(--space-md);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  background: var(--color-paper);
+}
+
+/* ── Phones: stage on top, menus below ─────────────────────────────── */
+
+@media (max-width: 48rem) {
+  .lobby {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto 42dvh auto auto;
+    grid-template-areas:
+      "top"
+      "rail"
+      "stage"
+      "play"
+      "foot";
+    min-height: auto;
+    padding-inline: var(--space-md);
+  }
+
+  /* On a phone the stage is its own row, so the menus never sit on your face. */
+  .lobby__stage {
+    position: relative;
+    grid-area: stage;
+    inset: auto;
+    overflow: clip;
+    border-radius: var(--radius-md);
+  }
+
+  .lobby-rail {
+    flex-direction: row;
+    align-self: auto;
+    overflow-x: auto;
+  }
+
+  .lobby-rail__item {
+    font-size: var(--text-base);
+    padding-inline: var(--space-sm);
+  }
+
+  .lobby-rail__item[aria-current="page"]::before {
+    inset-block: auto 0;
+    inset-inline: var(--space-sm);
+    inline-size: auto;
+    block-size: 3px;
+  }
+
+  .top-ranks {
+    display: none;
+  }
+
+  .mode-card {
+    inline-size: auto;
+  }
+
+  .lobby__panel {
+    grid-column: 1;
+    grid-row: 3 / 6;
+    max-block-size: none;
+    padding: var(--space-md);
+  }
+
+  .player-card__xp {
+    inline-size: 6rem;
+  }
+}

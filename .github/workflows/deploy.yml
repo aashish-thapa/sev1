@@ -1,0 +1,44 @@
+# The live site follows main: every push here is gated and then deployed to Cloudflare.
+# Schema changes are not applied from here — `pnpm db:migrate` against the live D1 stays a
+# deliberate step, run before the push that needs it.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Let an in-flight deploy finish rather than cancelling it half-uploaded; queue the next one
+# behind it so the newest push is what ends up live.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 12.10.1
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The same gates as a local `pnpm release`: the suite, then content validation,
+      # typecheck and the bundle via the build script.
+      - run: pnpm test
+      - run: pnpm build
+
+      - run: pnpm exec wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

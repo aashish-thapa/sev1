@@ -76,11 +76,24 @@ Built with the Hallmark anti-slop rules (bespoke route). Tokens live in `src/sty
 
 The game runs live at https://sev1.aashish-thapa.workers.dev on Cloudflare's free tier. Cloudflare serves the static site, runs one Durable Object per multiplayer room, and stores accounts and the money ledger in D1. The full plan and free-tier budget are in `docs/PLAN.md`.
 
+Pushing to `main` deploys it: `.github/workflows/deploy.yml` runs the suite and the build, then
+`wrangler deploy`. It needs one repository secret, `CLOUDFLARE_API_TOKEN` — a token with the *Edit
+Cloudflare Workers* template, from *My Profile → API Tokens* — set under *Settings → Secrets and
+variables → Actions*.
+
+Schema changes are not applied by CI. Run `pnpm db:migrate` yourself before the push that needs it,
+so a migration against the live database is always a deliberate act.
+
+To release by hand instead:
+
 ```sh
 pnpm exec wrangler login --device   # once; the device flow works over SSH
 pnpm db:migrate                     # apply new worker/migrations to the live D1
 pnpm release                        # test, build and deploy the committed HEAD (never uncommitted work)
 ```
+
+`pnpm release` only deploys `main` when it matches `origin/main`, since releasing a feature branch is
+how the live site quietly falls behind. Set `RELEASE_FROM_ANY_BRANCH=1` to override that for a hotfix.
 
 ### Billing (Stripe, Pro subscription)
 

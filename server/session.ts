@@ -4,19 +4,21 @@ import {
   parseClientMessage,
   type ClientMessage,
   type ErrorCode,
+  type RoomMode,
   type RoomVisibility,
   type ServerMessage,
 } from "../src/multiplayer/protocol.ts";
 import type { Logger } from "./log.ts";
 import type { Connection, JoinRequest, Room } from "./room.ts";
+import type { Venue } from "./venue.ts";
 import type { ScenarioCatalog } from "./scenarios.ts";
 import type { Scenario } from "../src/warroom/scenario.ts";
 
-/** Where a socket's create/join lands: every room in a Node process, or the single room a Durable Object holds. */
+/** Where a socket's create/join lands: every venue in a Node process, or the single one a Durable Object holds. */
 export interface RoomDirectory {
-  /** Null when no room can be opened here (capacity, or this host already holds its room). */
-  create(scenario: Scenario, visibility: RoomVisibility): Room | null;
-  find(code: string): Room | undefined;
+  /** Null when nothing can be opened here (capacity, or this host already holds its venue). */
+  create(scenario: Scenario, visibility: RoomVisibility, mode: RoomMode): Venue | null;
+  find(code: string): Venue | undefined;
 }
 
 export type SessionOptions = {
@@ -48,9 +50,9 @@ export function openSession({ connection, rooms, findScenario, logger, now = Dat
   let seated: Seated | null = null;
   const signals = signalBudget(now);
 
-  const enter = (room: Room, request: JoinRequest) => {
-    const outcome = room.join(request, connection);
-    if (outcome.ok) seated = { room, playerId: outcome.playerId };
+  const enter = (venue: Venue, request: JoinRequest) => {
+    const outcome = venue.join(request, connection);
+    if (outcome.ok) seated = { room: outcome.room, playerId: outcome.playerId };
     else fail(outcome.code, outcome.message);
   };
 
@@ -68,7 +70,7 @@ export function openSession({ connection, rooms, findScenario, logger, now = Dat
         if (seated) return fail("already_in_room", `You are already in room ${seated.room.code}.`);
         const scenario = findScenario(message.scenarioId);
         if (!scenario) return fail("unknown_scenario", `There is no scenario called ${message.scenarioId}.`);
-        const room = rooms.create(scenario, message.visibility);
+        const room = rooms.create(scenario, message.visibility, message.mode);
         if (!room) return fail("server_full", "This server is hosting as many war rooms as it can. Try again shortly.");
         return enter(room, { name: message.name, role: message.role, badge: message.badge, avatar: message.avatar, tags: identity.tags });
       }

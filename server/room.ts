@@ -11,15 +11,18 @@ import {
   type ServerMessage,
   type Signal,
 } from "../src/multiplayer/protocol.ts";
-import { advance, debrief, declareResolved, openIncident, type Incident } from "../src/warroom/incident.ts";
+import { advance, alertRate, debrief, declareResolved, openIncident, type Incident } from "../src/warroom/incident.ts";
 import type { CommsMessage, Scenario } from "../src/warroom/scenario.ts";
+import { EMPTY_SCORECARD, recordCommand, recordEarlyDeclare, recordRootCause, rootCauseShift, type Engineer, type Scorecard } from "../src/warroom/scorecard.ts";
 import { runLine } from "../src/warroom/shell/shell.ts";
 import { applyTeamwork } from "../src/warroom/teamwork.ts";
+import type { LaneStanding, Team } from "../src/warroom/versus.ts";
 import type { Logger } from "./log.ts";
 import { chatComms, declaredComms, joinedComms, leftComms, noticeComms } from "./notices.ts";
 import type { Paging } from "./paging.ts";
 import { isSameSecret, newSecret } from "./secrets.ts";
 import { startTicker, type StopTicker } from "./ticker.ts";
+import type { Venue } from "./venue.ts";
 
 /** One player's socket, as the room sees it. */
 export type Connection = {
@@ -49,7 +52,22 @@ export type JoinRequest = {
   readonly resume?: Resume;
 };
 
-export type JoinOutcome = { readonly ok: true; readonly playerId: string } | { readonly ok: false; readonly code: ErrorCode; readonly message: string };
+/** `room` is where the seat landed: the venue joined, or one side of a match. */
+export type JoinOutcome = { readonly ok: true; readonly playerId: string; readonly room: Room } | { readonly ok: false; readonly code: ErrorCode; readonly message: string };
+
+/** Something outside the room decides when a held room's incident starts: a versus match starts both sides at once. */
+export interface Kickoff {
+  requested(room: Room, playerId: string): void;
+}
+
+export type RoomOptions = {
+  /** A company office: quiet on arrival, paged a few minutes later, quiet again after each incident. */
+  readonly paging?: Paging | null;
+  /** Held quiet until the kickoff starts it; "Page me" asks the kickoff rather than starting the incident. */
+  readonly kickoff?: Kickoff | null;
+  /** The side this room's players are on in a versus match. */
+  readonly team?: Team | null;
+};
 
 const HISTORY_LIMIT = 200;
 const COMMS_LIMIT = 300;
@@ -75,7 +93,9 @@ type Seat = {
 };
 
 /** One war room: the authoritative incident plus the people working it. */
-export class Room {
+export class Room implements Venue {
+  readonly mode = "coop";
+  readonly capacity = MAX_PLAYERS_PER_ROOM;
   readonly code: string;
   readonly scenario: Scenario;
   private incident: Incident;
@@ -94,15 +114,23 @@ export class Room {
   private readonly logger: Logger;
   /** Called when who's connected changes, or the incident closes: what hosts track for expiry and listing. */
   private readonly onOccupancyChange: (room: Room) => void;
+  private readonly kickoff: Kickoff | null;
+  readonly team: Team | null;
+  /** Kept per incident, and past a player leaving, so the debrief still counts what they did. */
+  private scorecard: Scorecard = EMPTY_SCORECARD;
+  /** The engineer whose command last changed the cluster: the one credited if the root cause goes away next. */
+  private lastChanger: Engineer | null = null;
 
-  constructor(code: string, scenario: Scenario, timing: RoomTiming, logger: Logger, onOccupancyChange: (room: Room) => void, paging: Paging | null = null) {
+  constructor(code: string, scenario: Scenario, timing: RoomTiming, logger: Logger, onOccupancyChange: (room: Room) => void, options: RoomOptions = {}) {
     this.code = code;
     this.scenario = scenario;
     this.timing = timing;
     this.logger = logger;
     this.onOccupancyChange = onOccupancyChange;
-    this.paging = paging;
-    this.phase = paging ? "quiet" : "incident";
+    this.paging = options.paging ?? null;
+    this.kickoff = options.kickoff ?? null;
+    this.team = options.team ?? null;
+    this.phase = this.paging || this.kickoff ? "quiet" : "incident";
     this.incident = openIncident(scenario);
     this.comms = this.phase === "incident" ? this.openingComms() : [];
   }
@@ -118,6 +146,43 @@ export class Room {
 
   get connectedCount(): number {
     return [...this.seats.values()].filter((seat) => seat.connection !== null).length;
+  }
+
+  /** Seats taken, counting those held for a dropped player. */
+  get seatCount(): number {
+    return this.seats.size;
+  }
+
+  holdsSeat(playerId: string): boolean {
+    return this.seats.has(playerId);
+  }
+
+  /** How this room's incident stands, for a match to compare against the other side's. */
+  get standing(): Omit<LaneStanding, "team"> {
+    const { phase, cluster, reopenCount } = this.incident;
+    const isClosed = phase.name === "closed";
+    return {
+      players: this.connectedCount,
+      phase: this.phase === "quiet" ? "waiting" : phase.name,
+      alertRate: Math.min(1, Math.max(0, alertRate(this.scenario, cluster))),
+      reopenCount,
+      finish: isClosed ? { points: debrief(this.incident, this.scenario, true).points, closedAt: phase.closedAt } : null,
+    };
+  }
+
+  /** Starts a held room's incident; a room already live is left alone. */
+  start() {
+    if (this.phase === "quiet") this.goLive();
+  }
+
+  /** Sends a message from outside the incident (a match's standings) to everyone here. */
+  announce(message: ServerMessage) {
+    this.broadcast(message);
+  }
+
+  /** Posts a line to this room's comms from someone outside the incident. */
+  notify(from: string, text: string) {
+    this.post({ at: this.incident.cluster.t, from, text });
   }
 
   join(request: JoinRequest, connection: Connection): JoinOutcome {
@@ -136,7 +201,7 @@ export class Room {
       comms: [...this.comms],
       history: [...seat.history],
       phase: this.phase,
-      team: null,
+      team: this.team,
     });
     this.send(seat, { type: "state", frame: encodeFrame(null, this.incident) });
     if (this.incident.phase.name === "closed") this.send(seat, this.closedMessage());
@@ -145,7 +210,7 @@ export class Room {
     if (!resumed) this.post(joinedComms(seat.name, seat.role, seat.badge, seat.tags, this.incident.cluster.t));
     this.logger("info", resumed ? "player_resumed" : "player_joined", { room: this.code, player: seat.id, role: seat.role });
     this.occupancyChanged();
-    return { ok: true, playerId: seat.id };
+    return { ok: true, playerId: seat.id, room: this };
   }
 
   /** The player's socket went away; hold the seat in case they come back. Ignores sockets already superseded. */
@@ -191,6 +256,8 @@ export class Room {
     const trimmed = line.trim();
     const result = runLine(trimmed, { cluster: this.incident.cluster, scenario: this.scenario, history: seat.history, role: seat.role });
     if (trimmed) seat.history = [...seat.history, trimmed].slice(-HISTORY_LIMIT);
+    if (trimmed) this.scorecard = recordCommand(this.scorecard, engineerOf(seat), result.cluster !== undefined);
+    if (result.cluster) this.lastChanger = engineerOf(seat);
 
     this.send(seat, { type: "terminal", line, output: [...result.output], isClearScreen: result.clearScreen ?? false });
     if (result.cluster) this.commit({ ...this.incident, cluster: result.cluster });
@@ -210,9 +277,11 @@ export class Room {
     }
   }
 
-  /** A member presses "Page me" in a quiet office: the incident starts now. */
+  /** A member presses "Page me" in a quiet room: the incident starts now, or the kickoff is asked to start it. */
   page(playerId: string) {
-    if (this.seats.has(playerId) && this.phase === "quiet") this.goLive();
+    if (!this.seats.has(playerId) || this.phase !== "quiet") return;
+    if (this.kickoff) this.kickoff.requested(this, playerId);
+    else this.goLive();
   }
 
   declare(playerId: string) {
@@ -224,6 +293,7 @@ export class Room {
     }
     const { incident, notice } = declareResolved(this.incident, this.scenario);
     if (notice) {
+      this.scorecard = recordEarlyDeclare(this.scorecard, engineerOf(seat));
       this.post(noticeComms(notice, incident.cluster.t));
       return;
     }
@@ -308,6 +378,8 @@ export class Room {
   /** A new incident isn't a delta of the last one: tell everyone the phase, then send it whole. */
   private replaceIncident(next: Incident) {
     this.incident = next;
+    this.scorecard = EMPTY_SCORECARD;
+    this.lastChanger = null;
     this.broadcast({ type: "phase", phase: this.phase });
     this.broadcast({ type: "state", frame: encodeFrame(null, next) });
   }
@@ -318,6 +390,8 @@ export class Room {
 
   /** Every change goes through here, so the frame each client applies is always relative to the last one sent. */
   private commit(next: Incident) {
+    const shift = rootCauseShift(this.scenario.isRootCauseFixed(this.incident.cluster), this.scenario.isRootCauseFixed(next.cluster));
+    this.scorecard = recordRootCause(this.scorecard, shift, this.lastChanger);
     const frame = encodeFrame(this.incident, next);
     this.incident = next;
     this.broadcast({ type: "state", frame });
@@ -335,7 +409,7 @@ export class Room {
         ifPostmortemCorrect: debrief(this.incident, this.scenario, true),
         ifPostmortemWrong: debrief(this.incident, this.scenario, false),
       },
-      scorecard: [],
+      scorecard: [...this.scorecard],
     };
   }
 
@@ -434,6 +508,10 @@ export class Room {
       this.stopTicker = null;
     }
   }
+}
+
+function engineerOf(seat: Seat): Engineer {
+  return { playerId: seat.id, name: seat.name, role: seat.role };
 }
 
 function shorten(text: string, limit: number): string {

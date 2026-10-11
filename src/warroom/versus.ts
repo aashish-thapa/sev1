@@ -57,3 +57,6 @@ export type MatchStage =
   | { readonly name: "racing" }
   | { readonly name: "overtime"; readonly msLeft: number }
   | { readonly name: "decided"; readonly winner: Winner };
+
+/** A race nobody closes ends here, with whatever has closed by then. */
+export const MATCH_TIME_LIMIT_MS = 30 * 60_000;

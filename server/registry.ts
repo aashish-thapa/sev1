@@ -1,10 +1,11 @@
-import type { PublicRoom, RoomVisibility } from "../src/multiplayer/protocol.ts";
+import type { PublicRoom, RoomMode, RoomVisibility } from "../src/multiplayer/protocol.ts";
 import type { Scenario } from "../src/warroom/scenario.ts";
 import { newestFirst, publicListing, type RoomListing } from "./listing.ts";
 import type { Logger } from "./log.ts";
 import { generateRoomCode } from "./room-code.ts";
-import { Room, type RoomTiming } from "./room.ts";
+import type { RoomTiming } from "./room.ts";
 import type { RoomDirectory } from "./session.ts";
+import { openVenue, type Venue } from "./venue.ts";
 
 export type RegistryOptions = {
   readonly maxRooms: number;
@@ -19,7 +20,7 @@ export type RegistryOptions = {
 
 /** Owns every live room in the process: creation under a cap, lookup by code, and expiry once abandoned. */
 export class RoomRegistry implements RoomDirectory {
-  private readonly rooms = new Map<string, Room>();
+  private readonly rooms = new Map<string, Venue>();
   private readonly listings = new Map<string, RoomListing>();
   private readonly expiries = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly options: RegistryOptions;
@@ -33,19 +34,19 @@ export class RoomRegistry implements RoomDirectory {
   }
 
   /** Null when the process is at its room cap or no free code could be found. */
-  create(scenario: Scenario, visibility: RoomVisibility): Room | null {
+  create(scenario: Scenario, visibility: RoomVisibility, mode: RoomMode): Venue | null {
     if (this.rooms.size >= this.options.maxRooms) return null;
     const code = generateRoomCode(this.options.random, (candidate) => this.rooms.has(candidate));
     if (!code) return null;
-    const room = new Room(code, scenario, this.options.timing, this.options.logger, (changed) => this.occupancyChanged(changed));
+    const room = openVenue(mode, { code, scenario, timing: this.options.timing, logger: this.options.logger, onOccupancyChange: (changed) => this.occupancyChanged(changed) });
     this.rooms.set(code, room);
     this.listings.set(code, { visibility, openedAt: this.options.now() });
-    this.options.logger("info", "room_created", { room: code, scenario: scenario.id, visibility, rooms: this.rooms.size });
+    this.options.logger("info", "room_created", { room: code, scenario: scenario.id, visibility, mode, rooms: this.rooms.size });
     this.occupancyChanged(room);
     return room;
   }
 
-  find(code: string): Room | undefined {
+  find(code: string): Venue | undefined {
     return this.rooms.get(code);
   }
 
@@ -63,7 +64,7 @@ export class RoomRegistry implements RoomDirectory {
     for (const code of [...this.rooms.keys()]) this.remove(code);
   }
 
-  private occupancyChanged(room: Room) {
+  private occupancyChanged(room: Venue) {
     const pending = this.expiries.get(room.code);
     if (room.connectedCount > 0) {
       if (pending) clearTimeout(pending);

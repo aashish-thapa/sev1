@@ -1,5 +1,5 @@
-import { MAX_PLAYERS_PER_ROOM, type PublicRoom, type RoomVisibility } from "../src/multiplayer/protocol.ts";
-import type { Room } from "./room.ts";
+import type { PublicRoom, RoomVisibility } from "../src/multiplayer/protocol.ts";
+import type { Venue } from "./venue.ts";
 
 /** What a host knows about a room beyond the room itself: who may find it, and since when. */
 export type RoomListing = { readonly visibility: RoomVisibility; readonly openedAt: number };
@@ -8,16 +8,16 @@ export type RoomListing = { readonly visibility: RoomVisibility; readonly opened
  * How `room` appears in the public lobby, or null when it shouldn't: it's private, nobody is in it
  * to play with, it's full, or its incident is already over.
  */
-export function publicListing(room: Room, listing: RoomListing): PublicRoom | null {
+export function publicListing(room: Venue, listing: RoomListing): PublicRoom | null {
   const players = room.connectedCount;
-  if (listing.visibility !== "public" || players === 0 || players >= MAX_PLAYERS_PER_ROOM || room.isClosed) return null;
+  if (listing.visibility !== "public" || players === 0 || players >= room.capacity || room.isClosed) return null;
   return {
     code: room.code,
     host: room.hostName ?? "Someone",
     players,
-    maxPlayers: MAX_PLAYERS_PER_ROOM,
+    maxPlayers: room.capacity,
     scenarioTitle: room.scenario.title,
-    mode: "coop",
+    mode: room.mode,
     openedAt: listing.openedAt,
   };
 }

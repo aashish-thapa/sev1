@@ -1,6 +1,6 @@
 import { lazy, Suspense, useContext, useEffect, useState } from "react";
 import { careerLevel } from "../domain/career.ts";
-import { CharacterPicker, LobbyRail, ModeCard, PlayerCard, TopRanks } from "./lobby/LobbyParts.tsx";
+import { CharacterPicker, LobbyRail, ModeCard, PlayerCard, TopRanks, type RoomActions } from "./lobby/LobbyParts.tsx";
 import { useLook } from "../app/look-context.ts";
 import type { Look } from "../domain/look.ts";
 import { wornAvatar } from "../warroom/floor/people/avatars.ts";
@@ -14,8 +14,6 @@ import { featuredBadge } from "../domain/achievements.ts";
 import { roomWarRooms } from "../warroom/scenarios/index.ts";
 import type { Role } from "../domain/incident.ts";
 import type { Progress } from "../domain/progress.ts";
-import type { RoomVisibility } from "../multiplayer/protocol.ts";
-import type { ListPublicRooms } from "../multiplayer/usePublicRooms.ts";
 import { useLeaderboard, type FetchLeaderboard } from "../storage/leaderboard-api.ts";
 import { AccountPanel } from "./AccountPanel.tsx";
 import { BadgeMark } from "./Badges.tsx";
@@ -55,13 +53,7 @@ type Props = {
   };
   /** Saves the body and pose you chose to wear. */
   onChooseLook: (look: Look) => void;
-  rooms: {
-    status: string;
-    error: string | null;
-    onCreate: (name: string, visibility: RoomVisibility, scenarioId: string) => void;
-    onJoin: (code: string, name: string) => void;
-    listPublic: ListPublicRooms;
-  };
+  rooms: RoomActions;
 };
 
 const ACCOUNT_PANEL_ID = "account-panel";

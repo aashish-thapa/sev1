@@ -5,7 +5,8 @@ import type { CommsMessage } from "../warroom/scenario.ts";
 import { promptFor } from "../warroom/shell/prompt.ts";
 import type { TerminalLine } from "../warroom/ui/useIncident.ts";
 import { RoomClient, seatOf, type Engineer, type RoomEvents, type RoomStatus, type Seat, type SocketConstructor } from "./client.ts";
-import type { Player, Position, Resume, RoomPhase, RoomVisibility, ServerMessageOf, Signal } from "./protocol.ts";
+import type { Team } from "../warroom/versus.ts";
+import type { Player, Position, Resume, RoomMode, RoomPhase, RoomVisibility, ServerMessageOf, Signal } from "./protocol.ts";
 
 export type RoomInfo = {
   readonly code: string;
@@ -13,6 +14,8 @@ export type RoomInfo = {
   readonly scenarioId: string;
   /** Persist it (e.g. sessionStorage) and pass `seat.resume` to `join` to keep the seat across a page reload. */
   readonly seat: Seat;
+  /** This player's side in a versus match; null in a co-op room. */
+  readonly team: Team | null;
 };
 
 export type RoomView = {
@@ -90,7 +93,7 @@ export function useRoom(options: { url: string; WebSocket?: SocketConstructor })
   }, [client]);
 
   const create = useCallback(
-    (scenarioId: string, engineer: Engineer, visibility: RoomVisibility) => client.create({ scenarioId, visibility, ...engineer }),
+    (scenarioId: string, engineer: Engineer, visibility: RoomVisibility, mode: RoomMode = "coop") => client.create({ scenarioId, visibility, mode, ...engineer }),
     [client],
   );
   const join = useCallback(
@@ -121,7 +124,7 @@ function reduce(view: RoomView, { type, event }: Event): RoomView {
     case "welcome":
       return {
         ...view,
-        room: { code: event.roomCode, playerId: event.playerId, scenarioId: event.scenarioId, seat: seatOf(event) },
+        room: { code: event.roomCode, playerId: event.playerId, scenarioId: event.scenarioId, seat: seatOf(event), team: event.team },
         players: event.players,
         comms: event.comms,
         history: event.history,
@@ -130,8 +133,9 @@ function reduce(view: RoomView, { type, event }: Event): RoomView {
         error: null,
       };
     case "phase":
-      // A new incident (or a quiet office) starts every laptop clean; chat history stays.
-      return { ...view, phase: event.phase, terminal: [], activity: [], debrief: null, scorecard: [] };
+      // A new incident (or a quiet office) starts every laptop clean; chat history stays. The scorecard
+      // outlives the quiet that follows a close, since players read it after their postmortem.
+      return { ...view, phase: event.phase, terminal: [], activity: [], debrief: null, scorecard: event.phase === "incident" ? [] : view.scorecard };
     case "incident":
       return { ...view, incident: event };
     case "players":

@@ -12,6 +12,7 @@ import { completeLine } from "../shell/shell.ts";
 import { laptopBanner } from "./laptop-identity.ts";
 import type { IncidentFeed } from "./feed.ts";
 import { LiveIncident, type TeamContext } from "./LiveIncident.tsx";
+import { RivalStrip } from "./RivalStrip.tsx";
 import { TeamChat } from "./TeamChat.tsx";
 import { VoiceControls } from "./VoiceControls.tsx";
 
@@ -104,6 +105,7 @@ export function TeamIncident({ room, scenario, role, overlay, onUseScreen, onClo
         team={team}
       />
       <aside className="team-panel" aria-label="Your team">
+        {room.match && <RivalStrip match={room.match} team={room.room?.team ?? null} />}
         <VoiceControls voice={voice} selfId={team.selfId} members={members} />
         <TeamChat comms={room.comms} onSend={room.chat} />
       </aside>

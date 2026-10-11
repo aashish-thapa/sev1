@@ -2484,3 +2484,133 @@ a {
   color: var(--color-muted);
   font-size: var(--text-sm);
 }
+
+/* ── Versus: the side colour every team mark reads from ──────────── */
+
+[data-team="red"] {
+  --team-color: var(--color-team-red);
+}
+
+[data-team="blue"] {
+  --team-color: var(--color-team-blue);
+}
+
+/* ── War room debrief: versus result and scorecard ──────────────── */
+
+.match-result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  background: var(--color-paper-2);
+}
+
+.match-result[data-outcome="won"] {
+  border-color: var(--color-good);
+  background: var(--color-good-wash);
+}
+
+.match-result[data-outcome="lost"] {
+  border-color: var(--color-critical);
+  background: var(--color-critical-wash);
+}
+
+.match-result__headline {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 800;
+  font-stretch: 80%;
+}
+
+.match-result__lanes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-sm);
+  margin: 0;
+}
+
+.match-result__lanes > div {
+  padding-inline-start: var(--space-xs);
+  border-inline-start: 3px solid var(--team-color);
+}
+
+.match-result__lanes dt {
+  color: var(--team-color);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.match-result__lanes dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.scorecard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.scorecard__title {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* A narrow phone scrolls the table, never the page. */
+.scorecard__scroll {
+  max-inline-size: 100%;
+  overflow-x: auto;
+}
+
+.scorecard__table {
+  inline-size: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.scorecard__table th,
+.scorecard__table td {
+  padding: var(--space-2xs) var(--space-xs);
+  border-bottom: 1px solid var(--color-rule-2);
+  text-align: start;
+}
+
+.scorecard__table tbody th {
+  overflow-wrap: anywhere;
+}
+
+.scorecard__role {
+  display: block;
+  color: var(--color-muted);
+  font-size: var(--text-2xs);
+  font-weight: 400;
+}
+
+.scorecard__table thead th {
+  color: var(--color-muted);
+  font-weight: 500;
+}
+
+.scorecard__table abbr {
+  text-decoration: none;
+}
+
+.scorecard__table tr[data-mvp="true"] {
+  background: var(--color-paper-3);
+}
+
+.scorecard__mvp {
+  color: var(--color-accent);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+}

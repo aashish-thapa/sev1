@@ -610,3 +610,11 @@
     inline-size: 6rem;
   }
 }
+
+.mode-card__versus {
+  margin-inline-start: var(--space-2xs);
+  color: var(--color-accent);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  text-transform: uppercase;
+}

@@ -12,6 +12,7 @@ import { CompanyOfficeContext } from "../floor/company-office/context.ts";
 import type { WallScreen } from "../floor/office.ts";
 import type { useRoom } from "../../multiplayer/useRoom.ts";
 import { SoloIncident } from "./LiveIncident.tsx";
+import { MatchResult, ScorecardTable } from "./MatchDebrief.tsx";
 import { IncidentHelpContext, type IncidentHelp } from "./incident-help.ts";
 import { TeamIncident } from "./TeamIncident.tsx";
 
@@ -134,6 +135,7 @@ export function WarRoomView({ scenario, role, onFinish, onBuySolution, hints, on
   return (
     <main className="debrief">
       <p className="paged__source">{scenario.title} · debrief</p>
+      {room?.match && <MatchResult match={room.match} team={room.room?.team ?? null} />}
       <h1 className="debrief__grade" data-grade={result.grade}>
         {result.grade}
         <span className="debrief__points">{result.points} / 100</span>
@@ -165,6 +167,7 @@ export function WarRoomView({ scenario, role, onFinish, onBuySolution, hints, on
           </li>
         ))}
       </ul>
+      {room && <ScorecardTable scorecard={room.scorecard} />}
       {hasBoughtSolution(wallet, { scenarioId: scenario.id, runStartedAt }) && (
         <p className="debrief__assisted">Assisted run: you bought the worked solution, so this incident paid no bonus and earned no experience.</p>
       )}

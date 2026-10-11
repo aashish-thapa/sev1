@@ -163,6 +163,7 @@ export function App({ shareUrl, proSale, adminApi, companyApi, ...services }: Pr
           roles={{ chosen: game.progress.role, onChoose: game.chooseRole }}
           onEnterOffice={game.enterOffice}
           onFeatureBadge={game.featureBadge}
+          onChooseLook={game.chooseLook}
           proSale={proSale}
           adminApi={adminApi}
           company={{

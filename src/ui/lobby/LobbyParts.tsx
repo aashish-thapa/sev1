@@ -5,6 +5,8 @@ import { ROLE_INFO } from "../../domain/roles.ts";
 import type { RoomVisibility } from "../../multiplayer/protocol.ts";
 import { usePublicRooms, type ListPublicRooms } from "../../multiplayer/usePublicRooms.ts";
 import type { LeaderboardView } from "../../storage/leaderboard-api.ts";
+import { AVATAR_COUNT, avatarNumber, POSES, stepAvatar, type Pose } from "../../domain/look.ts";
+import type { AvatarId } from "../../warroom/floor/assets/catalog.ts";
 
 /** Who you are, top left: name, marks, rank and how far to the next promotion. */
 export function PlayerCard({ name, marks, experience, href }: { name: string; marks: ReactNode; experience: number; href: string }) {
@@ -170,3 +172,49 @@ export function ModeCard({ role, onRole, name, onName, onSolo, rooms }: ModeCard
     </section>
   );
 }
+
+/** The wardrobe: step through bodies on the stage, pick a pose, and wear it. */
+export function CharacterPicker({
+  draft,
+  onDraft,
+  isWorn,
+  onWear,
+}: {
+  draft: { readonly avatar: AvatarId; readonly pose: Pose };
+  onDraft: (draft: { avatar: AvatarId; pose: Pose }) => void;
+  /** The draft is already what you wear. */
+  isWorn: boolean;
+  onWear: () => void;
+}) {
+  return (
+    <section className="wardrobe" aria-label="Your character">
+      <div className="wardrobe__step">
+        <button type="button" className="wardrobe__arrow" aria-label="Previous body" onClick={() => onDraft({ ...draft, avatar: stepAvatar(draft.avatar, -1) })}>
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+        <span className="wardrobe__count" aria-live="polite">
+          {avatarNumber(draft.avatar)} / {AVATAR_COUNT}
+        </span>
+        <button type="button" className="wardrobe__arrow" aria-label="Next body" onClick={() => onDraft({ ...draft, avatar: stepAvatar(draft.avatar, 1) })}>
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      </div>
+      <div className="mode-card__choice" role="radiogroup" aria-label="Lobby pose">
+        {POSES.map((pose) => (
+          <button key={pose} type="button" role="radio" aria-checked={draft.pose === pose} className="mode-card__pill" onClick={() => onDraft({ ...draft, pose })}>
+            {POSE_LABEL[pose]}
+          </button>
+        ))}
+      </div>
+      <button type="button" className="mode-card__start" disabled={isWorn} onClick={onWear}>
+        {isWorn ? "Wearing" : "Wear this"}
+      </button>
+    </section>
+  );
+}
+
+const POSE_LABEL: Readonly<Record<Pose, string>> = { idle: "Standing", phone: "On the phone", talk: "Talking" };

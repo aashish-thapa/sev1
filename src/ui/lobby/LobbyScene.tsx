@@ -3,11 +3,14 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { Suspense, useCallback, useMemo, useRef, type PointerEvent, type ReactNode } from "react";
 import { AgXToneMapping, type Group } from "three";
 import { Avatar } from "../../warroom/floor/people/Avatar.tsx";
-import { avatarFor } from "../../warroom/floor/people/avatars.ts";
+import type { AvatarId } from "../../warroom/floor/assets/catalog.ts";
 import type { Motion } from "../../warroom/floor/people/behaviour.ts";
+import type { Pose } from "../../domain/look.ts";
 import { tokenColor } from "../../warroom/floor/tokens.ts";
 
-const IDLE: Motion = { clip: "idle", speed: 0 };
+/** How far left you step when a panel opens beside you, in metres, and how quickly. */
+const ASIDE_X = -0.95;
+const SLIDE = 4;
 /** Radians per pixel of drag, and how fast the body drifts back to facing you once let go. */
 const TURN_PER_PIXEL = 0.012;
 const SETTLE = 1.6;
@@ -16,7 +19,16 @@ const SETTLE = 1.6;
  * The lobby's stage: you, standing in front of the data centre, turnable by dragging. Lazy-loaded
  * so the menus are usable before three.js arrives; the backdrop image fills in meanwhile.
  */
-export default function LobbyScene({ seed, reduceMotion }: { seed: string; reduceMotion: boolean }) {
+type Props = {
+  avatar: AvatarId;
+  pose: Pose;
+  /** A panel is open on the right: stand aside so you're still in view. */
+  isAside: boolean;
+  reduceMotion: boolean;
+};
+
+export default function LobbyScene({ avatar, pose, isAside, reduceMotion }: Props) {
+  const motion = useMemo<Motion>(() => ({ clip: pose, speed: 0 }), [pose]);
   const turn = useRef({ angle: 0, isDragging: false, lastX: 0 });
   const gl = useMemo(() => ({ antialias: true, alpha: true, toneMapping: AgXToneMapping }), []);
 
@@ -47,13 +59,13 @@ export default function LobbyScene({ seed, reduceMotion }: { seed: string; reduc
     <div className="lobby-scene" onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}>
       <Canvas dpr={[1, 2]} gl={gl} camera={{ fov: 30, position: [0, 1.05, 4.6] }} onCreated={({ camera }) => camera.lookAt(0, 0.92, 0)}>
         <Lights />
-        <Suspense fallback={null}>
-          <Turntable angleAfter={angleAfter}>
-            <Avatar id={avatarFor(seed)} motion={() => IDLE} />
-          </Turntable>
-        </Suspense>
-        <Platform />
-        <ContactShadows position={[0, 0.005, 0]} opacity={0.6} scale={4} blur={2.4} far={2} />
+        <Turntable angleAfter={angleAfter} x={isAside ? ASIDE_X : 0} reduceMotion={reduceMotion}>
+          <Suspense fallback={null}>
+            <Avatar key={avatar} id={avatar} motion={() => motion} />
+          </Suspense>
+          <Platform />
+          <ContactShadows position={[0, 0.005, 0]} opacity={0.6} scale={4} blur={2.4} far={2} />
+        </Turntable>
       </Canvas>
     </div>
   );
@@ -83,11 +95,14 @@ function Platform() {
   );
 }
 
-/** Turns its children to the angle the scene reports each frame. */
-function Turntable({ angleAfter, children }: { angleAfter: (delta: number) => number; children: ReactNode }) {
+/** Turns its children to the angle the scene reports each frame, and eases them to `x`. */
+function Turntable({ angleAfter, x, reduceMotion, children }: { angleAfter: (delta: number) => number; x: number; reduceMotion: boolean; children: ReactNode }) {
   const group = useRef<Group>(null);
   useFrame((_, delta) => {
-    if (group.current) group.current.rotation.y = angleAfter(delta);
+    const body = group.current;
+    if (!body) return;
+    body.rotation.y = angleAfter(delta);
+    body.position.x = reduceMotion ? x : body.position.x + (x - body.position.x) * Math.min(1, delta * SLIDE);
   });
   return <group ref={group}>{children}</group>;
 }

@@ -249,6 +249,8 @@ export const ServerMessageSchema = z.discriminatedUnion("type", [
     phase: RoomPhaseSchema.default("incident"),
     /** The side this player is on in a versus match; null in a co-op room. */
     team: TeamSchema.nullable().default(null),
+    /** What kind of room this is; older servers only ran co-op. */
+    mode: RoomModeSchema.default("coop"),
   }),
   /** The room went quiet, or the pager went off; a full `state` frame follows with the incident to show. */
   z.object({ type: z.literal("phase"), phase: RoomPhaseSchema }),

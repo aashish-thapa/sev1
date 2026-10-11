@@ -6,6 +6,7 @@ import {
   type ErrorCode,
   type Player,
   type Position,
+  type RoomMode,
   type Resume,
   type RoomPhase,
   type ServerMessage,
@@ -69,6 +70,8 @@ export type RoomOptions = {
   readonly kickoff?: Kickoff | null;
   /** The side this room's players are on in a versus match. */
   readonly team?: Team | null;
+  /** Set on a match's sides, so their players are told what kind of room they joined. */
+  readonly mode?: RoomMode;
   /** A bot crew plays every role here, with nobody needed in the room: a versus rival when matchmaking finds none. */
   readonly isBotCrew?: boolean;
 };
@@ -98,7 +101,8 @@ type Seat = {
 
 /** One war room: the authoritative incident plus the people working it. */
 export class Room implements Venue {
-  readonly mode = "coop";
+  /** Co-op on its own; one side of a match carries the match's mode. */
+  readonly mode: RoomMode;
   readonly capacity = MAX_PLAYERS_PER_ROOM;
   readonly code: string;
   readonly scenario: Scenario;
@@ -136,6 +140,7 @@ export class Room implements Venue {
     this.paging = options.paging ?? null;
     this.kickoff = options.kickoff ?? null;
     this.team = options.team ?? null;
+    this.mode = options.mode ?? "coop";
     this.crewPlan = options.isBotCrew ? planCrew(scenario, seededRandom(`${scenario.seed}:crew:${code}`)) : null;
     this.phase = this.paging || this.kickoff ? "quiet" : "incident";
     this.incident = openIncident(scenario);
@@ -210,6 +215,7 @@ export class Room implements Venue {
       history: [...seat.history],
       phase: this.phase,
       team: this.team,
+      mode: this.mode,
     });
     this.send(seat, { type: "state", frame: encodeFrame(null, this.incident) });
     if (this.incident.phase.name === "closed") this.send(seat, this.closedMessage());

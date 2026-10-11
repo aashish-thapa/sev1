@@ -33,7 +33,7 @@ export class Match implements Venue, Kickoff {
     this.logger = logger;
     this.onOccupancyChange = onOccupancyChange;
     this.now = now;
-    const side = (team: Team) => new Room(code, scenario, timing, logger, () => this.occupancyChanged(), { kickoff: this, team });
+    const side = (team: Team) => new Room(code, scenario, timing, logger, () => this.occupancyChanged(), { kickoff: this, team, mode: this.mode });
     this.sides = { red: side("red"), blue: side("blue") };
   }
 

@@ -172,6 +172,12 @@ export function randomMatchScenario(role: Role, level: Level, random: Random): S
   return pool[Math.floor(random() * pool.length)] ?? null;
 }
 
+/** The incident a by-code room plays (co-op or versus): drawn from everything its host may open a room on. */
+export function randomRoomScenario(role: Role, level: Level, random: Random): Scenario {
+  const pool = roomWarRooms(role, level);
+  return pool[Math.floor(random() * pool.length)] ?? TEAM_SCENARIO;
+}
+
 /** The cross-team incident: every room may play it, and a new room starts on it. */
 export const TEAM_SCENARIO = checkoutMeltdown;
 

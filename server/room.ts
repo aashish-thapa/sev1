@@ -13,6 +13,8 @@ import {
 } from "../src/multiplayer/protocol.ts";
 import { advance, alertRate, debrief, declareResolved, openIncident, type Incident } from "../src/warroom/incident.ts";
 import type { CommsMessage, Scenario } from "../src/warroom/scenario.ts";
+import { seededRandom } from "../src/domain/random.ts";
+import { crewTurn, planCrew, type BotPlan } from "../src/warroom/bot-crew.ts";
 import { EMPTY_SCORECARD, recordCommand, recordEarlyDeclare, recordRootCause, rootCauseShift, type Engineer, type Scorecard } from "../src/warroom/scorecard.ts";
 import { runLine } from "../src/warroom/shell/shell.ts";
 import { applyTeamwork } from "../src/warroom/teamwork.ts";
@@ -67,6 +69,8 @@ export type RoomOptions = {
   readonly kickoff?: Kickoff | null;
   /** The side this room's players are on in a versus match. */
   readonly team?: Team | null;
+  /** A bot crew plays every role here, with nobody needed in the room: a versus rival when matchmaking finds none. */
+  readonly isBotCrew?: boolean;
 };
 
 const HISTORY_LIMIT = 200;
@@ -120,6 +124,8 @@ export class Room implements Venue {
   private scorecard: Scorecard = EMPTY_SCORECARD;
   /** The engineer whose command last changed the cluster: the one credited if the root cause goes away next. */
   private lastChanger: Engineer | null = null;
+  /** Null unless a bot crew works this room. */
+  private crewPlan: BotPlan | null;
 
   constructor(code: string, scenario: Scenario, timing: RoomTiming, logger: Logger, onOccupancyChange: (room: Room) => void, options: RoomOptions = {}) {
     this.code = code;
@@ -130,6 +136,7 @@ export class Room implements Venue {
     this.paging = options.paging ?? null;
     this.kickoff = options.kickoff ?? null;
     this.team = options.team ?? null;
+    this.crewPlan = options.isBotCrew ? planCrew(scenario, seededRandom(`${scenario.seed}:crew:${code}`)) : null;
     this.phase = this.paging || this.kickoff ? "quiet" : "incident";
     this.incident = openIncident(scenario);
     this.comms = this.phase === "incident" ? this.openingComms() : [];
@@ -162,6 +169,7 @@ export class Room implements Venue {
     const { phase, cluster, reopenCount } = this.incident;
     const isClosed = phase.name === "closed";
     return {
+      crew: this.crewPlan ? "bots" : "players",
       players: this.connectedCount,
       phase: this.phase === "quiet" ? "waiting" : phase.name,
       alertRate: Math.min(1, Math.max(0, alertRate(this.scenario, cluster))),
@@ -337,9 +345,11 @@ export class Room implements Venue {
     const previousT = this.incident.cluster.t;
     const { incident: advanced, notice } = advance(this.incident, this.scenario);
     // A held seat stays in `seats` until it expires, so a colleague never takes a reconnecting player's role.
-    const covered = new Set([...this.seats.values()].map((seat) => seat.role));
-    const { incident, done, messages } = applyTeamwork(advanced, this.scenario, covered, this.teamworkDone);
+    // A bot crew covers every role itself, so colleagues never repeat its moves.
+    const covered = new Set(this.crewPlan ? this.scenario.roles : [...this.seats.values()].map((seat) => seat.role));
+    const { incident: helped, done, messages } = applyTeamwork(advanced, this.scenario, covered, this.teamworkDone);
     this.teamworkDone = done;
+    const incident = this.crewPlan ? this.crewMoves(helped) : helped;
     this.commit(incident);
     const t = incident.cluster.t;
     for (const message of this.scenario.comms) if (message.at > previousT && message.at <= t) this.post(message);
@@ -353,6 +363,14 @@ export class Room implements Venue {
       this.onOccupancyChange(this);
       if (this.paging) this.resetTimer = setTimeout(() => this.goQuiet(), this.paging.resetAfterCloseMs);
     }
+  }
+
+  private crewMoves(incident: Incident): Incident {
+    if (!this.crewPlan) return incident;
+    const turn = crewTurn(this.crewPlan, incident, this.scenario);
+    this.crewPlan = turn.plan;
+    if (turn.incident.declaredAt !== incident.declaredAt) this.post(declaredComms("the bot crew", turn.incident.cluster.t));
+    return turn.incident;
   }
 
   /** The pager goes off: a fresh incident opens and everyone's floor turns live. */
@@ -486,7 +504,8 @@ export class Room implements Venue {
 
   /** The clock runs only while someone is watching and a live incident is still open. */
   private syncTicker() {
-    const shouldRun = this.connectedCount > 0 && this.phase === "incident" && this.incident.phase.name !== "closed";
+    const isManned = this.connectedCount > 0 || this.crewPlan !== null;
+    const shouldRun = isManned && this.phase === "incident" && this.incident.phase.name !== "closed";
     if (shouldRun && !this.stopTicker) {
       this.stopTicker = startTicker(
         () => (this.incident.phase.name === "monitoring" ? this.timing.monitoringTickMs : this.timing.tickMs),

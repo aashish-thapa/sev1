@@ -85,6 +85,7 @@ export function useRoom(options: { url: string; WebSocket?: SocketConstructor })
       forward("closed"),
       forward("phase"),
       forward("match"),
+      forward("move"),
     ];
     return () => {
       for (const off of unsubscribe) off();
@@ -155,6 +156,9 @@ function reduce(view: RoomView, { type, event }: Event): RoomView {
       return { ...view, error: event };
     case "closed":
       return { ...view, debrief: event.debrief, scorecard: event.scorecard };
+    case "move":
+      // The client is already rejoining elsewhere; nothing from this room carries over.
+      return { ...INITIAL_VIEW, status: view.status };
     case "match":
       return { ...view, match: { stage: event.stage, lanes: event.lanes } };
   }

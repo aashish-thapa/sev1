@@ -253,6 +253,6 @@ export function CharacterPicker({
   );
 }
 
-const FORMAT_LABEL: Readonly<Record<RoomMode, string>> = { coop: "Co-op", versus: "Versus · red vs blue" };
+const FORMAT_LABEL: Readonly<Record<RoomMode, string>> = { coop: "Co-op", versus: "Versus · red vs blue", matchmade: "Random opponents" };
 
 const POSE_LABEL: Readonly<Record<Pose, string>> = { idle: "Standing", phone: "On the phone", talk: "Talking" };

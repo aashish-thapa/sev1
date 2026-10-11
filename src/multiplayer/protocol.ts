@@ -106,8 +106,11 @@ const RoomPhaseSchema = z.enum(ROOM_PHASES);
 export const ROOM_VISIBILITIES = ["public", "private"] as const;
 export type RoomVisibility = (typeof ROOM_VISIBILITIES)[number];
 
-/** Co-op: one shared incident. Versus: two teams race their own copy of the same incident. */
-export const ROOM_MODES = ["coop", "versus"] as const;
+/**
+ * Co-op: one shared incident. Versus: two teams race their own copy of the same incident, the other
+ * team joining by code. Matchmade: versus against whoever matchmaking finds, or a bot crew.
+ */
+export const ROOM_MODES = ["coop", "versus", "matchmade"] as const;
 export type RoomMode = (typeof ROOM_MODES)[number];
 const RoomModeSchema = z.enum(ROOM_MODES);
 
@@ -134,6 +137,8 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
     avatar: OfferedAvatarSchema,
     /** Reclaims a seat (and its shell history) after a dropped connection. */
     resume: ResumeSchema.optional(),
+    /** The side to take in a versus match; a full or absent side falls back to the server's pick. */
+    team: TeamSchema.optional(),
   }),
   z.strictObject({ type: z.literal("presence"), ...PositionSchema.shape }),
   z.strictObject({ type: z.literal("command"), line: z.string().max(MAX_COMMAND_LENGTH) }),
@@ -210,6 +215,7 @@ const TallySchema = z.object({
 
 const LaneStandingSchema = z.object({
   team: TeamSchema,
+  crew: z.enum(["players", "bots"]).default("players"),
   players: z.int().nonnegative(),
   phase: z.enum(["waiting", "live", "monitoring", "closed"]),
   alertRate: z.number().min(0).max(1),
@@ -219,6 +225,8 @@ const LaneStandingSchema = z.object({
 
 const MatchStageSchema = z.discriminatedUnion("name", [
   z.object({ name: z.literal("lineup") }),
+  z.object({ name: z.literal("searching"), msElapsed: z.number().nonnegative() }),
+  z.object({ name: z.literal("found") }),
   z.object({ name: z.literal("racing") }),
   z.object({ name: z.literal("overtime"), msLeft: z.number().nonnegative() }),
   z.object({ name: z.literal("decided"), winner: z.union([TeamSchema, z.literal("draw")]) }),
@@ -275,6 +283,8 @@ export const ServerMessageSchema = z.discriminatedUnion("type", [
   }),
   /** A versus match's standings: sent as they change, and about once a second while it's on. */
   z.object({ type: z.literal("match"), stage: MatchStageSchema, lanes: z.array(LaneStandingSchema) }),
+  /** Matchmaking paired this room's players with another room: rejoin there, on this side. */
+  z.object({ type: z.literal("move"), roomCode: RoomCodeSchema, team: TeamSchema }),
   z.object({ type: z.literal("pong"), nonce: z.int().nonnegative().optional() }),
 ]);
 export type ServerMessage = z.infer<typeof ServerMessageSchema>;

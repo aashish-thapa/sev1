@@ -1,6 +1,7 @@
 import type { Role } from "../domain/incident.ts";
 import type { Incident } from "../warroom/incident.ts";
 import { backoffDelay, RECONNECT_BACKOFF, type BackoffPolicy } from "./backoff.ts";
+import type { Team } from "../warroom/versus.ts";
 import { applyFrame } from "./frame.ts";
 import {
   encodeClientMessage,
@@ -50,6 +51,8 @@ export type RoomEvents = {
   readonly signal: ServerMessageOf<"signal">;
   readonly phase: ServerMessageOf<"phase">;
   readonly match: ServerMessageOf<"match">;
+  /** Matchmaking moved us: the client is already rejoining at `roomCode`; views should start clean. */
+  readonly move: ServerMessageOf<"move">;
 };
 
 export type RoomClientOptions = {
@@ -69,7 +72,7 @@ export function seatOf(welcome: ServerMessageOf<"welcome">): Seat {
 
 type Intent =
   | ({ readonly kind: "create"; readonly scenarioId: string; readonly visibility: RoomVisibility; readonly mode?: RoomMode } & Engineer)
-  | ({ readonly kind: "join"; readonly roomCode: string; readonly resume?: Resume } & Engineer);
+  | ({ readonly kind: "join"; readonly roomCode: string; readonly resume?: Resume; readonly team?: Team } & Engineer);
 
 /** Who takes the seat: shown to teammates by name, role, the badge and the body they chose. */
 export type Engineer = { readonly name: string; readonly role: Role; readonly badge: string | null; readonly avatar?: string | null };
@@ -100,6 +103,7 @@ export class RoomClient {
     signal: new Set(),
     phase: new Set(),
     match: new Set(),
+    move: new Set(),
   };
   /** Null until voice starts; resent on every new seat, since the server forgets it with the old one. */
   private voiceHeld: boolean | null = null;
@@ -150,7 +154,8 @@ export class RoomClient {
     this.begin({ kind: "create", ...request });
   }
 
-  join(request: { roomCode: string; resume?: Resume } & Engineer) {
+  /** `team` asks for a side in a versus match; the server falls back to its own pick when it's full. */
+  join(request: { roomCode: string; resume?: Resume; team?: Team } & Engineer) {
     this.begin({ kind: "join", ...request });
   }
 
@@ -245,7 +250,7 @@ export class RoomClient {
     } else if (intent.kind === "create") {
       this.transmit({ type: "create", scenarioId: intent.scenarioId, name: intent.name, role: intent.role, badge: intent.badge, avatar: intent.avatar ?? null, visibility: intent.visibility, mode: intent.mode });
     } else {
-      this.transmit({ type: "join", roomCode: intent.roomCode, name: intent.name, role: intent.role, badge: intent.badge, avatar: intent.avatar ?? null, resume: intent.resume });
+      this.transmit({ type: "join", roomCode: intent.roomCode, name: intent.name, role: intent.role, badge: intent.badge, avatar: intent.avatar ?? null, resume: intent.resume, team: intent.team });
     }
   }
 
@@ -275,6 +280,8 @@ export class RoomClient {
         return this.emit("error", message);
       case "pong":
         return;
+      case "move":
+        return this.moveTo(message);
       default:
         return this.emit(message.type, message);
     }
@@ -365,6 +372,17 @@ export class RoomClient {
   private stopKeepalive() {
     if (this.keepaliveTimer) clearInterval(this.keepaliveTimer);
     this.keepaliveTimer = null;
+  }
+
+  /** Gives up this seat and takes one on `team` in the room matchmaking paired us with. */
+  private moveTo(move: ServerMessageOf<"move">) {
+    const intent = this.intent;
+    if (!intent) return;
+    const engineer: Engineer = { name: intent.name, role: intent.role, badge: intent.badge, avatar: intent.avatar };
+    this.transmit({ type: "leave" });
+    this.teardown();
+    this.emit("move", move);
+    this.begin({ kind: "join", roomCode: move.roomCode, team: move.team, ...engineer });
   }
 
   private teardown() {

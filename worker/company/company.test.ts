@@ -185,6 +185,19 @@ describe("work days and payroll", () => {
     expect((await setup.companies.settle(founder)).ok).toBe(true);
   });
 
+  it("lets only the founder close the day", async () => {
+    const setup = world();
+    const founder = setup.user("u1", "maya");
+    const sam = setup.user("u2", "sam");
+    await foundedCompany(setup, founder);
+    expect((await setup.companies.invite(founder, { username: "sam", role: "frontend", payCents: 20_000 })).ok).toBe(true);
+    const [offer] = (await setup.companies.mine(sam)).invitations;
+    expect((await setup.companies.accept(sam, offer.id)).ok).toBe(true);
+
+    expect(await setup.companies.settle(sam)).toEqual({ ok: false, problem: "not_founder" });
+    expect((await setup.companies.settle(founder)).ok).toBe(true);
+  });
+
   it("charges the company for what its members took from the pantry that day", async () => {
     const asked: string[] = [];
     const setup = world(async (userId, day) => (asked.push(`${userId}:${day}`), 235));

@@ -291,12 +291,13 @@ export class CompanyService {
     return ok(null);
   }
 
-  /** Any member may close the day, once per real UTC day. */
+  /** Only the founder closes the day, once per real UTC day. */
   async settle(caller: Caller): Promise<Outcome<WorkDaySettlement>> {
     const { store, now } = this.deps;
     if (await this.deps.isOverLimit(`company:${caller.id}`)) return fail("rate_limited");
     const view = await this.companyFor(caller.id);
     if (!view) return fail("not_in_company");
+    if (view.company.founderId !== caller.id) return fail("not_founder");
     if (view.company.state !== "active") return fail("not_active");
     const at = now();
     const today = utcDay(at);

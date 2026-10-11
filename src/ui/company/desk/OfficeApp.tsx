@@ -11,7 +11,7 @@ const settled = (day: WorkDaySettlement) => {
   return `Day ${day.workDay} closed: +${formatCents(revenue)}, ${formatCents(day.fundsAfter)} left.${day.isPayrollShort ? " Pay ran short." : ""}`;
 };
 
-/** How the company stands, closing the day, and (for the founder) rooms and servers to buy. */
+/** How the company stands, and for the founder, closing the day and buying rooms and servers. */
 export function OfficeApp({ desk }: { desk: CompanyDesk }) {
   const { api, company } = desk;
   const { isFounder, book, category } = useDesk(desk);
@@ -34,9 +34,13 @@ export function OfficeApp({ desk }: { desk: CompanyDesk }) {
         </p>
       )}
 
-      <button type="button" className="button button--primary desk__primary" disabled={isBusy} onClick={() => void act(() => api.settleWorkDay({}), settled)}>
-        Close today’s work day
-      </button>
+      {isFounder ? (
+        <button type="button" className="button button--primary desk__primary" disabled={isBusy} onClick={() => void act(() => api.settleWorkDay({}), settled)}>
+          Close today’s work day
+        </button>
+      ) : (
+        <p className="company__note">The founder closes each work day.</p>
+      )}
 
       {isFounder && (
         <ul className="shop" aria-label="Rooms and servers">

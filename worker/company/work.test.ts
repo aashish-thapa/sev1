@@ -131,7 +131,7 @@ describe("closing the day", () => {
     }
     expect((await boardOf(setup, "u1")).shippedSinceClose).toBe(4);
 
-    const settled = await setup.companies.settle({ id: "u2" });
+    const settled = await setup.companies.settle({ id: "u1" });
     if (!settled.ok) throw new Error(settled.problem);
     expect(setup.work.rows.every((row) => row.settledWorkDay === 1)).toBe(true);
     expect((await boardOf(setup, "u1")).shippedSinceClose).toBe(0);

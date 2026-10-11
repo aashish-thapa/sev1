@@ -13,7 +13,8 @@ export function DealApp({ api, deals, username, onChanged }: Props) {
   return (
     <div className="desk">
       {deals.map((deal) => (
-        <TermSheet key={deal.id} api={api} deal={deal} username={username} onChanged={onChanged} />
+        // New terms from the other side start a fresh sheet, so your draft never hides what's on the table.
+        <TermSheet key={`${deal.id}:${deal.terms.amountCents}:${deal.terms.equityBps}`} api={api} deal={deal} username={username} onChanged={onChanged} />
       ))}
     </div>
   );

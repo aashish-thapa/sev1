@@ -38,7 +38,8 @@ type Props = {
   incident: Incident;
   scenario: Scenario;
   isPaged: boolean;
-  onPage: () => void;
+  /** Absent when you can't start the incident yourself (a visitor to someone's office). */
+  onPage?: () => void;
   onDeclare: () => void;
   onLeave: () => void;
 };
@@ -59,9 +60,11 @@ export function IncidentHud({ incident, scenario, isPaged, onPage, onDeclare, on
             <WalletChip />
           </dl>
           <SoundToggle />
-          <button type="button" className="button button--ghost hud__resolve" onClick={onPage}>
-            Page me
-          </button>
+          {onPage && (
+            <button type="button" className="button button--ghost hud__resolve" onClick={onPage}>
+              Page me
+            </button>
+          )}
         </div>
       </header>
     );

@@ -24,7 +24,8 @@ type Props = {
   scenario: Scenario;
   role: Role;
   isPaged: boolean;
-  onPage: () => void;
+  /** Absent when you can't start the incident yourself (a visitor to someone's office). */
+  onPage?: () => void;
   onClosed: (incident: Incident) => void;
   onLeave: () => void;
   onUseScreen: (screen: WallScreen) => void;

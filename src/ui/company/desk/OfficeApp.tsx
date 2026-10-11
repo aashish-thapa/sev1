@@ -8,7 +8,8 @@ import { useCompanyAction, useDesk, type CompanyDesk } from "./desk.ts";
 
 const settled = (day: WorkDaySettlement) => {
   const revenue = day.lines.filter((line) => line.reason === "revenue").reduce((sum, line) => sum + line.amountCents, 0);
-  return `Day ${day.workDay} closed: +${formatCents(revenue)}, ${formatCents(day.fundsAfter)} left.${day.isPayrollShort ? " Pay ran short." : ""}`;
+  const skipped = day.undiscussed.length > 0 ? ` Half pay, no discussion: ${day.undiscussed.join(", ")}.` : "";
+  return `Day ${day.workDay} closed: +${formatCents(revenue)}, ${formatCents(day.fundsAfter)} left.${day.isPayrollShort ? " Pay ran short." : ""}${skipped}`;
 };
 
 /** How the company stands, and for the founder, closing the day and buying rooms and servers. */
@@ -41,6 +42,7 @@ export function OfficeApp({ desk }: { desk: CompanyDesk }) {
       ) : (
         <p className="company__note">The founder closes each work day.</p>
       )}
+      <p className="company__note">Answer at least one discussion card at your room’s screen each day, or that day pays half.</p>
 
       {isFounder && (
         <ul className="shop" aria-label="Rooms and servers">

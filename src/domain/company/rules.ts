@@ -93,6 +93,8 @@ export type WorkDayReport = {
   readonly contractorCents: number;
   /** What the members took from the office pantry that day; the company stocks it. */
   readonly pantryCents?: number;
+  /** Members who answered no discussion card that day; they're owed half their pay. */
+  readonly undiscussedIds?: ReadonlySet<string>;
 };
 
 export type LedgerReason = "revenue" | "room-upkeep" | "server-upkeep" | "contractor" | "pantry" | "payroll";
@@ -111,8 +113,9 @@ export type Settlement = {
 };
 
 /**
- * Books one work day: revenue comes in first, then upkeep, contractors and the pantry, then payroll. If the
- * money runs short, every member gets the same fraction of their pay rather than some going unpaid.
+ * Books one work day: revenue comes in first, then upkeep, contractors and the pantry, then payroll. A member
+ * who skipped the day's discussion is owed half their pay. If the money runs short, every member gets the same
+ * fraction of what they're owed rather than some going unpaid.
  */
 export function settleWorkDay(book: CompanyBook, report: WorkDayReport): Settlement {
   const category = categoryById(book.category);
@@ -133,9 +136,10 @@ export function settleWorkDay(book: CompanyBook, report: WorkDayReport): Settlem
   if (pantry > 0) lines.push({ reason: "pantry", amountCents: -pantry });
 
   const available = Math.max(0, book.fundsCents + revenue - roomUpkeep - serverUpkeep - contractor - pantry);
-  const owed = book.members.reduce((sum, member) => sum + member.payCents, 0);
+  const dueOf = (member: CompanyBook["members"][number]) => (report.undiscussedIds?.has(member.userId) ? Math.floor(member.payCents / 2) : member.payCents);
+  const owed = book.members.reduce((sum, member) => sum + dueOf(member), 0);
   const share = owed === 0 || available >= owed ? 1 : available / owed;
-  const payroll = book.members.map((member) => ({ userId: member.userId, amountCents: Math.floor(member.payCents * share) }));
+  const payroll = book.members.map((member) => ({ userId: member.userId, amountCents: Math.floor(dueOf(member) * share) }));
   for (const pay of payroll) if (pay.amountCents > 0) lines.push({ reason: "payroll", amountCents: -pay.amountCents, userId: pay.userId });
 
   const fundsAfter = book.fundsCents + lines.reduce((sum, line) => sum + line.amountCents, 0);

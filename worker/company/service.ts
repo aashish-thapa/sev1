@@ -81,6 +81,8 @@ export type CompanyDeps = {
    * Without it the pantry is free, as in job mode.
    */
   readonly pantryOf?: (userId: string, day: string) => Promise<number>;
+  /** Whether a member answered at least one discussion card on a UTC day, read from their saved progress; without it, everyone has. */
+  readonly discussedOn?: (userId: string, day: string) => Promise<boolean>;
   readonly newId: () => string;
   /** True when this caller has made too many company writes recently. */
   readonly isOverLimit: (key: string) => Promise<boolean>;
@@ -306,11 +308,14 @@ export class CompanyService {
     const book = bookOf(view);
     const pantryOf = this.deps.pantryOf;
     const pantryCents = pantryOf ? (await Promise.all(book.members.map((member) => pantryOf(member.userId, today)))).reduce((sum, cents) => sum + cents, 0) : 0;
+    const discussedOn = this.deps.discussedOn;
+    const undiscussedIds = new Set(discussedOn ? (await Promise.all(book.members.map(async (member) => ((await discussedOn(member.userId, today)) ? [] : [member.userId])))).flat() : []);
     // Work the server graded and no closed day has counted yet, across every member; the client's own count is ignored.
     const countable = Math.min(MAX_TASKS_PER_DAY, TASKS_PER_MEMBER_CAP * book.members.length);
     const workIds = this.deps.work ? await this.deps.work.unsettledShipped(view.company.id, countable) : [];
     const settlement = settleWorkDay(book, {
       pantryCents,
+      undiscussedIds,
       healthyShare: HEALTHY_SHARE_DEFAULT,
       tasksShipped: workIds.length,
       // Contractors are booked per issue once phase 2 records issues; a day settles without them until then.
@@ -346,6 +351,7 @@ export class CompanyService {
       lines: [...lines, ...dividends.lines].map((line) => ({ at, workDay, reason: line.reason, amountCents: line.amountCents, note: line.note })),
       fundsAfter: settlement.fundsAfter - dividends.payouts.reduce((sum, payout) => sum + payout.amountCents, 0),
       isPayrollShort: settlement.isPayrollShort,
+      undiscussed: [...undiscussedIds].map((userId) => nameOf.get(userId) ?? userId),
     });
   }
 

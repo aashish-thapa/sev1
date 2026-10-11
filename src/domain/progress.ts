@@ -187,6 +187,12 @@ export function hasFinishedShift(progress: Progress, day: LocalDate): boolean {
   return progress.history.some((entry) => entry.day === day);
 }
 
+/** True once at least one of the day's rated discussion cards is answered. */
+export function hasDiscussedOn(progress: Progress, day: string): boolean {
+  if (progress.activeShift?.day === day && progress.activeShift.attempts.length > 0) return true;
+  return progress.history.some((entry) => entry.day === day && entry.total > 0);
+}
+
 export function startShift(progress: Progress, day: LocalDate, incidentIds: readonly string[]): Progress {
   return { ...progress, activeShift: { day, incidentIds: [...incidentIds], attempts: [] } };
 }

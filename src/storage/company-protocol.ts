@@ -142,6 +142,8 @@ export const WorkDaySettlementSchema = z.object({
   lines: z.array(CompanyLedgerLineSchema),
   fundsAfter: SignedCents,
   isPayrollShort: z.boolean(),
+  /** Members paid half because they answered no discussion card that day. */
+  undiscussed: z.array(z.string()).default([]),
 });
 export type WorkDaySettlement = z.output<typeof WorkDaySettlementSchema>;
 

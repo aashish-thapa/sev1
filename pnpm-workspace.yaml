@@ -1,0 +1,6 @@
+# Both ship prebuilt platform binaries as optional dependencies, so their install scripts have
+# nothing left to do here; saying so explicitly keeps `pnpm install --frozen-lockfile` from
+# failing with ERR_PNPM_IGNORED_BUILDS, which is what CI runs.
+allowBuilds:
+  esbuild: false
+  workerd: false

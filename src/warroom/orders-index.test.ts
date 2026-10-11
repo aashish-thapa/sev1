@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { applyFrame, encodeFrame, IncidentFrameSchema } from "../multiplayer/frame.ts";
 import { advance, debrief, declareResolved, openIncident, type Incident, type IncidentNotice } from "./incident.ts";
 import { ordersIndexInvalid as scenario } from "./scenarios/orders-index-invalid.ts";
-import { soloScenarioFor } from "./scenarios/index.ts";
+import { soloScenarioFor, unlockedWarRooms } from "./scenarios/index.ts";
 import { runLine } from "./shell/shell.ts";
 import { rolloutRestart, rolloutUndo, scale, type ActionResult } from "./sim/actions.ts";
 
@@ -119,7 +119,8 @@ describe("orders index left invalid by a migration", () => {
   });
 
   it("pages senior SREs first, and stays locked below senior", () => {
-    expect(soloScenarioFor("infrastructure", 0, 3).id).toBe(scenario.id);
-    expect([0, 1, 2, 3, 4, 5].map((rotation) => soloScenarioFor("infrastructure", rotation, 2).id)).not.toContain(scenario.id);
+    expect(soloScenarioFor("infrastructure", 0, 3).tier).toBe(4);
+    expect(unlockedWarRooms("infrastructure", 3)).toContain(scenario);
+    expect(unlockedWarRooms("infrastructure", 2)).not.toContain(scenario);
   });
 });

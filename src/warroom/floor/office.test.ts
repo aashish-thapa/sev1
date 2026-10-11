@@ -10,7 +10,7 @@ import type { Footprint } from "./layout.ts";
 const inside = (point: { x: number; z: number }, box: Footprint, margin = 0) =>
   Math.abs(point.x - box.x) < box.width / 2 + margin && Math.abs(point.z - box.z) < box.depth / 2 + margin;
 
-const racks = layoutHall(openIncident(checkoutPoolLeak).cluster, checkoutPoolLeak.externals).map((rack) => ({
+const racks = layoutHall(openIncident(checkoutPoolLeak).cluster, checkoutPoolLeak).map((rack) => ({
   ...rack.footprint,
   x: rack.footprint.x + DATACENTRE_ORIGIN.x,
   z: rack.footprint.z + DATACENTRE_ORIGIN.z,

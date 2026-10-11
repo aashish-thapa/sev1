@@ -1033,5 +1033,1080 @@
       "title": "MDN: <script>: The Script element",
       "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/script"
     }
+  },
+  {
+    "id": "fe-groupby-old-safari",
+    "kind": "diagnose",
+    "topic": "frontend",
+    "difficulty": 1,
+    "alert": {
+      "service": "orders-web",
+      "title": "Sentry: new TypeError on /orders since orders-web@3.2.0 (2.1k users)",
+      "severity": "SEV2",
+      "firedAt": "10:24"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "Sentry event: orders-web (production)",
+        "lines": [
+          {
+            "ts": "10:19:02.114",
+            "level": "INFO",
+            "source": "navigation",
+            "text": "GET /orders 200 (client route)"
+          },
+          {
+            "ts": "10:19:02.380",
+            "level": "INFO",
+            "source": "fetch",
+            "text": "GET /api/orders?limit=50 200 (142ms)"
+          },
+          {
+            "ts": "10:19:02.391",
+            "level": "ERROR",
+            "source": "console",
+            "text": "TypeError: Object.groupBy is not a function. (In 'Object.groupBy(t,e=>e.status)', 'Object.groupBy' is undefined)"
+          },
+          {
+            "ts": "10:19:02.395",
+            "level": "INFO",
+            "source": "ui",
+            "text": "ErrorBoundary rendered “We couldn’t load your orders”"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Sentry issue tags",
+        "items": [
+          {
+            "key": "browser",
+            "value": "Mobile Safari 16.7 64% · Safari 17.3 21% · Mobile Safari 17.2 15%"
+          },
+          {
+            "key": "Chrome, Firefox, Edge",
+            "value": "0 events"
+          },
+          {
+            "key": "release",
+            "value": "orders-web@3.2.0 — group the order list by status"
+          },
+          {
+            "key": "build",
+            "value": "Vite, build.target es2020; no polyfill imports"
+          },
+          {
+            "key": "first seen",
+            "value": "10:02, two minutes after the 3.2.0 deploy"
+          }
+        ]
+      }
+    ],
+    "question": "Why does /orders crash for these users?",
+    "options": [
+      "Minifier mangled the groupBy call in the production bundle",
+      "CDN kept serving the 3.1 bundle to iOS devices",
+      "Safari before 17.4 lacks Object.groupBy; no polyfill ships",
+      "iOS content blocker strips the polyfills chunk from the page"
+    ],
+    "answer": 2,
+    "explanation": {
+      "cause": "Object.groupBy only exists from Safari 17.4, and the build ships no polyfill for it",
+      "why": "build.target tells the bundler which syntax to lower, not which built-ins exist. Object.groupBy is a runtime API: Chrome 117+ and Firefox 119+ have it, Safari only from 17.4, and iPhones that stop at iOS 16 never get it. With no polyfill, the call throws and the error boundary replaces the list.",
+      "tell": "Every event comes from Safari below 17.4, none from Chrome or Firefox, and JSC says Object.groupBy itself is undefined, so the 3.2.0 code loaded and ran."
+    },
+    "source": {
+      "title": "MDN: Object.groupBy()",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/groupBy"
+    }
+  },
+  {
+    "id": "perf-static-import-defeats-lazy-chunk",
+    "kind": "find-line",
+    "topic": "web-performance",
+    "difficulty": 1,
+    "alert": {
+      "service": "account-portal",
+      "title": "CI: bundle budget failed — index.js 1,642 kB (budget 600 kB)",
+      "severity": "SEV3",
+      "firedAt": "15:06"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "vite build, build #4471",
+        "lines": [
+          {
+            "ts": "15:04:51",
+            "level": "INFO",
+            "source": "vite",
+            "text": "dist/index.html  0.62 kB │ gzip: 0.38 kB"
+          },
+          {
+            "ts": "15:04:51",
+            "level": "INFO",
+            "source": "vite",
+            "text": "dist/assets/index-BQ3k9xTa.css  48.20 kB │ gzip: 9.71 kB"
+          },
+          {
+            "ts": "15:04:51",
+            "level": "INFO",
+            "source": "vite",
+            "text": "dist/assets/index-C9xQ2kLm.js  1,642.18 kB │ gzip: 498.37 kB"
+          },
+          {
+            "ts": "15:04:51",
+            "level": "WARN",
+            "source": "vite",
+            "text": "(!) Some chunks are larger than 500 kB after minification. Consider:"
+          },
+          {
+            "ts": "15:04:53",
+            "level": "ERROR",
+            "source": "ci",
+            "text": "bundle budget: assets/index-*.js 1,642 kB > 600 kB"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Build #4470 → #4471",
+        "items": [
+          {
+            "key": "index chunk",
+            "value": "571.02 kB → 1,642.18 kB"
+          },
+          {
+            "key": "InvoicePdf chunk",
+            "value": "1,071.55 kB, loaded on demand → no such chunk"
+          },
+          {
+            "key": "OrderPage",
+            "value": "part of the entry bundle (not route-split)"
+          },
+          {
+            "key": "changed files",
+            "value": "OrderPage.tsx only — “tidy imports”"
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "label": "OrderPage.tsx (build #4471)",
+        "language": "diff",
+        "startLine": 1,
+        "lines": [
+          " import { Suspense, useState } from \"react\";",
+          "-import { lazy } from \"react\";",
+          " import { OrderHeader } from \"./OrderHeader\";",
+          " import { OrderLines } from \"./OrderLines\";",
+          "+import { InvoicePdf } from \"./InvoicePdf\";",
+          " import { formatMoney } from \"@/lib/money\";",
+          "-",
+          "-const InvoicePdf = lazy(() => import(\"./InvoicePdf\"));",
+          " ",
+          " export function OrderPage({ order }: { order: Order }) {",
+          "   const [showInvoice, setShowInvoice] = useState(false);",
+          "   return (",
+          "     <article className=\"order-page\">",
+          "       <OrderHeader order={order} total={formatMoney(order.total)} />",
+          "       <OrderLines lines={order.lines} />",
+          "       <button onClick={() => setShowInvoice(true)}>Download invoice</button>",
+          "       {showInvoice && (",
+          "         <Suspense fallback={null}>",
+          "           <InvoicePdf order={order} />",
+          "         </Suspense>",
+          "       )}",
+          "     </article>",
+          "   );",
+          " }"
+        ]
+      }
+    ],
+    "question": "Which line pulled the PDF renderer into the main bundle?",
+    "answer": {
+      "evidence": 2,
+      "line": 4
+    },
+    "explanation": {
+      "cause": "A static import of InvoicePdf replaced lazy(), pulling it into the entry chunk",
+      "why": "A module gets its own on-demand chunk only while nothing in the entry graph imports it statically. OrderPage is in the main bundle, so one static import makes InvoicePdf, and the PDF renderer it brings, part of index.js: every visitor downloads and parses ~1 MB they rarely use. Restore the lazy(() => import()) form.",
+      "tell": "The 1,071 kB InvoicePdf chunk vanished and index grew by about that much in the same build; InvoicePdf is the only import that went from dynamic to static."
+    }
+  },
+  {
+    "id": "perf-font-preload-missing-crossorigin",
+    "kind": "find-line",
+    "topic": "web-performance",
+    "difficulty": 2,
+    "alert": {
+      "service": "marketing-site",
+      "title": "Datadog RUM: font bytes per view doubled after “self-host Inter” release",
+      "severity": "SEV3",
+      "firedAt": "11:52"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "Chrome DevTools: www.acme.io/blog/launch-week",
+        "lines": [
+          {
+            "ts": "+0ms",
+            "level": "INFO",
+            "source": "document",
+            "text": "GET /blog/launch-week 200 ttfb=210ms"
+          },
+          {
+            "ts": "+232ms",
+            "level": "INFO",
+            "source": "resource",
+            "text": "/fonts/inter-var.woff2 96 KB initiator=<link rel=preload>"
+          },
+          {
+            "ts": "+236ms",
+            "level": "INFO",
+            "source": "resource",
+            "text": "/assets/site-4b1e.css 31 KB initiator=<link rel=stylesheet>"
+          },
+          {
+            "ts": "+611ms",
+            "level": "INFO",
+            "source": "resource",
+            "text": "/fonts/inter-var.woff2 96 KB initiator=site-4b1e.css"
+          },
+          {
+            "ts": "+611ms",
+            "level": "WARN",
+            "source": "console",
+            "text": "A preload for 'https://www.acme.io/fonts/inter-var.woff2' is found, but is not used because the request credentials mode does not match. Consider taking a look at crossorigin attribute."
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "label": "site/_includes/head.html",
+        "language": "html",
+        "lines": [
+          "<head>",
+          "  <meta charset=\"utf-8\" />",
+          "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />",
+          "  <link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin />",
+          "  <link rel=\"preload\" href=\"/fonts/inter-var.woff2\" as=\"font\" type=\"font/woff2\" />",
+          "  <link rel=\"stylesheet\" href=\"/assets/site-4b1e.css\" />",
+          "  <script type=\"module\" src=\"/assets/site-91c2.js\"></script>",
+          "</head>"
+        ]
+      },
+      {
+        "type": "code",
+        "label": "assets/site.css",
+        "language": "css",
+        "lines": [
+          "@font-face {",
+          "  font-family: \"Inter\";",
+          "  src: url(\"/fonts/inter-var.woff2\") format(\"woff2\");",
+          "  font-weight: 100 900;",
+          "  font-display: swap;",
+          "}"
+        ]
+      }
+    ],
+    "question": "Which line makes every page download the font twice?",
+    "answer": {
+      "evidence": 1,
+      "line": 4
+    },
+    "explanation": {
+      "cause": "Font preload has no crossorigin, so the CSS font request can’t reuse it and refetches",
+      "why": "Fonts are always fetched in CORS mode with credentials “same-origin”, even from your own origin. A preload without crossorigin is a no-cors request with credentials “include”, so the two don’t match: Chrome warns, fetches the font again for @font-face, and the preloaded bytes are wasted. Add crossorigin to the preload.",
+      "tell": "Both fetches are the same self-hosted URL, the second started by the stylesheet, and Chrome says the preload went unused because the credentials mode doesn’t match."
+    },
+    "source": {
+      "title": "MDN: rel=preload — CORS-enabled fetches",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Attributes/rel/preload"
+    }
+  },
+  {
+    "id": "fe-script-error-cross-origin-cdn",
+    "kind": "diagnose",
+    "topic": "frontend",
+    "difficulty": 2,
+    "alert": {
+      "service": "web-shop",
+      "title": "client-errors: 96% of events are now “Script error.” — no stack, no file",
+      "severity": "SEV3",
+      "firedAt": "13:40"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "“Script error.” share of client errors",
+        "unit": "%",
+        "points": [
+          3,
+          2,
+          3,
+          2,
+          3,
+          2,
+          3,
+          2,
+          71,
+          95,
+          96,
+          96,
+          97,
+          96,
+          96,
+          96
+        ],
+        "markAt": 8
+      },
+      {
+        "type": "log",
+        "label": "client-errors collector (window error events)",
+        "lines": [
+          {
+            "ts": "13:21:07.902",
+            "level": "INFO",
+            "source": "deploy",
+            "text": "web-shop@9.4.0: serve /assets from https://static.acmecdn.net (was www.acme.io/assets)"
+          },
+          {
+            "ts": "13:24:11.310",
+            "level": "ERROR",
+            "source": "collector",
+            "text": "message=\"Script error.\" filename=\"\" lineno=0 colno=0 error=null browser=Chrome 141"
+          },
+          {
+            "ts": "13:24:12.044",
+            "level": "ERROR",
+            "source": "collector",
+            "text": "message=\"Script error.\" filename=\"\" lineno=0 colno=0 error=null browser=Firefox 143"
+          },
+          {
+            "ts": "13:24:15.587",
+            "level": "ERROR",
+            "source": "collector",
+            "text": "message=\"Script error.\" filename=\"\" lineno=0 colno=0 error=null browser=Safari 18.6"
+          },
+          {
+            "ts": "13:30:00.000",
+            "level": "INFO",
+            "source": "collector",
+            "text": "client errors/min: 41 (7-day average 39)"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Page, CDN and tooling",
+        "items": [
+          {
+            "key": "script tag",
+            "value": "<script defer src=\"https://static.acmecdn.net/app-7c1e.js\"></script>"
+          },
+          {
+            "key": "CDN response headers",
+            "value": "content-type: text/javascript; no access-control-allow-origin"
+          },
+          {
+            "key": "source maps",
+            "value": "uploaded for 9.4.0"
+          },
+          {
+            "key": "tag manager",
+            "value": "no container published this week"
+          },
+          {
+            "key": "local DevTools",
+            "value": "console shows the full TypeError with its stack"
+          }
+        ]
+      }
+    ],
+    "question": "Why did client errors lose their message, file and stack?",
+    "options": [
+      "Bundles went cross-origin with no crossorigin/CORS setup",
+      "Source maps for release 9.4.0 were never uploaded",
+      "A new third-party tag throws on every page view",
+      "Collector truncates error fields above its payload size limit"
+    ],
+    "answer": 0,
+    "explanation": {
+      "cause": "Bundles now load cross-origin without crossorigin and ACAO, so browsers mute their errors",
+      "why": "Errors from a classic script fetched cross-origin without CORS are muted: window error events get only “Script error.”, an empty filename, line 0 and a null error. Moving to the CDN made your own bundle look third-party. Add crossorigin=\"anonymous\" to the tags and have the CDN send Access-Control-Allow-Origin.",
+      "tell": "Volume is flat while every browser reports the same empty fields from the CDN move on, and DevTools still shows the real error locally: the details exist but are withheld."
+    },
+    "source": {
+      "title": "MDN: HTML attribute: crossorigin",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Attributes/crossorigin"
+    }
+  },
+  {
+    "id": "perf-anti-flicker-snippet-lcp",
+    "kind": "diagnose",
+    "topic": "web-performance",
+    "difficulty": 2,
+    "alert": {
+      "service": "storefront",
+      "title": "Datadog RUM: LCP p75 on /pricing 3.3s (budget 2.5s)",
+      "severity": "SEV3",
+      "firedAt": "09:47"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "LCP p75, /pricing",
+        "unit": "s",
+        "points": [
+          2,
+          2.1,
+          2,
+          2.1,
+          2,
+          2.1,
+          2,
+          2.1,
+          3.1,
+          3.3,
+          3.2,
+          3.3,
+          3.3,
+          3.2,
+          3.3,
+          3.3
+        ],
+        "markAt": 8
+      },
+      {
+        "type": "facts",
+        "label": "web-vitals LCP attribution (p75 sample)",
+        "items": [
+          {
+            "key": "target",
+            "value": "img.pricing-hero__image"
+          },
+          {
+            "key": "timeToFirstByte",
+            "value": "290 ms"
+          },
+          {
+            "key": "resourceLoadDelay",
+            "value": "60 ms"
+          },
+          {
+            "key": "resourceLoadDuration",
+            "value": "280 ms"
+          },
+          {
+            "key": "elementRenderDelay",
+            "value": "2,670 ms"
+          }
+        ]
+      },
+      {
+        "type": "log",
+        "label": "Release + RUM segments, /pricing",
+        "lines": [
+          {
+            "ts": "09:02:00",
+            "level": "INFO",
+            "source": "release",
+            "text": "storefront@7.6.0: add variantly A/B snippet to <head> (anti-flicker hides <html>, timeout 4000ms)"
+          },
+          {
+            "ts": "09:30:00",
+            "level": "INFO",
+            "source": "rum",
+            "text": "app.css done at 540ms p75; inter-var.woff2 done at 610ms p75"
+          },
+          {
+            "ts": "09:30:00",
+            "level": "INFO",
+            "source": "rum",
+            "text": "variantly.js loaded in 82% of sessions, done at 2,480ms p75; their LCP p75 2.7s"
+          },
+          {
+            "ts": "09:30:00",
+            "level": "WARN",
+            "source": "rum",
+            "text": "variantly.js failed in 18% of sessions (net::ERR_BLOCKED_BY_CLIENT); their LCP p75 4.4s"
+          }
+        ]
+      }
+    ],
+    "question": "What is delaying LCP on /pricing?",
+    "options": [
+      "Hero image is too heavy, so its download dominates LCP",
+      "Render-blocking stylesheet holds back the first paint",
+      "Hydration long task delays painting the hero image",
+      "A/B anti-flicker snippet keeps the page hidden"
+    ],
+    "answer": 3,
+    "explanation": {
+      "cause": "Anti-flicker snippet hides the page until the A/B script runs or its 4s timeout fires",
+      "why": "The snippet sets <html> to opacity 0 until variantly.js applies its experiments. LCP ignores elements with opacity 0, so the hero only counts once revealed: render delay grows by however long the vendor script takes, and when an ad blocker stops it, users wait out the full 4000ms timeout.",
+      "tell": "The hero arrives within ~340ms of the request but renders 2.7s later, CSS and fonts are done by 610ms, and LCP follows variantly.js: 2.7s when it loads, 4.4s when it is blocked."
+    },
+    "source": {
+      "title": "web.dev: Largest Contentful Paint (LCP)",
+      "url": "https://web.dev/articles/lcp"
+    }
+  },
+  {
+    "id": "fe-deleted-service-worker-keeps-control",
+    "kind": "diagnose",
+    "topic": "frontend",
+    "difficulty": 3,
+    "alert": {
+      "service": "app-web",
+      "title": "Analytics: 34% of sessions still on 4.18, nine days after 4.19 shipped",
+      "severity": "SEV2",
+      "firedAt": "10:25"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "Sessions on web build 4.18 or older (daily)",
+        "unit": "%",
+        "points": [
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          71,
+          52,
+          41,
+          37,
+          35,
+          34,
+          34,
+          34,
+          34,
+          34
+        ],
+        "markAt": 6
+      },
+      {
+        "type": "log",
+        "label": "Console from an affected user (Chrome)",
+        "lines": [
+          {
+            "ts": "09:12:40.118",
+            "level": "INFO",
+            "source": "app",
+            "text": "boot build=4.18.2 (shell from service worker precache)"
+          },
+          {
+            "ts": "09:12:40.502",
+            "level": "INFO",
+            "source": "fetch",
+            "text": "GET /api/v1/orders 200 (deprecated, sunset 2026-10-20)"
+          },
+          {
+            "ts": "10:12:40.511",
+            "level": "INFO",
+            "source": "pwa",
+            "text": "hourly check: registration.update()"
+          },
+          {
+            "ts": "10:12:40.693",
+            "level": "ERROR",
+            "source": "console",
+            "text": "Uncaught (in promise) TypeError: Failed to update a ServiceWorker for scope ('https://app.acme.io/') with script ('https://app.acme.io/sw.js'): A bad HTTP response code (404) was received when fetching the script."
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "4.19.0 release and serving config",
+        "items": [
+          {
+            "key": "4.19.0 change",
+            "value": "Drop offline mode: remove vite-plugin-pwa and sw.js"
+          },
+          {
+            "key": "GET /sw.js",
+            "value": "404 since the 4.19.0 deploy"
+          },
+          {
+            "key": "index.html headers",
+            "value": "cache-control: no-cache"
+          },
+          {
+            "key": "Registration (affected user)",
+            "value": "one active worker from 4.18.2, none waiting or installing"
+          },
+          {
+            "key": "Affected users",
+            "value": "all visited before 4.19.0; clearing site data fixes it"
+          }
+        ]
+      }
+    ],
+    "question": "Why are these users stuck on 4.18?",
+    "options": [
+      "CDN is caching index.html with a long max-age",
+      "Deleting sw.js left the old worker in control",
+      "The 4.19 service worker is stuck waiting on open tabs",
+      "Browser HTTP cache still holds the 4.18 JS bundles"
+    ],
+    "answer": 1,
+    "explanation": {
+      "cause": "Removing sw.js doesn’t unregister it: the update 404s and the 4.18 worker keeps serving",
+      "why": "Browsers re-fetch sw.js to look for updates. A 404 fails the update but keeps the registration while an installed worker exists, so the 4.18 worker keeps answering navigations from its precache and the network’s index.html is never seen. Fix: serve a no-op sw.js at the same URL, or one that unregisters itself.",
+      "tell": "Each hourly update() fails with a 404 for sw.js, index.html is no-cache, and there is one active worker but nothing waiting: no newer worker was ever installed."
+    },
+    "source": {
+      "title": "Chrome for Developers: Removing buggy service workers",
+      "url": "https://developer.chrome.com/docs/workbox/remove-buggy-service-workers"
+    }
+  },
+  {
+    "id": "fe-trace-header-cors-preflight",
+    "kind": "find-line",
+    "topic": "frontend",
+    "difficulty": 3,
+    "alert": {
+      "service": "checkout-web",
+      "title": "Datadog RUM: 100% of api.acme.io calls failing since 16:02",
+      "severity": "SEV1",
+      "firedAt": "16:09"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "Deploy + browser console (Chrome), /cart",
+        "lines": [
+          {
+            "ts": "16:02:10.004",
+            "level": "INFO",
+            "source": "deploy",
+            "text": "checkout-web@5.3.0: link browser spans to API traces"
+          },
+          {
+            "ts": "16:04:18.201",
+            "level": "INFO",
+            "source": "app",
+            "text": "[cart] GET https://api.acme.io/v2/cart"
+          },
+          {
+            "ts": "16:04:18.244",
+            "level": "ERROR",
+            "source": "console",
+            "text": "Access to fetch at 'https://api.acme.io/v2/cart' from origin 'https://www.acme.io' has been blocked by CORS policy: Request header field traceparent is not allowed by Access-Control-Allow-Headers in preflight response."
+          },
+          {
+            "ts": "16:04:18.245",
+            "level": "ERROR",
+            "source": "app",
+            "text": "[cart] load failed: TypeError: Failed to fetch"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "OPTIONS /v2/cart preflight response",
+        "items": [
+          {
+            "key": "status",
+            "value": "204"
+          },
+          {
+            "key": "access-control-allow-origin",
+            "value": "https://www.acme.io"
+          },
+          {
+            "key": "access-control-allow-headers",
+            "value": "content-type, authorization"
+          },
+          {
+            "key": "access-control-allow-methods",
+            "value": "GET, POST, PUT, DELETE"
+          },
+          {
+            "key": "api.acme.io changes",
+            "value": "none since Oct 7; CORS config unchanged"
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "label": "src/telemetry/tracing.ts (16:02 deploy)",
+        "language": "ts",
+        "startLine": 9,
+        "lines": [
+          "const provider = new WebTracerProvider({",
+          "  resource: resourceFromAttributes({ \"service.name\": \"checkout-web\" }),",
+          "  spanProcessors: [new BatchSpanProcessor(new OTLPTraceExporter({ url: \"/otel/v1/traces\" }))],",
+          "});",
+          "provider.register();",
+          "",
+          "registerInstrumentations({",
+          "  instrumentations: [",
+          "    new FetchInstrumentation({",
+          "      ignoreUrls: [/\\/otel\\/v1\\/traces$/, /\\/healthz$/],",
+          "      propagateTraceHeaderCorsUrls: [/^https:\\/\\/api\\.acme\\.io\\//],",
+          "      clearTimingResources: true,",
+          "    }),",
+          "    new DocumentLoadInstrumentation(),",
+          "  ],",
+          "});"
+        ]
+      }
+    ],
+    "question": "Which line got every API call blocked?",
+    "answer": {
+      "evidence": 2,
+      "line": 10
+    },
+    "explanation": {
+      "cause": "Tracing now adds traceparent to api.acme.io calls; the API’s preflight doesn’t allow it",
+      "why": "FetchInstrumentation adds trace headers to cross-origin requests only for URLs in propagateTraceHeaderCorsUrls. Matching api.acme.io puts traceparent on every call, a non-safelisted header the preflight must list. The API allows only content-type and authorization, so Chrome blocks the call. Allow traceparent on the API first.",
+      "tell": "Chrome names traceparent as the rejected header, the preflight’s explicit allow list hasn’t changed, and only one line sends trace headers to api.acme.io."
+    },
+    "source": {
+      "title": "OpenTelemetry JS: FetchInstrumentation source",
+      "url": "https://github.com/open-telemetry/opentelemetry-js/blob/main/experimental/packages/opentelemetry-instrumentation-fetch/src/fetch.ts"
+    }
+  },
+  {
+    "id": "fe-minified-constructor-name",
+    "kind": "find-line",
+    "topic": "frontend",
+    "difficulty": 3,
+    "alert": {
+      "service": "billing-web",
+      "title": "Support: “Something went wrong” instead of login after session expiry",
+      "severity": "SEV2",
+      "firedAt": "14:35"
+    },
+    "evidence": [
+      {
+        "type": "facts",
+        "label": "Repro, billing-web@6.0.0",
+        "items": [
+          {
+            "key": "steps",
+            "value": "Sign in · let the 30-minute session expire · click Refresh"
+          },
+          {
+            "key": "pnpm dev",
+            "value": "Redirects to /login ✓"
+          },
+          {
+            "key": "staging and prod (vite build)",
+            "value": "Toast “Something went wrong”, no redirect ✗"
+          },
+          {
+            "key": "6.0.0 change",
+            "value": "API errors become classes (SessionExpiredError, …)"
+          },
+          {
+            "key": "tsconfig",
+            "value": "target es2022"
+          }
+        ]
+      },
+      {
+        "type": "log",
+        "label": "Browser console, production",
+        "lines": [
+          {
+            "ts": "14:21:03.410",
+            "level": "WARN",
+            "source": "api",
+            "text": "GET /api/invoices → 401 {\"code\":\"session_expired\"}"
+          },
+          {
+            "ts": "14:21:03.412",
+            "level": "DEBUG",
+            "source": "api",
+            "text": "err instanceof SessionExpiredError === true"
+          },
+          {
+            "ts": "14:21:03.413",
+            "level": "INFO",
+            "source": "errors",
+            "text": "handleApiError kind=e"
+          },
+          {
+            "ts": "14:21:03.414",
+            "level": "INFO",
+            "source": "toast",
+            "text": "Something went wrong"
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "label": "src/api/errors.ts",
+        "language": "ts",
+        "lines": [
+          "export class ApiError extends Error {",
+          "  constructor(readonly status: number, readonly code: string) {",
+          "    super(`${status} ${code}`);",
+          "  }",
+          "}",
+          "export class SessionExpiredError extends ApiError {}",
+          "export class RateLimitedError extends ApiError {}",
+          "export function toApiError(status: number, code: string): ApiError {",
+          "  if (status === 401 && code === \"session_expired\") return new SessionExpiredError(status, code);",
+          "  if (status === 429) return new RateLimitedError(status, code);",
+          "  return new ApiError(status, code);",
+          "}",
+          "export function handleApiError(error: unknown): void {",
+          "  const kind = error instanceof ApiError ? error.constructor.name : \"unknown\";",
+          "  log.info(`handleApiError kind=${kind}`);",
+          "  switch (kind) {",
+          "    case \"SessionExpiredError\":",
+          "      return redirectToLogin();",
+          "    case \"RateLimitedError\":",
+          "      return toast(\"Too many requests, try again in a minute\");",
+          "    default:",
+          "      return toast(\"Something went wrong\");",
+          "  }",
+          "}"
+        ]
+      }
+    ],
+    "question": "Which line breaks the login redirect in production builds?",
+    "answer": {
+      "evidence": 2,
+      "line": 13
+    },
+    "explanation": {
+      "cause": "Dispatch on error.constructor.name breaks once the minifier renames SessionExpiredError",
+      "why": "Minifiers rename classes to save bytes, so in the production bundle constructor.name is “e”, not “SessionExpiredError”. No case matches and every typed error falls through to the generic toast. The dev server doesn’t minify, so it works there. Branch with instanceof or on error.code, which survive minification.",
+      "tell": "The 401 maps to a real SessionExpiredError (instanceof is true) yet kind=e, and only minified builds fail. One line reads a class name at runtime."
+    },
+    "source": {
+      "title": "esbuild: Keep names",
+      "url": "https://esbuild.github.io/api/#keep-names"
+    }
+  },
+  {
+    "id": "perf-cloudfront-no-content-length-uncompressed",
+    "kind": "diagnose",
+    "topic": "web-performance",
+    "difficulty": 3,
+    "alert": {
+      "service": "web-shop",
+      "title": "Datadog RUM: JS bytes per view 3.4x; LCP p75 on 4G up 1.1s",
+      "severity": "SEV2",
+      "firedAt": "12:18"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "JS bytes transferred per page view",
+        "unit": "KB",
+        "points": [
+          412,
+          409,
+          415,
+          411,
+          408,
+          414,
+          410,
+          412,
+          1180,
+          1391,
+          1402,
+          1398,
+          1404,
+          1399,
+          1401,
+          1400
+        ],
+        "markAt": 8
+      },
+      {
+        "type": "facts",
+        "label": "Resource timing: /assets/app-91fe.js",
+        "items": [
+          {
+            "key": "transferSize",
+            "value": "1,402,311 (yesterday 398,874)"
+          },
+          {
+            "key": "encodedBodySize",
+            "value": "1,401,987 (yesterday 398,550)"
+          },
+          {
+            "key": "decodedBodySize",
+            "value": "1,401,987 (yesterday 1,398,204)"
+          },
+          {
+            "key": "response content-encoding",
+            "value": "none (yesterday: br)"
+          },
+          {
+            "key": "request accept-encoding",
+            "value": "gzip, deflate, br, zstd"
+          }
+        ]
+      },
+      {
+        "type": "log",
+        "label": "Deploy, CloudFront log and origin checks",
+        "lines": [
+          {
+            "ts": "11:40:12",
+            "level": "INFO",
+            "source": "deploy",
+            "text": "/assets/* origin: S3 bucket → edge-server (Node, streams files from disk)"
+          },
+          {
+            "ts": "11:40:12",
+            "level": "INFO",
+            "source": "deploy",
+            "text": "CloudFront behavior /assets/*: Compress objects automatically = Yes (unchanged)"
+          },
+          {
+            "ts": "12:05:31",
+            "level": "INFO",
+            "source": "cloudfront",
+            "text": "GET /assets/app-91fe.js 200 x-edge-result-type=Hit sc-content-type=text/javascript"
+          },
+          {
+            "ts": "12:06:02",
+            "level": "INFO",
+            "source": "curl",
+            "text": "edge-server: HTTP/1.1 200 content-type: text/javascript transfer-encoding: chunked"
+          },
+          {
+            "ts": "12:06:09",
+            "level": "INFO",
+            "source": "curl",
+            "text": "old S3 origin: HTTP/1.1 200 content-type: text/javascript content-length: 1398204"
+          }
+        ]
+      }
+    ],
+    "question": "Why did JS transfer size more than triple?",
+    "options": [
+      "Bundle grew 3.5x after this week’s dependency upgrade",
+      "Asset requests now miss the edge cache and all go to the origin",
+      "Origin sends no Content-Length; CloudFront won’t compress",
+      "CloudFront doesn’t compress the text/javascript type"
+    ],
+    "answer": 2,
+    "explanation": {
+      "cause": "New origin streams assets chunked with no Content-Length, so CloudFront skips compression",
+      "why": "CloudFront compresses only when the origin response has a Content-Length between 1,000 and 10,000,000 bytes. S3 always sent one; the Node server pipes files with chunked encoding, so CloudFront caches and serves them raw. Set Content-Length at the origin (or compress there), then invalidate /assets/*.",
+      "tell": "encodedBodySize equals decodedBodySize, the decoded size barely moved, the edge Hit is uncompressed, and the two origins differ only in content-length for the same text/javascript file."
+    },
+    "source": {
+      "title": "Amazon CloudFront: Serve compressed files",
+      "url": "https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/ServingCompressedFiles.html"
+    }
+  },
+  {
+    "id": "perf-rebound-listener-memory-leak",
+    "kind": "find-line",
+    "topic": "web-performance",
+    "difficulty": 3,
+    "alert": {
+      "service": "trading-web",
+      "title": "Support: /markets gets slower all day, then the tab crashes",
+      "severity": "SEV2",
+      "firedAt": "16:40"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "JS heap, QA soak: switch symbol every 5 min",
+        "unit": "MB",
+        "points": [
+          62,
+          98,
+          131,
+          167,
+          203,
+          236,
+          270,
+          305,
+          341,
+          377,
+          410,
+          446,
+          481,
+          515
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Heap snapshot diff after 20 symbol switches",
+        "items": [
+          {
+            "key": "PriceChart instances",
+            "value": "21 (1 mounted)"
+          },
+          {
+            "key": "Retained by",
+            "value": "priceFeed’s “tick” listeners (bound handleTick functions)"
+          },
+          {
+            "key": "componentWillUnmount",
+            "value": "ran 20 times; chart.destroy() ran each time"
+          },
+          {
+            "key": "Tick dispatch time",
+            "value": "0.4 ms → 3.1 ms per tick"
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "label": "src/markets/PriceChart.tsx (excerpt)",
+        "language": "tsx",
+        "startLine": 12,
+        "lines": [
+          "export class PriceChart extends Component<Props> {",
+          "  private canvasRef = createRef<HTMLCanvasElement>();",
+          "  private chart: Chart | null = null;",
+          "",
+          "  constructor(props: Props) {",
+          "    super(props);",
+          "    this.handleTick = this.handleTick.bind(this);",
+          "  }",
+          "",
+          "  componentDidMount() {",
+          "    this.chart = createChart(this.canvasRef.current!, { symbol: this.props.symbol });",
+          "    priceFeed.addEventListener(\"tick\", this.handleTick);",
+          "  }",
+          "",
+          "  componentWillUnmount() {",
+          "    this.chart?.destroy();",
+          "    priceFeed.removeEventListener(\"tick\", this.handleTick.bind(this));",
+          "  }",
+          "",
+          "  handleTick(event: Event) {",
+          "    const tick = (event as CustomEvent<Tick>).detail;",
+          "    if (tick.symbol === this.props.symbol) this.chart?.push(tick);",
+          "  }",
+          "}"
+        ]
+      }
+    ],
+    "question": "Which line keeps every old chart alive?",
+    "answer": {
+      "evidence": 2,
+      "line": 16
+    },
+    "explanation": {
+      "cause": "bind() at unmount makes a new function, so removeEventListener removes nothing",
+      "why": "removeEventListener removes only the exact function that was added. The constructor stored a bound handleTick and componentDidMount added that one; calling .bind(this) again creates a different function, so the removal is a silent no-op. The feed keeps every unmounted chart reachable and calls it on each tick. Pass this.handleTick as is.",
+      "tell": "Instances grow by one per switch though unmount and destroy() run every time, and the feed’s tick listeners retain them: the cleanup runs, but its removal matches nothing."
+    },
+    "source": {
+      "title": "MDN: EventTarget: removeEventListener() method",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/removeEventListener"
+    }
   }
 ]

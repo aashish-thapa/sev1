@@ -6,24 +6,26 @@
 import { careerLevel, type Level } from "./career.ts";
 import {
   CARD_BONUS_CENTS,
-  INCIDENT_CENTS_PER_POINT,
+  INCIDENT_CENTS_PER_POINT_BY_TIER,
   INCIDENT_MIN_POINTS,
   LEDGER_LIMIT,
   MIN_SECONDS_PER_CARD,
   MIN_SECONDS_PER_INCIDENT,
+  paidTier,
   SALARY_CENTS_PER_MINUTE,
   SPEND_REASONS,
+  scenarioOfIncident,
   type LedgerEntry,
   type PayReason,
   type Wallet,
 } from "./economy.ts";
 import type { Progress } from "./progress.ts";
-import { scenarioOfPurchase, solutionPriceCents, type SolutionTier } from "./purchases.ts";
+import { scenarioOfPurchase, solutionPriceCents } from "./purchases.ts";
+import type { Tier } from "./tier.ts";
 
 /** Network and timer jitter between syncs: allow this much extra time and a couple of extra events. */
 const TIME_SLACK = 1.25;
 const EVENT_ALLOWANCE = 2;
-const MAX_INCIDENT_CENTS = 100 * INCIDENT_CENTS_PER_POINT;
 const MAX_CARD_CENTS = Math.max(...Object.values(CARD_BONUS_CENTS));
 const EARN_REASONS = ["salary", "card", "incident", "payroll", "grant", "dividend"] as const satisfies readonly PayReason[];
 /** Earnings the server issues and the save only claims: each new line must be one the server promised. */
@@ -31,9 +33,9 @@ const SERVER_ISSUED = ["payroll", "grant", "dividend"] as const satisfies readon
 type ServerIssued = (typeof SERVER_ISSUED)[number];
 
 /** Looks up the tier of a scenario by id; the Worker answers from the scenario registry. */
-export type TierOf = (scenarioId: string) => SolutionTier | undefined;
+export type TierOf = (scenarioId: string) => Tier | undefined;
 
-/** With no registry, nothing can be bought — every purchase line is rejected. */
+/** With no registry, no incident payout or purchase can be priced — every such line is rejected. */
 const NO_TIERS: TierOf = () => undefined;
 
 /**
@@ -53,7 +55,7 @@ export type PromisedMoney = {
 
 export const NO_PROMISED_MONEY: PromisedMoney = { fundings: new Map(), payouts: new Map(), grants: new Map(), investments: new Map(), dividends: new Map() };
 
-/** Does the server stand behind this new ledger line (a purchase it can price, or pay it booked)? */
+/** Does the server stand behind this new ledger line (incident pay within its tier's cap, a purchase it can price, or pay it booked)? */
 type Vouch = (entry: LedgerEntry) => boolean;
 
 /** Why a wallet can't honestly follow the previous one, or null when it can. */
@@ -62,6 +64,7 @@ export function walletProblem(
   next: Wallet,
   elapsedSeconds: number,
   topLevel: Level = 4,
+  isFairIncidentPay: Vouch = () => false,
   isAllowedSpend: Vouch = () => false,
   isBookedPay: Vouch = () => false,
 ): AuditProblem | null {
@@ -92,9 +95,11 @@ export function walletProblem(
 
   const incidents = delta("incident", "paidUnits");
   if (incidents > seconds / MIN_SECONDS_PER_INCIDENT + EVENT_ALLOWANCE) return "incident_count";
-  if (delta("incident", "earnedCents") > incidents * MAX_INCIDENT_CENTS) return "incident_amount";
+  // Backstop for lines the per-line check can't see (evicted, or booked under another reason): the most any run pays at the level reached.
+  if (delta("incident", "earnedCents") > incidents * 100 * INCIDENT_CENTS_PER_POINT_BY_TIER[paidTier(5, topLevel)]) return "incident_amount";
 
   const fresh = freshLines(previous, next);
+  if (fresh.some((entry) => entry.reason === "incident" && !isFairIncidentPay(entry))) return "incident_over_tier";
   const purchases = fresh.filter((entry) => (SPEND_REASONS as readonly string[]).includes(entry.reason));
   if (purchases.some((entry) => entry.amountCents >= 0 || !isAllowedSpend(entry))) return "unvouched_spend";
   // Payroll and grants come only from money the server issued, and each new cent of them must be one of those lines.
@@ -125,6 +130,7 @@ export type AuditProblem =
   | "card_amount"
   | "incident_count"
   | "incident_amount"
+  | "incident_over_tier"
   | "unvouched_spend"
   | "unvouched_pay"
   | "pay_total"
@@ -139,8 +145,8 @@ export function isPlausibleWallet(...args: Parameters<typeof walletProblem>): bo
 }
 
 /**
- * Is `next` an honest successor of `previous` after `elapsedSeconds`? `tierOf` prices any
- * solutions bought in between; without it, a save containing a new purchase is refused.
+ * Is `next` an honest successor of `previous` after `elapsedSeconds`? `tierOf` caps each incident
+ * payout and prices each solution bought in between; without it, a save with either is refused.
  */
 export function isPlausibleProgress(
   previous: Progress,
@@ -168,12 +174,18 @@ export function progressProblem(
   const isFirstSave = previous.wallet.nextSeq === 0 && previous.correctCards === 0;
   const unpaidAllowance = isFirstSave ? next.history.reduce((sum, day) => sum + day.correct, 0) : 0;
   const lowestLevel = careerLevel(previous).level;
+  const topLevel = careerLevel(next).level;
+  const tierFrom = (scenarioId: string | null) => (scenarioId === null ? undefined : tierOf(scenarioId));
+  const isFairIncidentPay: Vouch = (entry) => {
+    const tier = tierFrom(scenarioOfIncident(entry.ref));
+    // A promotion can land mid-sync, so the level the save reaches sets the cap.
+    return tier !== undefined && entry.amountCents <= 100 * INCIDENT_CENTS_PER_POINT_BY_TIER[paidTier(tier, topLevel)];
+  };
   const isAllowedSpend: Vouch = (entry) => {
     // A company seed must be exactly what the server is waiting for, under the ref it issued.
     if (entry.reason === "company") return promised.fundings.get(entry.ref) === -entry.amountCents;
     if (entry.reason === "invest") return promised.investments.get(entry.ref) === -entry.amountCents;
-    const scenarioId = scenarioOfPurchase(entry.ref);
-    const tier = scenarioId === null ? undefined : tierOf(scenarioId);
+    const tier = tierFrom(scenarioOfPurchase(entry.ref));
     // Price rises with level, so charging at the level the buyer started this sync from is the floor.
     return tier !== undefined && -entry.amountCents >= solutionPriceCents(tier, lowestLevel);
   };
@@ -182,7 +194,7 @@ export function progressProblem(
   if (newCorrect < 0) return "correct_cards_went_down";
   if (newCorrect > newPaidCards + unpaidAllowance) return "correct_cards_unpaid";
   if (improvedPassingWarRooms(previous, next) > newPaidIncidents) return "war_rooms_unpaid";
-  return walletProblem(previous.wallet, next.wallet, elapsedSeconds, careerLevel(next).level, isAllowedSpend, isBookedPay);
+  return walletProblem(previous.wallet, next.wallet, elapsedSeconds, topLevel, isFairIncidentPay, isAllowedSpend, isBookedPay);
 }
 
 /** War Rooms whose best run newly reached a paying score; each needs its own incident payout. */
@@ -209,8 +221,22 @@ function isLedgerConsistent(previous: Wallet, next: Wallet): boolean {
   }
   const total = fresh.reduce((sum, entry) => sum + entry.amountCents, 0);
   const balanceDelta = next.balanceCents - previous.balanceCents;
-  if (fresh.length === next.nextSeq - previous.nextSeq) return total === balanceDelta;
+  if (fresh.length === next.nextSeq - previous.nextSeq) return total === balanceDelta && isBookedByReason(previous, next, fresh);
   // Lines go missing only when the cap evicts them oldest-first — so the whole ledger must then be new.
   const isEvictedByCap = next.ledger.length === LEDGER_LIMIT && fresh.length === LEDGER_LIMIT;
   return isEvictedByCap && total <= balanceDelta;
+}
+
+/**
+ * Each reason's totals move by exactly its own lines, so money paid under one reason can't be booked to
+ * another, and each incident line is one paid incident, so one run can't carry several payouts.
+ */
+function isBookedByReason(previous: Wallet, next: Wallet, fresh: readonly LedgerEntry[]): boolean {
+  const linesFor = (reason: LedgerEntry["reason"]) => fresh.filter((entry) => entry.reason === reason);
+  const centsFor = (reason: LedgerEntry["reason"]) => linesFor(reason).reduce((sum, entry) => sum + entry.amountCents, 0);
+  return (
+    EARN_REASONS.every((reason) => centsFor(reason) === next.earnedCents[reason] - previous.earnedCents[reason]) &&
+    SPEND_REASONS.every((reason) => -centsFor(reason) === next.spentCents[reason] - previous.spentCents[reason]) &&
+    linesFor("incident").length === next.paidUnits.incident - previous.paidUnits.incident
+  );
 }

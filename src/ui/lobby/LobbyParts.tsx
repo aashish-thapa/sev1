@@ -81,13 +81,18 @@ type ModeCardProps = {
   name: string;
   onName: ((name: string) => void) | null;
   onSolo: () => void;
-  rooms: { status: string; error: string | null; onCreate: (name: string, visibility: RoomVisibility) => void; onJoin: (code: string, name: string) => void; listPublic: ListPublicRooms };
+  /** What a room this player hosts may play: their unlocked War Rooms and the cross-team incident. */
+  incidents: readonly { readonly id: string; readonly title: string; readonly tier: number }[];
+  rooms: { status: string; error: string | null; onCreate: (name: string, visibility: RoomVisibility, scenarioId: string) => void; onJoin: (code: string, name: string) => void; listPublic: ListPublicRooms };
 };
 
 /** Bottom right: pick a role and a way to play, then START. */
-export function ModeCard({ role, onRole, name, onName, onSolo, rooms }: ModeCardProps) {
+export function ModeCard({ role, onRole, name, onName, onSolo, incidents, rooms }: ModeCardProps) {
   const [mode, setMode] = useState<Mode>("solo");
   const [visibility, setVisibility] = useState<RoomVisibility>("private");
+  // The list follows role and level, so a pick it no longer holds falls back to the first: the cross-team incident.
+  const [pickedId, setPickedId] = useState<string | null>(null);
+  const incident = incidents.find((candidate) => candidate.id === pickedId) ?? incidents[0];
   const [code, setCode] = useState("");
   const publicRooms = usePublicRooms(rooms.listPublic, mode === "join");
   const isBusy = rooms.status === "connecting";
@@ -95,7 +100,7 @@ export function ModeCard({ role, onRole, name, onName, onSolo, rooms }: ModeCard
 
   const start = () => {
     if (mode === "solo") onSolo();
-    else if (mode === "host") rooms.onCreate(name, visibility);
+    else if (mode === "host") rooms.onCreate(name, visibility, incident.id);
     else if (code.length === 4) rooms.onJoin(code, name);
   };
   const canStart = !isBusy && !needsName && (mode !== "join" || code.length === 4);
@@ -120,6 +125,15 @@ export function ModeCard({ role, onRole, name, onName, onSolo, rooms }: ModeCard
 
       <div className="mode-card__detail">
         {mode === "solo" && <p>Your shift, colleagues on the other roles.</p>}
+        {mode === "host" && (
+          <div className="mode-card__choice" role="radiogroup" aria-label="Incident">
+            {incidents.map((candidate) => (
+              <button key={candidate.id} type="button" role="radio" aria-checked={candidate === incident} className="mode-card__pill" onClick={() => setPickedId(candidate.id)}>
+                {candidate.title} · tier {candidate.tier}
+              </button>
+            ))}
+          </div>
+        )}
         {mode === "host" && (
           <div className="mode-card__choice" role="radiogroup" aria-label="Who can join">
             {(["private", "public"] as const).map((option) => (

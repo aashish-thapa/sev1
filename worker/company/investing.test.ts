@@ -26,7 +26,7 @@ const SEED = FOUNDING_MINIMUM_CENTS + 50_000;
 function richProgress(cents: number): Progress {
   let progress = emptyProgress();
   for (let index = 0; progress.wallet.balanceCents < cents; index += 1) {
-    progress = earn(progress, { kind: "incident", ref: payRef.incident(`seed-run-${index}`, START + index), points: 100, title: "x", isTeam: false }, START);
+    progress = earn(progress, { kind: "incident", ref: payRef.incident(`seed-run-${index}`, START + index), points: 100, tier: 1, title: "x", isTeam: false }, START);
   }
   return progress;
 }
@@ -80,7 +80,8 @@ function world() {
     store.applyMoves(userId, moves, at);
     investors.applyMoves(userId, moves, at);
   });
-  const accounts = new AccountService(accountStore, () => now, { bank: store, investors });
+  // Every seed run is a tier-1 War Room, so the audit can price its pay.
+  const accounts = new AccountService(accountStore, () => now, { bank: store, investors, tierOf: () => 1 });
   const newId = () => `id-${(ids += 1)}`;
   const proposalStore = new MemoryProposalStore((companyId) => store.companies.get(companyId)?.name ?? "");
   let dealsOf: (userId: string) => Promise<DealWire[]> = async () => [];

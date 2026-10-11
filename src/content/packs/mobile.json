@@ -1119,5 +1119,1062 @@
       "title": "Android Developers — Foreground service types are required (Android 14)",
       "url": "https://developer.android.com/about/versions/14/changes/fgs-types-required"
     }
+  },
+  {
+    "id": "ios-webview-save-image-photos-add-key",
+    "kind": "diagnose",
+    "topic": "mobile",
+    "difficulty": 1,
+    "alert": {
+      "service": "ShopApp iOS",
+      "title": "Crashlytics: new SIGABRT in 9.8.0 when saving an image from Help",
+      "severity": "SEV2",
+      "firedAt": "15:42"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "Crash report, ShopApp 9.8.0 (iOS 18.6)",
+        "lines": [
+          {
+            "ts": "15:31:08",
+            "level": "FATAL",
+            "text": "Exception Type: EXC_CRASH (SIGABRT)"
+          },
+          {
+            "ts": "15:31:08",
+            "level": "FATAL",
+            "text": "Exception Codes: 0x0000000000000000, 0x0000000000000000"
+          },
+          {
+            "ts": "15:31:08",
+            "level": "FATAL",
+            "text": "Termination Reason: TCC 0"
+          },
+          {
+            "ts": "15:31:08",
+            "level": "FATAL",
+            "text": "This app has crashed because it attempted to access privacy-sensitive data without a usage description."
+          },
+          {
+            "ts": "15:31:08",
+            "level": "FATAL",
+            "text": "The app's Info.plist must contain an NSPhotoLibraryAddUsageDescription key with a string value explaining to the user how the app uses this data."
+          },
+          {
+            "ts": "15:31:08",
+            "level": "INFO",
+            "text": "Triggered by Thread: 7"
+          },
+          {
+            "ts": "15:31:08",
+            "level": "INFO",
+            "text": "3   TCC   0x00000001ada4eb10 TCC_CRASHING_DUE_TO_PRIVACY_VIOLATION + 172 (TCC.c:579)"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "9.8.0 changes and scope",
+        "items": [
+          {
+            "key": "9.8.0 change",
+            "value": "Help Center articles open in an in-app WKWebView"
+          },
+          {
+            "key": "Repro",
+            "value": "long-press an image in a Help article and save it"
+          },
+          {
+            "key": "Info.plist privacy keys",
+            "value": "NSCameraUsageDescription, NSPhotoLibraryUsageDescription"
+          },
+          {
+            "key": "App code calling Photos APIs",
+            "value": "none; avatars use PHPickerViewController"
+          },
+          {
+            "key": "Photos permission prompt",
+            "value": "never shown before the crash"
+          }
+        ]
+      }
+    ],
+    "question": "Why does saving an image from a Help article crash 9.8.0?",
+    "options": [
+      "Photos access was denied and the save doesn't handle it",
+      "Info.plist lacks the add-only Photos usage description key",
+      "WKWebView writes the image to Photos off the main thread",
+      "ATS blocks the article image, so the save gets a nil image"
+    ],
+    "answer": 1,
+    "explanation": {
+      "cause": "Info.plist has the Photos read key but not NSPhotoLibraryAddUsageDescription",
+      "why": "Writing to the photo library, even through WKWebView's built-in save action, needs its own add-only purpose string. Without it, TCC terminates the app as soon as the write is attempted, before any prompt. NSPhotoLibraryUsageDescription covers reading, so the existing key doesn't help, even though the app's own code never calls Photos.",
+      "tell": "The TCC termination reason names NSPhotoLibraryAddUsageDescription, and Info.plist lists only the camera and photo-library read keys. A denial would fail the save, not kill the app."
+    }
+  },
+  {
+    "id": "android-settext-count-as-resource-id",
+    "kind": "find-line",
+    "topic": "mobile",
+    "difficulty": 1,
+    "alert": {
+      "service": "GroceryApp Android",
+      "title": "Crashlytics: Resources$NotFoundException on the cart screen, 5.10.0",
+      "severity": "SEV2",
+      "firedAt": "13:26"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "logcat, AndroidRuntime (trimmed)",
+        "lines": [
+          {
+            "ts": "13:14:52.301",
+            "level": "FATAL",
+            "source": "AndroidRuntime",
+            "text": "FATAL EXCEPTION: main"
+          },
+          {
+            "ts": "13:14:52.301",
+            "level": "FATAL",
+            "source": "AndroidRuntime",
+            "text": "Process: com.groceryapp, PID: 14592"
+          },
+          {
+            "ts": "13:14:52.301",
+            "level": "FATAL",
+            "source": "AndroidRuntime",
+            "text": "android.content.res.Resources$NotFoundException: String resource ID #0x3"
+          },
+          {
+            "ts": "13:14:52.301",
+            "level": "FATAL",
+            "source": "AndroidRuntime",
+            "text": "at android.content.res.Resources.getText(Resources.java:469)"
+          },
+          {
+            "ts": "13:14:52.301",
+            "level": "FATAL",
+            "source": "AndroidRuntime",
+            "text": "at android.widget.TextView.setText(TextView.java:7614)"
+          },
+          {
+            "ts": "13:14:52.301",
+            "level": "FATAL",
+            "source": "AndroidRuntime",
+            "text": "at com.groceryapp.cart.CartBadgeView.bind(CartBadgeView.kt:28)"
+          },
+          {
+            "ts": "13:14:52.301",
+            "level": "FATAL",
+            "source": "AndroidRuntime",
+            "text": "at com.groceryapp.cart.CartFragment.render(CartFragment.kt:58)"
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "label": "CartBadgeView.kt (badge added in 5.10.0)",
+        "language": "kotlin",
+        "startLine": 18,
+        "lines": [
+          "class CartBadgeView @JvmOverloads constructor(",
+          "    context: Context,",
+          "    attrs: AttributeSet? = null,",
+          ") : ConstraintLayout(context, attrs) {",
+          "    private val binding = ViewCartBadgeBinding.inflate(LayoutInflater.from(context), this)",
+          "",
+          "    fun bind(cart: Cart) {",
+          "        isVisible = cart.items.isNotEmpty()",
+          "        if (!isVisible) return",
+          "        binding.title.setText(R.string.cart_badge_title)",
+          "        binding.itemCount.setText(cart.items.size)",
+          "        binding.total.text = priceFormatter.format(cart.totalCents)",
+          "    }",
+          "}"
+        ]
+      }
+    ],
+    "question": "Tap the line that crashes the cart screen.",
+    "answer": {
+      "evidence": 1,
+      "line": 10
+    },
+    "explanation": {
+      "cause": "setText() is passed the item count, so Android looks the number up as a string resource ID",
+      "why": "TextView.setText(int) is the @StringRes overload: it calls Resources.getText(id), which throws when no string has that ID. setText(cart.items.size) compiles fine but asks for resource 0x3 when the cart holds three items. Empty carts return early, so only shoppers with items crash. Pass a String or use a plurals resource.",
+      "tell": "\"String resource ID #0x3\" is a cart count, not a real ID (app resources look like 0x7f…), and frame CartBadgeView.kt:28 is the setText call that passes cart.items.size."
+    }
+  },
+  {
+    "id": "ios-core-data-model-edited-in-place",
+    "kind": "diagnose",
+    "topic": "mobile",
+    "difficulty": 2,
+    "alert": {
+      "service": "RecipeApp iOS",
+      "title": "Crashlytics: 4.7.0 crashes at launch, crash-free sessions 62%",
+      "severity": "SEV1",
+      "firedAt": "10:12"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "Crash log, RecipeApp 4.7.0 (updated from 4.6.2)",
+        "lines": [
+          {
+            "ts": "09:51:30.118",
+            "level": "INFO",
+            "source": "PersistenceController",
+            "text": "Loading store RecipeApp.sqlite"
+          },
+          {
+            "ts": "09:51:30.402",
+            "level": "FATAL",
+            "text": "Fatal error: Unresolved error Error Domain=NSCocoaErrorDomain Code=134130 \"Persistent store migration failed, missing source managed object model.\""
+          },
+          {
+            "ts": "09:51:30.402",
+            "level": "FATAL",
+            "text": "UserInfo={URL=file:///…/Library/Application%20Support/RecipeApp.sqlite, metadata={…}, reason=Can't find model for source store}"
+          },
+          {
+            "ts": "09:51:30.402",
+            "level": "FATAL",
+            "text": "Exception Type:  EXC_BREAKPOINT (SIGTRAP)"
+          },
+          {
+            "ts": "09:51:30.402",
+            "level": "FATAL",
+            "text": "0   RecipeApp   0x0000000100a4c2f8 closure #1 in PersistenceController.init() (in RecipeApp) (PersistenceController.swift:31)"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "4.7.0 changes and scope",
+        "items": [
+          {
+            "key": "RecipeModel.xcdatamodeld",
+            "value": "1 model version (RecipeModel), edited in 4.7.0"
+          },
+          {
+            "key": "4.7.0 model diff",
+            "value": "Recipe gains an optional attribute, servingNotes"
+          },
+          {
+            "key": "Fresh installs of 4.7.0",
+            "value": "0 crashes"
+          },
+          {
+            "key": "Updates from 4.6.x",
+            "value": "crash on every launch, 0.3 s after start"
+          },
+          {
+            "key": "Store options",
+            "value": "NSPersistentContainer defaults (automatic, inferred)"
+          }
+        ]
+      }
+    ],
+    "question": "Why does 4.7.0 crash at launch for users who updated?",
+    "options": [
+      "Migrating large stores outlasts the launch watchdog",
+      "New attribute is non-optional with no default for old rows",
+      "Model was edited in place, so no model matches the old store",
+      "Data Protection keeps the store unreadable at prewarm launch"
+    ],
+    "answer": 2,
+    "explanation": {
+      "cause": "The shipped model was edited in place, leaving no source model to migrate old stores from",
+      "why": "Core Data migrates by finding the bundled model whose version hashes match the store on disk. Editing RecipeModel without adding a model version replaced the only copy of the 4.6 schema, so the store matches nothing and migration fails with 134130 before it starts. Fresh installs create a new store, which is why QA saw no crash.",
+      "tell": "Code 134130 with reason \"Can't find model for source store\", a single model version edited in 4.7.0, and crashes only on updates, 0.3 s in (no watchdog)."
+    }
+  },
+  {
+    "id": "ios-apns-provider-token-signed-once",
+    "kind": "find-line",
+    "topic": "mobile",
+    "difficulty": 2,
+    "alert": {
+      "service": "notify-worker",
+      "title": "ShopApp iOS push delivery 31% over the last 30 min (was 99.6%)",
+      "severity": "SEV2",
+      "firedAt": "10:20"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "notify-worker-7c9f4 (one of 4 pods)",
+        "lines": [
+          {
+            "ts": "09:04:51",
+            "level": "INFO",
+            "source": "notify-worker",
+            "text": "Started 3.12.0, HTTP/2 session open to api.push.apple.com"
+          },
+          {
+            "ts": "09:05:02",
+            "level": "INFO",
+            "source": "apns",
+            "text": "POST /3/device/9f1c…e2 → 200"
+          },
+          {
+            "ts": "09:31:17",
+            "level": "WARN",
+            "source": "apns",
+            "text": "POST /3/device/41aa…07 → 410 Unregistered"
+          },
+          {
+            "ts": "09:31:17",
+            "level": "INFO",
+            "source": "tokens",
+            "text": "Removed device token 41aa…07"
+          },
+          {
+            "ts": "10:04:49",
+            "level": "INFO",
+            "source": "apns",
+            "text": "POST /3/device/c3d0…5b → 200"
+          },
+          {
+            "ts": "10:04:53",
+            "level": "ERROR",
+            "source": "apns",
+            "text": "POST /3/device/77be…19 → 403 ExpiredProviderToken"
+          },
+          {
+            "ts": "10:04:53",
+            "level": "ERROR",
+            "source": "apns",
+            "text": "POST /3/device/0a52…c8 → 403 ExpiredProviderToken"
+          },
+          {
+            "ts": "10:04:54",
+            "level": "ERROR",
+            "source": "apns",
+            "text": "POST /3/device/e81f…3d → 403 ExpiredProviderToken"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "3.12.0 release",
+        "items": [
+          {
+            "key": "Before 3.12.0",
+            "value": "cron job every 2 min; each run exits after its batch"
+          },
+          {
+            "key": "Since 3.12.0",
+            "value": "long-running Deployment, 4 pods started 09:03–09:05"
+          },
+          {
+            "key": "Other pods",
+            "value": "first 403 between 10:03 and 10:05"
+          },
+          {
+            "key": "APNs auth",
+            "value": "token-based .p8 key, not revoked in the developer account"
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "label": "src/apns/client.ts",
+        "language": "ts",
+        "startLine": 12,
+        "lines": [
+          "export class ApnsClient {",
+          "  private readonly session = http2.connect(\"https://api.push.apple.com\");",
+          "  private readonly authorization = `bearer ${signProviderToken(KEY_ID, TEAM_ID, p8Key)}`;",
+          "",
+          "  async send(deviceToken: string, payload: ApnsPayload): Promise<SendResult> {",
+          "    const request = this.session.request({",
+          "      \":method\": \"POST\",",
+          "      \":path\": `/3/device/${deviceToken}`,",
+          "      authorization: this.authorization,",
+          "      \"apns-topic\": BUNDLE_ID,",
+          "      \"apns-push-type\": \"alert\",",
+          "    });",
+          "    const { status, body } = await exchange(request, JSON.stringify(payload));",
+          "    if (status === 410) await tokens.remove(deviceToken);",
+          "    return { status, reason: body?.reason };",
+          "  }",
+          "}"
+        ]
+      }
+    ],
+    "question": "Tap the line that makes pushes fail an hour after each pod starts.",
+    "answer": {
+      "evidence": 2,
+      "line": 2
+    },
+    "explanation": {
+      "cause": "The APNs provider token is signed once per process and reused after it is an hour old",
+      "why": "APNs rejects a provider token whose iat is more than an hour old with 403 ExpiredProviderToken, and wants it re-signed every 20 to 60 minutes. As a 2-minute cron job, each run signed a fresh token. As a long-running Deployment, the field signed at startup goes stale 60 minutes in. The 410s are ordinary uninstalls.",
+      "tell": "403 ExpiredProviderToken starts one hour after each pod started, only since the move to a Deployment, and the authorization field is signed once at construction and never refreshed."
+    },
+    "source": {
+      "title": "Apple Developer — Establishing a token-based connection to APNs",
+      "url": "https://developer.apple.com/documentation/usernotifications/establishing-a-token-based-connection-to-apns"
+    }
+  },
+  {
+    "id": "android-keystore-invalidated-by-new-fingerprint",
+    "kind": "diagnose",
+    "topic": "mobile",
+    "difficulty": 2,
+    "alert": {
+      "service": "BankApp Android",
+      "title": "Crashlytics: 2,140 users in a launch crash loop at biometric unlock",
+      "severity": "SEV2",
+      "firedAt": "11:40"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "Crashlytics stack trace (Android 14, trimmed)",
+        "lines": [
+          {
+            "ts": "11:22:05",
+            "level": "FATAL",
+            "text": "Fatal Exception: android.security.keystore.KeyPermanentlyInvalidatedException: Key permanently invalidated"
+          },
+          {
+            "ts": "11:22:05",
+            "level": "FATAL",
+            "text": "at android.security.keystore2.KeyStoreCryptoOperationUtils.getOrMakeOperationChallenge(KeyStoreCryptoOperationUtils.java:202)"
+          },
+          {
+            "ts": "11:22:05",
+            "level": "FATAL",
+            "text": "at android.security.keystore2.AndroidKeyStoreCipherSpiBase.ensureKeystoreOperationInitialized(AndroidKeyStoreCipherSpiBase.java:374)"
+          },
+          {
+            "ts": "11:22:05",
+            "level": "FATAL",
+            "text": "at android.security.keystore2.AndroidKeyStoreCipherSpiBase.engineInit(AndroidKeyStoreCipherSpiBase.java:253)"
+          },
+          {
+            "ts": "11:22:05",
+            "level": "FATAL",
+            "text": "at com.bankapp.auth.BiometricUnlock.decryptCipher(BiometricUnlock.kt:44)"
+          },
+          {
+            "ts": "11:22:05",
+            "level": "FATAL",
+            "text": "at com.bankapp.auth.UnlockActivity.onCreate(UnlockActivity.kt:31)"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Scope, from Crashlytics and support",
+        "items": [
+          {
+            "key": "Affected users",
+            "value": "crash on every launch until they clear app data"
+          },
+          {
+            "key": "Devices",
+            "value": "same device since biometric sign-in setup; no restores"
+          },
+          {
+            "key": "Android versions",
+            "value": "11 to 15, no OS update in common"
+          },
+          {
+            "key": "Support tickets",
+            "value": "\"added my wife's fingerprint\", \"set up my finger again\""
+          },
+          {
+            "key": "Unlock key spec",
+            "value": "setUserAuthenticationRequired(true), no validity duration or end"
+          }
+        ]
+      }
+    ],
+    "question": "Why are these users stuck in a launch crash loop?",
+    "options": [
+      "An OS update wiped the device's hardware-backed Keystore keys",
+      "Auto Backup restored the token to a device without its key",
+      "The key's validity end date passed, so Keystore rejects it",
+      "A new fingerprint permanently invalidated the auth-bound key"
+    ],
+    "answer": 3,
+    "explanation": {
+      "cause": "Enrolling a new biometric invalidated the auth-bound key, and the app doesn't handle it",
+      "why": "Keystore keys that require user authentication with no validity duration are by default irreversibly invalidated when a new biometric is enrolled or all are removed. Cipher.init then throws KeyPermanentlyInvalidatedException. UnlockActivity doesn't catch it, so every launch crashes. Catch it, delete the key and fall back to the password.",
+      "tell": "KeyPermanentlyInvalidatedException at Cipher.init on users' original devices across Android 11–15, a key with no end date, and tickets about adding a fingerprint."
+    },
+    "source": {
+      "title": "Android Developers — KeyGenParameterSpec.Builder.setInvalidatedByBiometricEnrollment",
+      "url": "https://developer.android.com/reference/android/security/keystore/KeyGenParameterSpec.Builder#setInvalidatedByBiometricEnrollment(boolean)"
+    }
+  },
+  {
+    "id": "android-prefs-apply-blocks-on-stop",
+    "kind": "find-line",
+    "topic": "mobile",
+    "difficulty": 3,
+    "alert": {
+      "service": "ShopApp Android",
+      "title": "Play vitals: user-perceived ANR rate 3x on 6.5.0",
+      "severity": "SEV2",
+      "firedAt": "16:05"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "Top ANR cluster, main thread (trimmed)",
+        "lines": [
+          {
+            "ts": "16:01:12",
+            "level": "ERROR",
+            "text": "Input dispatching timed out"
+          },
+          {
+            "ts": "16:01:12",
+            "level": "INFO",
+            "text": "\"main\" prio=5 tid=1 Native"
+          },
+          {
+            "ts": "16:01:12",
+            "level": "INFO",
+            "text": "at android.os.FileUtils.sync(FileUtils.java:277)"
+          },
+          {
+            "ts": "16:01:12",
+            "level": "INFO",
+            "text": "at android.app.SharedPreferencesImpl.writeToFile(SharedPreferencesImpl.java:815)"
+          },
+          {
+            "ts": "16:01:12",
+            "level": "INFO",
+            "text": "at android.app.QueuedWork.processPendingWork(QueuedWork.java:292)"
+          },
+          {
+            "ts": "16:01:12",
+            "level": "INFO",
+            "text": "at android.app.QueuedWork.waitToFinish(QueuedWork.java:205)"
+          },
+          {
+            "ts": "16:01:12",
+            "level": "INFO",
+            "text": "at android.app.ActivityThread.handleStopActivity(ActivityThread.java:5948)"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "6.5.0 and device facts",
+        "items": [
+          {
+            "key": "When",
+            "value": "92% within 5 s of opening a product from the list"
+          },
+          {
+            "key": "6.5.0 change",
+            "value": "analytics events kept on disk until upload succeeds"
+          },
+          {
+            "key": "shared_prefs/analytics_queue.xml",
+            "value": "2.4 MB median, up to 6 MB offline"
+          },
+          {
+            "key": "shared_prefs/settings.xml",
+            "value": "3 KB"
+          },
+          {
+            "key": "Worst devices",
+            "value": "low-end eMMC storage"
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "label": "AnalyticsQueue.kt (new in 6.5.0)",
+        "language": "kotlin",
+        "startLine": 20,
+        "lines": [
+          "class AnalyticsQueue(context: Context, private val api: EventsApi) {",
+          "    private val queuePrefs = context.getSharedPreferences(\"analytics_queue\", MODE_PRIVATE)",
+          "    private val settings = context.getSharedPreferences(\"settings\", MODE_PRIVATE)",
+          "    private val pending = mutableListOf<Event>()",
+          "",
+          "    @MainThread",
+          "    fun track(event: Event) {",
+          "        synchronized(pending) { pending += event }",
+          "        queuePrefs.edit().putString(KEY_PENDING, json.encodeToString(pending)).apply()",
+          "        settings.edit().putLong(KEY_LAST_EVENT_AT, event.timestampMillis).apply()",
+          "    }",
+          "",
+          "    suspend fun flush() = withContext(Dispatchers.IO) {",
+          "        val batch = synchronized(pending) { pending.toList() }",
+          "        api.upload(batch)",
+          "        synchronized(pending) { pending.removeAll(batch) }",
+          "    }",
+          "}"
+        ]
+      }
+    ],
+    "question": "Tap the line that causes the ANRs.",
+    "answer": {
+      "evidence": 2,
+      "line": 8
+    },
+    "explanation": {
+      "cause": "Every event rewrites the whole multi-MB queue with apply(), and activity stop waits for it",
+      "why": "apply() only defers the disk write. Before an activity finishes stopping, ActivityThread calls QueuedWork.waitToFinish(), which runs pending writes on the main thread. Each event re-serializes the whole queue, so opening a product makes the main thread fsync megabytes of XML and the next tap times out. The upload already runs on IO.",
+      "tell": "The main thread is in SharedPreferencesImpl.writeToFile under QueuedWork.waitToFinish from handleStopActivity, and only analytics_queue.xml is megabytes; track() rewrites it with apply()."
+    }
+  },
+  {
+    "id": "android-app-links-upload-key-fingerprint",
+    "kind": "diagnose",
+    "topic": "mobile",
+    "difficulty": 3,
+    "alert": {
+      "service": "ShopApp Android",
+      "title": "Email campaign: 41% of Android link taps open Chrome, not the app",
+      "severity": "SEV2",
+      "firedAt": "15:10"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "App Link taps that open the browser",
+        "unit": "%",
+        "points": [
+          3,
+          3,
+          4,
+          3,
+          3,
+          3,
+          9,
+          17,
+          24,
+          30,
+          35,
+          39,
+          41
+        ],
+        "markAt": 6
+      },
+      {
+        "type": "log",
+        "label": "QA phone: pm get-app-links com.shop.app",
+        "lines": [
+          {
+            "ts": "14:51:02",
+            "level": "INFO",
+            "source": "qa",
+            "text": "Installed 7.3.0 from the CI release artifact with adb install"
+          },
+          {
+            "ts": "14:51:40",
+            "level": "INFO",
+            "text": "Domain verification state:"
+          },
+          {
+            "ts": "14:51:40",
+            "level": "INFO",
+            "text": "shop.example: verified"
+          },
+          {
+            "ts": "14:58:15",
+            "level": "INFO",
+            "source": "qa",
+            "text": "Uninstalled, then installed 7.3.0 from the Play Store"
+          },
+          {
+            "ts": "14:58:52",
+            "level": "INFO",
+            "text": "Domain verification state:"
+          },
+          {
+            "ts": "14:58:52",
+            "level": "WARN",
+            "text": "shop.example: 1024"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Release and website changes",
+        "items": [
+          {
+            "key": "7.3.0 manifest diff",
+            "value": "none; autoVerify intent filters unchanged"
+          },
+          {
+            "key": "Tuesday web migration",
+            "value": "assetlinks.json regenerated from the CI release keystore"
+          },
+          {
+            "key": "assetlinks.json fingerprint",
+            "value": "FA:C6:17:45:…:3B:7E"
+          },
+          {
+            "key": "Play Console app signing key",
+            "value": "SHA-256 9B:2E:D0:73:…:C8:41"
+          },
+          {
+            "key": "GET /.well-known/assetlinks.json",
+            "value": "200, application/json, no redirect"
+          },
+          {
+            "key": "Who is affected",
+            "value": "users who installed or updated since Tuesday"
+          }
+        ]
+      }
+    ],
+    "question": "Why do App Links open the browser for so many Android users?",
+    "options": [
+      "7.3.0 changed the intent filters and broke autoVerify",
+      "The new web host redirects assetlinks.json, failing checks",
+      "assetlinks.json lists the upload key, not Play's signing key",
+      "Devices still cache the old assetlinks.json for up to 7 days"
+    ],
+    "answer": 2,
+    "explanation": {
+      "cause": "assetlinks.json lists the upload key's fingerprint, but Play installs carry Play's key",
+      "why": "With Play App Signing, Google re-signs the app, so Play installs carry the app signing key, not the upload key in the CI keystore. Only builds signed with a listed key verify. Android re-verifies only on install or update, so failures grew with 7.3.0 updates and made the release look guilty.",
+      "tell": "The same 7.3.0 verifies when installed from CI and fails when installed from Play, and the assetlinks.json fingerprint differs from Play Console's app signing key."
+    },
+    "source": {
+      "title": "Android Developers — Verify Android App Links",
+      "url": "https://developer.android.com/training/app-links/verify-applinks"
+    }
+  },
+  {
+    "id": "ios-notification-extension-full-size-decode",
+    "kind": "find-line",
+    "topic": "mobile",
+    "difficulty": 3,
+    "alert": {
+      "service": "ShopApp iOS",
+      "title": "Campaign pushes arriving without images since Tuesday (4% rich)",
+      "severity": "SEV2",
+      "firedAt": "12:30"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "Jetsam event report excerpt (iPhone 12)",
+        "lines": [
+          {
+            "ts": "12:02:41",
+            "level": "INFO",
+            "text": "\"memoryStatus\" : { \"pageSize\" : 16384 }"
+          },
+          {
+            "ts": "12:02:41",
+            "level": "INFO",
+            "text": "\"name\" : \"ShopNotificationService\""
+          },
+          {
+            "ts": "12:02:41",
+            "level": "INFO",
+            "text": "\"rpages\" : 1541"
+          },
+          {
+            "ts": "12:02:41",
+            "level": "INFO",
+            "text": "\"lifetimeMax\" : 1541"
+          },
+          {
+            "ts": "12:02:41",
+            "level": "FATAL",
+            "text": "\"reason\" : \"per-process-limit\""
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "What changed",
+        "items": [
+          {
+            "key": "Campaign images",
+            "value": "since Tue, 4032×3024 JPEG originals (~3 MB); were 600 px"
+          },
+          {
+            "key": "Image download, p95",
+            "value": "1.8 s (the extension gets 30 s)"
+          },
+          {
+            "key": "Delivered pushes",
+            "value": "show title and body, no image"
+          },
+          {
+            "key": "Same image URLs in the app",
+            "value": "load fine in the in-app gallery"
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "label": "NotificationService.swift",
+        "language": "swift",
+        "startLine": 14,
+        "lines": [
+          "override func didReceive(",
+          "    _ request: UNNotificationRequest,",
+          "    withContentHandler contentHandler: @escaping (UNNotificationContent) -> Void",
+          ") {",
+          "    let content = request.content.mutableCopy() as! UNMutableNotificationContent",
+          "    guard let url = (content.userInfo[\"image_url\"] as? String).flatMap(URL.init(string:)) else {",
+          "        return contentHandler(content)",
+          "    }",
+          "    URLSession.shared.downloadTask(with: url) { file, _, _ in",
+          "        defer { contentHandler(content) }",
+          "        guard let file, let data = try? Data(contentsOf: file),",
+          "              let image = UIImage(data: data) else { return }",
+          "        let scale = 300 / image.size.width",
+          "        let rect = CGRect(x: 0, y: 0, width: 300, height: image.size.height * scale)",
+          "        let renderer = UIGraphicsImageRenderer(size: rect.size)",
+          "        let jpeg = renderer.jpegData(withCompressionQuality: 0.8) { _ in image.draw(in: rect) }",
+          "        let thumb = FileManager.default.temporaryDirectory.appendingPathComponent(\"push.jpg\")",
+          "        try? jpeg.write(to: thumb)",
+          "        if let attachment = try? UNNotificationAttachment(identifier: \"img\", url: thumb) {",
+          "            content.attachments = [attachment]",
+          "        }",
+          "    }.resume()",
+          "}"
+        ]
+      }
+    ],
+    "question": "Tap the line that gets the extension killed.",
+    "answer": {
+      "evidence": 2,
+      "line": 15
+    },
+    "explanation": {
+      "cause": "Drawing the full-size UIImage decodes all 12 MP inside a memory-capped extension",
+      "why": "UIImage(data:) only parses the JPEG header; draw(in:) decodes the whole 4032×3024 bitmap, about 48 MB, before scaling it down. Notification Service Extensions get a far smaller memory limit than apps, so jetsam kills the process and iOS shows the original text-only push. Downsample with ImageIO's CGImageSourceCreateThumbnailAtIndex.",
+      "tell": "Jetsam names ShopNotificationService with per-process-limit at about 25 MB (1541 × 16 KB pages), far below a 48 MB decode, while the file is only 3 MB and downloads finish in 1.8 s."
+    },
+    "source": {
+      "title": "Apple Developer — Identifying high-memory use with jetsam event reports",
+      "url": "https://developer.apple.com/documentation/xcode/identifying-high-memory-use-with-jetsam-event-reports"
+    }
+  },
+  {
+    "id": "android-flag-default-flip-old-builds",
+    "kind": "find-line",
+    "topic": "mobile",
+    "difficulty": 3,
+    "alert": {
+      "service": "ShopApp Android",
+      "title": "Crashlytics velocity alert: checkout crashes on Android since 14:08",
+      "severity": "SEV1",
+      "firedAt": "14:15"
+    },
+    "evidence": [
+      {
+        "type": "log",
+        "label": "Crashlytics, top of stack",
+        "lines": [
+          {
+            "ts": "14:08:37",
+            "level": "FATAL",
+            "text": "Fatal Exception: kotlin.UninitializedPropertyAccessException: lateinit property paymentSheet has not been initialized"
+          },
+          {
+            "ts": "14:08:37",
+            "level": "FATAL",
+            "text": "at com.shopapp.checkout.v2.CheckoutV2Fragment.onViewCreated(CheckoutV2Fragment.kt:61)"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Crash breakdown and context",
+        "items": [
+          {
+            "key": "Crashing versions",
+            "value": "6.2.1 (58%), 6.3.0 (42%)"
+          },
+          {
+            "key": "6.4.0, at 25% staged rollout",
+            "value": "0 crashes in CheckoutV2Fragment"
+          },
+          {
+            "key": "CheckoutV2",
+            "value": "shipped dark since 6.2.0; paymentSheet setup added in 6.4.0"
+          },
+          {
+            "key": "Flag clients",
+            "value": "fetch flags on app start and every 5 minutes"
+          }
+        ]
+      },
+      {
+        "type": "log",
+        "label": "Change log, 13:50–14:10",
+        "lines": [
+          {
+            "ts": "13:52",
+            "level": "INFO",
+            "source": "deploy",
+            "text": "orders-api 2026.10.10-2 rolled out to 100%"
+          },
+          {
+            "ts": "14:01",
+            "level": "INFO",
+            "source": "play-console",
+            "text": "Staged rollout 6.4.0: 10% → 25%"
+          },
+          {
+            "ts": "14:03",
+            "level": "INFO",
+            "source": "flags",
+            "text": "Template v213: checkout_v2_enabled = true when app_version >= 6.4.0"
+          },
+          {
+            "ts": "14:06",
+            "level": "INFO",
+            "source": "flags",
+            "text": "Template v214: checkout_v2_enabled default false → true (cleanup, 6.4.0 looks healthy)"
+          },
+          {
+            "ts": "14:07",
+            "level": "INFO",
+            "source": "flags",
+            "text": "Template v215: home_banner_variant \"autumn\" → \"halloween\""
+          },
+          {
+            "ts": "14:08",
+            "level": "ERROR",
+            "source": "crashlytics",
+            "text": "New fatal issue: UninitializedPropertyAccessException in CheckoutV2Fragment"
+          }
+        ]
+      }
+    ],
+    "question": "Tap the change that started the crashes.",
+    "answer": {
+      "evidence": 2,
+      "line": 3
+    },
+    "explanation": {
+      "cause": "Flipping the flag's default turned on unfinished CheckoutV2 code in the 6.2 and 6.3 builds",
+      "why": "CheckoutV2 shipped dark from 6.2.0, but paymentSheet was only set up in 6.4.0. v213 enabled it safely for 6.4.0 and up. v214 changed the default, which every older binary also reads, so 6.2 and 6.3 users opened CheckoutV2 and hit the lateinit within one fetch. Halting the 6.4.0 rollout would not have helped.",
+      "tell": "Crashes are only on 6.2.1 and 6.3.0, none on the 6.4.0 being rolled out, and the first crash came two minutes after v214 changed the default for every version."
+    }
+  },
+  {
+    "id": "ios-pinned-leaf-key-rotated-on-renewal",
+    "kind": "diagnose",
+    "topic": "mobile",
+    "difficulty": 3,
+    "alert": {
+      "service": "RideApp iOS",
+      "title": "API success rate 1.4% on iOS since 02:59; Android and web normal",
+      "severity": "SEV1",
+      "firedAt": "03:10"
+    },
+    "evidence": [
+      {
+        "type": "metric",
+        "label": "iOS API requests succeeding",
+        "unit": "%",
+        "points": [
+          99.7,
+          99.8,
+          99.7,
+          99.8,
+          99.7,
+          99.8,
+          99.7,
+          1.9,
+          1.2,
+          1.4,
+          1.1,
+          1.3
+        ],
+        "markAt": 7
+      },
+      {
+        "type": "log",
+        "label": "Device console, RideApp 5.6.2 (trimmed)",
+        "lines": [
+          {
+            "ts": "03:04:11.402",
+            "level": "INFO",
+            "source": "HomeViewModel",
+            "text": "Loading home feed"
+          },
+          {
+            "ts": "03:04:11.655",
+            "level": "ERROR",
+            "text": "Task <6B1F0C2E-4D3A-4F7B-9E21-0C8D5A7E3F19>.<1> finished with error [-999] Error Domain=NSURLErrorDomain Code=-999 \"cancelled\""
+          },
+          {
+            "ts": "03:04:11.655",
+            "level": "ERROR",
+            "text": "UserInfo={NSErrorFailingURLStringKey=https://api.rideapp.example/v2/home, NSLocalizedDescription=cancelled}"
+          },
+          {
+            "ts": "03:04:11.656",
+            "level": "WARN",
+            "source": "HomeViewModel",
+            "text": "Home feed failed: cancelled"
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "label": "Context",
+        "items": [
+          {
+            "key": "02:59 cert-manager",
+            "value": "renewed api-tls, the first renewal since upgrading to v1.18"
+          },
+          {
+            "key": "rotationPolicy on api-tls",
+            "value": "not set (v1.18 default: Always)"
+          },
+          {
+            "key": "iOS PinnedSessionDelegate",
+            "value": "allows a request only if the leaf SPKI hash is one of 2 pins"
+          },
+          {
+            "key": "Android app and web",
+            "value": "no pinning; healthy, full chain served"
+          },
+          {
+            "key": "iOS releases",
+            "value": "none this week; every app version affected"
+          },
+          {
+            "key": "Trust errors (-1200, -1202)",
+            "value": "none in device logs"
+          }
+        ]
+      }
+    ],
+    "question": "Why is every iOS API request failing?",
+    "options": [
+      "A released AnyCancellable is cancelling every API request",
+      "The renewed chain omits its intermediate, failing iOS trust",
+      "A new key at renewal; the iOS leaf pin no longer matches",
+      "Device clocks lag, so the new cert isn't yet valid on iOS"
+    ],
+    "answer": 2,
+    "explanation": {
+      "cause": "The certificate renewal generated a new key pair, and the iOS app pins the old leaf key",
+      "why": "cert-manager 1.18 made rotationPolicy Always the default, so the first renewal since the upgrade minted a new key. The delegate hashes the leaf's public key, finds no pin, and calls .cancelAuthenticationChallenge, which cancels the request: -999 \"cancelled\", not a trust error. Pin the CA's key, or the next leaf key before rotating.",
+      "tell": "-999 on every iOS version starting at the 02:59 renewal, no -1200/-1202 trust errors, healthy unpinned Android and web, and a delegate that pins only the leaf key."
+    },
+    "source": {
+      "title": "Apple Developer — URLSession.AuthChallengeDisposition.cancelAuthenticationChallenge",
+      "url": "https://developer.apple.com/documentation/foundation/urlsession/authchallengedisposition/cancelauthenticationchallenge"
+    }
   }
 ]

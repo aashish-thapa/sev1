@@ -5,7 +5,7 @@ A game for on-call engineers, in two modes:
 - **Quick shift** — twelve incident cards a day, easiest first. Read the alert, the graph and the logs, make the call.
 - **War Room** — one live, simulated outage. Inspect the system on a 2D service map or **walk the server hall in 3D**, fight it from a bastion shell (`kubectl`, `psql`, `curl`), declare it resolved, survive ten minutes of monitoring, then write the postmortem.
 
-Players pick a **role** — Infra/SRE, Frontend, Mobile, Security or Data & ML. The whole game is one office: each role has a room with a wall screen where its daily problems are talked through (voiced by the colleague at the screen), the library mixes everyone's, and the pager can go off at any time. Solo infra players get the pure infra outage; everyone else — and every shared room — gets **Checkout meltdown**, a cross-team incident nobody can fix alone. In solo play, named colleagues cover the other roles from the scenario's playbook; in a shared room (4-letter code, up to 5 people) real teammates do.
+Players pick a **role** — Infra/SRE, Frontend, Mobile, Security or Data & ML. The whole game is one office: each role has a room with a wall screen where its daily problems are talked through (voiced by the colleague at the screen), the library mixes everyone's, and the pager can go off at any time. Every role has its own **ladder** of War Rooms, tier 1 (guided, one cause, one fix) to tier 4 (the usual fix does nothing); a tier opens at the career level one below it, and **Checkout meltdown** — tier 5, cross-team, nobody can fix it alone — opens at Staff. A shared room (4-letter code, up to 5 people) plays whatever its host picks from their own unlocked ladder, or the meltdown, which every room may pick. Solo or shared, named colleagues cover any paged role no player holds, from the scenario's playbook. War Room pay scales with the tier, capped at the tier the player's level unlocks.
 
 Sound is synthesized in the browser (Web Audio) and colleagues speak through the Web Speech API — no audio files, no accounts.
 
@@ -31,11 +31,11 @@ pnpm build               # validate content, type-check, bundle, generate the PW
 | `src/ui/` | Screens and components. Evidence renderers are a typed map keyed by evidence `type` — a new evidence kind is a new renderer, not an edited switch. |
 | `src/warroom/sim/` | Pure, deterministic cluster simulator: pods, rolling updates, connection pools, Postgres limits, build *traits* (defects) the engine applies. Operator actions are pure functions. |
 | `src/warroom/shell/` | Bastion shell: tokenizer, command registry (`kubectl`, `psql`, `curl`, …). Commands read and act on the cluster only through the sim's state and actions. |
-| `src/warroom/scenarios/` | One file per live incident: starting cluster, what "fixed" means, comms timeline, postmortem. |
+| `src/warroom/scenarios/` | One file per live incident: starting cluster, what "fixed" means, comms timeline, postmortem. `index.ts` holds each role's ladder (`LADDERS`); `checkout-commerce.ts` builds the shop around the cluster that non-infra incidents play in. |
 | `src/warroom/floor/` | The walkable 3D hall (three.js + React Three Fiber), lazy-loaded. `layout.ts` maps the live cluster to racks and `player.ts` handles walking/collision — both pure and unit-tested. Colours come from the CSS design tokens. |
 | `src/audio/` | Synthesized SFX, ambience/alarm/heartbeat loops, a voice director over `speechSynthesis`, and `soundscapeFor(panic, zone…)`. |
 | `src/multiplayer/`, `server/` | Room protocol (Zod), delta-encoded incident frames, `RoomClient` + `useRoom`, and the authoritative Node `ws` room server that runs the same simulation. |
-| `src/warroom/teamwork.ts` | Solo play: colleagues run the scenario's `teamPlaybook` for every role except yours. |
+| `src/warroom/teamwork.ts` | Colleagues run the scenario's `teamPlaybook` for every paged role no player holds, in solo play and in rooms alike. |
 | `src/warroom/ui/` | War Room screens: isometric service map, inspect panel, terminal, HUD, debrief. |
 | `src/main.tsx` | Composition root: builds the library, store and clock and hands them to `App`. |
 
@@ -43,7 +43,7 @@ Nothing runs an LLM at play time. Content is static JSON, so hosting costs stay 
 
 ## Adding a War Room scenario
 
-Write a `Scenario` in `src/warroom/scenarios/`: build the starting cluster, give the bad revision a trait the engine understands (add a new trait kind to `sim/model.ts` and its physics to `sim/engine.ts` if needed), define `isRootCauseFixed`, a comms timeline and the postmortem. Then add strategy tests like `src/warroom/warroom.test.ts`: doing nothing must get worse, the right fix must close, plausible wrong fixes must backfire.
+Write a `Scenario` in `src/warroom/scenarios/`: build the starting cluster, give the bad revision a trait the engine understands (add a new trait kind to `sim/model.ts` and its physics to `sim/engine.ts` if needed), define `isRootCauseFixed`, a comms timeline and the postmortem. If fixing it doesn't move checkout 5xx (a WAF blocking customers, refunds, fraud declines), give it an `alertMetric`: the rate the pager watches, which also gates "resolved". Non-infra incidents build their shop with `checkoutCommerce()` and put role-specific tool output in `evidence`. Add it to `SCENARIOS` and to its role's `LADDERS` entry at the right tier. Then add strategy tests like `src/warroom/warroom.test.ts`: doing nothing must get worse, the right fix must close, plausible wrong fixes must backfire.
 
 ## 3D assets
 

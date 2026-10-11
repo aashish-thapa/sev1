@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
+import { ROLE_IDS } from "../domain/incident.ts";
 import { advance, debrief, declareResolved, openIncident, type Incident, type IncidentNotice } from "./incident.ts";
 import type { Scenario } from "./scenario.ts";
+import { checkoutMeltdown } from "./scenarios/checkout-meltdown.ts";
+import { checkoutPoolLeak } from "./scenarios/checkout-pool-leak.ts";
 import { crashOnCheckout } from "./scenarios/crash-on-checkout.ts";
-import { practiceWarRooms, SCENARIOS, soloScenarioFor, unlockedWarRooms } from "./scenarios/index.ts";
+import { isUnlocked, practiceWarRooms, roomWarRooms, SCENARIOS, soloScenarioFor, unlockedWarRooms } from "./scenarios/index.ts";
 import { oomAfterDeploy } from "./scenarios/oom-after-deploy.ts";
+import { ordersIndexInvalid } from "./scenarios/orders-index-invalid.ts";
 import { scaledToZero } from "./scenarios/scaled-to-zero.ts";
+
+const LEVELS = [0, 1, 2, 3, 4] as const;
 import { runLine } from "./shell/shell.ts";
 
 function play(scenario: Scenario, seconds: number, incident: Incident) {
@@ -28,7 +34,7 @@ function resolveWith(scenario: Scenario, fix: string) {
   let incident = play(scenario, 40, openIncident(scenario)).incident;
   incident = shell(scenario, incident, fix).incident;
   incident = play(scenario, 120, incident).incident;
-  const declared = declareResolved(incident);
+  const declared = declareResolved(incident, scenario);
   const { incident: closed, notices } = play(scenario, 700, declared.incident);
   return { before: incident, refused: declared.notice, closed, notices };
 }
@@ -127,7 +133,50 @@ describe("the War Room ladder", () => {
     expect(practiceWarRooms("infrastructure", 0, pro, now).length).toBe(unlockedWarRooms("infrastructure", 4).length);
   });
 
-  it("keeps the cross-team incident for roles without their own ladder yet", () => {
-    expect(soloScenarioFor("frontend", 0, 0).id).toBe("checkout-meltdown");
+  it("gives every role a ladder of its own: tier-1 incidents for an intern, and a harder one with each promotion", () => {
+    for (const role of ROLE_IDS) {
+      for (const level of [0, 1, 2, 3] as const) {
+        const own = unlockedWarRooms(role, level);
+        expect(own.every((scenario) => scenario !== checkoutMeltdown && scenario.roles.includes(role))).toBe(true);
+        expect(Math.max(...own.map((scenario) => scenario.tier))).toBe(level + 1);
+      }
+    }
+    expect(soloScenarioFor("frontend", 0, 0).id).toBe("web-auto-retry-storm");
+    expect(soloScenarioFor("mobile", 0, 0).id).toBe("ios-retry-config");
+    expect(soloScenarioFor("security", 0, 0).id).toBe("bot-flood-single-ip");
+    expect(soloScenarioFor("data", 0, 0).id).toBe("refund-double-charges");
+  });
+
+  it("keeps infra's own outages by level below Staff, and adds the cross-team incident at Staff", () => {
+    const infraHardestFirst = [ordersIndexInvalid, checkoutPoolLeak, oomAfterDeploy, crashOnCheckout, scaledToZero];
+    expect(unlockedWarRooms("infrastructure", 0)).toEqual(infraHardestFirst.slice(3));
+    expect(unlockedWarRooms("infrastructure", 1)).toEqual(infraHardestFirst.slice(2));
+    expect(unlockedWarRooms("infrastructure", 2)).toEqual(infraHardestFirst.slice(1));
+    expect(unlockedWarRooms("infrastructure", 3)).toEqual(infraHardestFirst);
+    expect(unlockedWarRooms("infrastructure", 4)).toEqual([checkoutMeltdown, ...infraHardestFirst]);
+  });
+
+  it("always pages a solo player with something: the cross-team incident when their level unlocks nothing of their own", () => {
+    for (const role of ROLE_IDS) {
+      for (const level of LEVELS) {
+        for (const rotation of [0, 1, 2, 3, 4, 5, 6]) {
+          const paged = soloScenarioFor(role, rotation, level);
+          expect(paged === checkoutMeltdown || isUnlocked(paged, level)).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("offers every room the cross-team incident first, then what the host has unlocked, once each", () => {
+    expect(roomWarRooms("infrastructure", 0)).toEqual([checkoutMeltdown, crashOnCheckout, scaledToZero]);
+    expect(roomWarRooms("frontend", 0).map((scenario) => scenario.id)).toEqual(["checkout-meltdown", "web-auto-retry-storm"]);
+    for (const role of ROLE_IDS) {
+      for (const level of LEVELS) {
+        const offered = roomWarRooms(role, level);
+        expect(offered[0]).toBe(checkoutMeltdown);
+        expect(new Set(offered).size).toBe(offered.length);
+        expect(offered).toEqual(expect.arrayContaining([...unlockedWarRooms(role, level)]));
+      }
+    }
   });
 });

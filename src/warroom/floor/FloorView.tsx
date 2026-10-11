@@ -2,6 +2,7 @@ import { PerformanceMonitor } from "@react-three/drei";
 import { Canvas, useFrame, type ThreeEvent } from "@react-three/fiber";
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type RefObject } from "react";
 import { edgeHealth, sameNode, type NodeId } from "../health.ts";
+import { alertRate } from "../incident.ts";
 import type { CommsMessage, Scenario } from "../scenario.ts";
 import { openConnections } from "../sim/engine.ts";
 import type { ClusterState } from "../sim/model.ts";
@@ -164,11 +165,11 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
   // Racks are laid out around their own origin, then wheeled into the data-centre room.
   const racks = useMemo(
     () =>
-      layoutHall(cluster, scenario.externals).map((rack) => ({
+      layoutHall(cluster, scenario).map((rack) => ({
         ...rack,
         footprint: { ...rack.footprint, x: rack.footprint.x + DATACENTRE_ORIGIN.x, z: rack.footprint.z + DATACENTRE_ORIGIN.z },
       })),
-    [cluster, scenario.externals],
+    [cluster, scenario],
   );
   const reduceMotion = useMemo(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches, []);
   const [pinned] = useState(pinnedQuality);
@@ -358,7 +359,7 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
   const poolSize = cluster.deployments[0]?.poolSize ?? 1;
   const loadOf = (rack: Rack): number => {
     if (rack.kind === "database") return openConnections(cluster.deployments) / capacity;
-    if (rack.kind === "network") return Math.max(0.15, cluster.errorRate);
+    if (rack.kind === "network") return Math.max(0.15, alertRate(scenario, cluster));
     if (rack.node?.kind === "pod") {
       const name = rack.node.name;
       const pod = cluster.deployments.flatMap((deployment) => deployment.pods).find((candidate) => candidate.name === name);
@@ -432,7 +433,7 @@ export default function FloorView({ cluster, scenario, role, selected, comms, is
         {rowSigns(cluster).map((sign) => (
           <RowSign key={sign.label} title={sign.label} health={sign.health} x={sign.x + DATACENTRE_ORIGIN.x} z={sign.z + DATACENTRE_ORIGIN.z} />
         ))}
-        <Beacon health={edgeHealth(cluster)} reduceMotion={reduceMotion} x={DATACENTRE_ORIGIN.x} z={DATACENTRE_ORIGIN.z} />
+        <Beacon health={edgeHealth(cluster, scenario)} reduceMotion={reduceMotion} x={DATACENTRE_ORIGIN.x} z={DATACENTRE_ORIGIN.z} />
         <Laptop isOpen={isLaptopOpen} reduceMotion={reduceMotion} screenRef={laptopScreenRef} />
         {settings.hasEffects && <Effects />}
         <PlayerRig start={start} racks={racks} walls={walls} usables={usables} readIntent={readIntent} onMove={onPlayerMove} onFocus={setFocusedKey} tremor={reduceMotion ? 0 : panic} control={rig} reduceMotion={reduceMotion} />

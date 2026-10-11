@@ -2,7 +2,7 @@ import { segmentStats } from "../../sim/clients.ts";
 import { resolveAlert } from "../../sim/commerce-actions.ts";
 import { isAlertOpen, type AlertDisposition, type Commerce, type SiemAlert } from "../../sim/commerce.ts";
 import { DISTINCT_SOURCE_IPS } from "../../sim/edge.ts";
-import { applied, commerceCommand, count, percent, stamp, WINDOW_SECONDS } from "../commerce-command.ts";
+import { applied, commerceCommand, count, evidenceFor, percent, runEvidence, stamp, viewNames, WINDOW_SECONDS } from "../commerce-command.ts";
 import { operatorName, ssoRefusal } from "../identity.ts";
 import { takeFlag } from "../tokenize.ts";
 import { age, dim, err, out, table, type OutputLine, type ShellContext, type ShellResult } from "../types.ts";
@@ -54,6 +54,8 @@ function show(id: string, context: ShellContext, commerce: Commerce): ShellResul
       `Observed:  ${count(posts)} POST /checkout in the last 5 min (baseline ${count(baseline)}) from ${count(DISTINCT_SOURCE_IPS)} source IPs`,
       "Searches:  siem search auth-summary | checkout-sessions | client-mix | card-velocity",
     );
+  } else if (evidenceFor(context, "siem").length > 0) {
+    lines.push(`Searches:  siem search ${evidenceFor(context, "siem").map((entry) => entry.name).join(" | ")}`);
   }
   const soar = containmentNote(alert, context);
   if (soar) lines.push(`SOAR:      ${soar}`);
@@ -122,21 +124,35 @@ const SEARCHES: Record<string, (context: ShellContext, commerce: Commerce) => re
 };
 
 function search(name: string | undefined, context: ShellContext, commerce: Commerce): ShellResult {
+  const scenarioView = runEvidence(context, "siem", name);
+  if (scenarioView) return scenarioView;
   const run = name ? SEARCHES[name] : undefined;
-  if (!run) return { output: err(`siem: unknown saved search "${name ?? ""}"`, `Saved searches: ${Object.keys(SEARCHES).join(", ")}`) };
+  if (!run) return { output: err(`siem: unknown saved search "${name ?? ""}"`, `Saved searches: ${viewNames(context, "siem", Object.keys(SEARCHES)).join(", ")}`) };
   return { output: run(context, commerce) };
 }
 
+const RESOLVE_USAGE = 'usage: siem resolve <alert-id> --disposition benign|false-positive|true-positive [--contained-by <waf-rule-id>] [--note "why"]';
+
 function resolve(args: readonly string[], context: ShellContext, commerce: Commerce): ShellResult {
   const { value: disposition, rest: afterDisposition } = takeFlag(args, "--disposition", "-d");
-  const { value: note, rest } = takeFlag(afterDisposition, "--note", "-m");
+  const { value: containedBy, rest: afterContainedBy } = takeFlag(afterDisposition, "--contained-by");
+  const { value: note, rest } = takeFlag(afterContainedBy, "--note", "-m");
   const [id] = rest;
-  if (!id || !disposition) return { output: err('usage: siem resolve <alert-id> --disposition benign|false-positive|true-positive [--note "why"]') };
+  if (!id || !disposition || (containedBy === undefined && args.includes("--contained-by"))) return { output: err(RESOLVE_USAGE) };
   if (!isDisposition(disposition)) return { output: err(`siem: invalid disposition "${disposition}" (benign, false-positive, true-positive)`) };
   const alert = findAlert(commerce, id);
-  const result = resolveAlert(context.cluster, alert?.id ?? id, disposition, note ?? "no note", operatorName(context.role));
+  const result = resolveAlert(context.cluster, alert?.id ?? id, disposition, note ?? "no note", operatorName(context.role), containedBy);
   return applied("siem", result, (state) => {
     const lines = out(`${alert?.id ?? id} closed as ${DISPOSITIONS[disposition]} by ${operatorName(context.role)}.`);
+    if (containedBy !== undefined) {
+      const rule = state.commerce?.wafRules.find((candidate) => candidate.id === containedBy);
+      return [
+        ...lines,
+        ...out(`Containment recorded: ${containedBy} (${rule?.action ?? "?"}: ${rule?.expression ?? "?"}).`),
+        ...(alert?.autoContainAt !== null ? dim("SOAR auto-containment cancelled; the playbook's own block did not run.") : []),
+      ];
+    }
+    if (disposition === "true-positive" && alert?.containTopIps === 0) return [...lines, ...dim("This alert has no SOAR containment playbook; nothing was blocked.")];
     if (disposition === "true-positive") {
       const rule = state.commerce?.wafRules.at(-1);
       return [...lines, ...out(`SOAR playbook auto-contain ran: rule ${rule?.id ?? "?"} blocks the top ${alert?.containTopIps ?? 0} source IPs on /checkout.`)];
@@ -152,7 +168,7 @@ function resolve(args: readonly string[], context: ShellContext, commerce: Comme
 
 export const siem = commerceCommand({
   name: "siem",
-  usage: 'siem alerts | show <id> | search <saved-search> | resolve <id> --disposition benign|false-positive|true-positive [--note "why"]',
+  usage: 'siem alerts | show <id> | search <saved-search> | resolve <id> --disposition benign|false-positive|true-positive [--contained-by <rule-id>] [--note "why"]',
   summary: "SIEM alerts, saved searches and triage",
   roles: ["security"],
   refuse: (_args, { role }) => ssoRefusal("siem", "sec-soc", role),
@@ -172,12 +188,14 @@ export const siem = commerceCommand({
         return { output: err(`siem: unknown command "${sub}"`, "Commands: alerts, show, search, resolve") };
     }
   },
-  complete(args, _partial, _context, commerce) {
+  complete(args, _partial, context, commerce) {
     if (args.length === 0) return ["alerts", "show", "search", "resolve"];
     if (args.length === 1 && (args[0] === "show" || args[0] === "resolve")) return commerce.alerts.map((alert) => alert.id);
-    if (args.length === 1 && args[0] === "search") return Object.keys(SEARCHES);
+    if (args.length === 1 && args[0] === "search") return viewNames(context, "siem", Object.keys(SEARCHES));
     if (args[0] === "resolve" && args.at(-1) === "--disposition") return Object.keys(DISPOSITIONS);
+    if (args[0] === "resolve" && args.at(-1) === "--contained-by") return commerce.wafRules.map((rule) => rule.id);
     if (args[0] === "resolve" && args.length === 2) return ["--disposition"];
+    if (args[0] === "resolve" && args.at(-1) === "true-positive") return ["--contained-by", "--note"];
     return [];
   },
 });

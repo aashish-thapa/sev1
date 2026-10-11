@@ -80,7 +80,7 @@ function standingOf(progress: Progress): Standing {
 export class AccountService {
   private readonly store: AccountStore;
   private readonly now: Clock;
-  /** Prices solutions bought in a synced save; without it, purchases are refused. */
+  /** Caps incident payouts and prices solutions in a synced save; without it, both are refused. */
   private readonly tierOf: TierOf | undefined;
   /** What companies are waiting for from or owe each player; without it, company money in a save is refused. */
   private readonly bank: CompanyBank | undefined;

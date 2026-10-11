@@ -48,17 +48,42 @@ export type PolicySource =
 
 export type PlatformId = "web" | "ios" | "android";
 
+/**
+ * When a build's defect fires: always, while a flag is on (or off), while a remote-config key holds one
+ * value, while a comma-separated remote-config list lacks one entry, or only while every trigger in `all` holds.
+ */
+export type DefectTrigger =
+  | "always"
+  | { readonly flag: string; readonly failsWhenOn: boolean }
+  | { readonly remoteConfig: string; readonly failsWhen: string }
+  | { readonly remoteConfig: string; readonly failsWithout: string }
+  | { readonly all: readonly DefectTrigger[] };
+
+/** A bug shipped in a client build that fails some of its checkouts. */
+export type ClientDefect = {
+  readonly trigger: DefectTrigger;
+  /** Share of this build's checkouts that fail while the defect fires. */
+  readonly failShare: number;
+  /** "server": checkout-api answers the bad request with a 5xx. "client": the checkout dies in the app or browser, before any request. */
+  readonly where: "server" | "client";
+  /** What the failure says where it surfaces (console, crash report, checkout-api log). */
+  readonly message: string;
+};
+
 export type ClientBuild = {
   readonly version: string;
   readonly userAgent: string;
   /** How long the client waits for POST /checkout before it gives up (and, if it retries, retries). */
   readonly timeoutMs: number;
   readonly retry: PolicySource;
+  readonly defects?: readonly ClientDefect[];
 };
 
 export type Rollout =
   | { readonly kind: "instant" }
-  | { readonly kind: "phased"; readonly day: number; readonly isPaused: boolean; readonly adoptionPerSecond: number };
+  | { readonly kind: "phased"; readonly day: number; readonly isPaused: boolean; readonly adoptionPerSecond: number }
+  /** A web build a service worker keeps serving from its precache; tabs move to `current` only while the kill-switch flag is on. */
+  | { readonly kind: "service-worker"; readonly killSwitchFlag: string; readonly adoptionPerSecond: number };
 
 export type Platform = {
   readonly id: PlatformId;
@@ -94,6 +119,76 @@ export type WafRule = {
   readonly createdBy: string;
   /** Share of legitimate checkout customers whose requests this rule stops. */
   readonly customerShare: number;
+  /** Share of attack traffic this rule stops; absent stops none. */
+  readonly attackShare?: number;
+};
+
+/** A block of attacker addresses inside one network. */
+export type AttackRange = {
+  readonly cidr: string;
+  readonly asn: number;
+  readonly network: string;
+  readonly ips: number;
+};
+
+export type AttackSources =
+  | { readonly kind: "ranges"; readonly ranges: readonly AttackRange[] }
+  /** Spread across residential ISPs' customer addresses, so no range or ASN singles them out. */
+  | { readonly kind: "residential-proxies"; readonly ips: number };
+
+/** Hostile traffic at the edge. Individual addresses derive from the sources and a rank, never stored one by one. */
+export type Attack = {
+  readonly label: string;
+  /** The path it hits, such as "/checkout" or "/session". */
+  readonly path: string;
+  readonly requestsPerSecond: number;
+  readonly growthPerSecond: number;
+  readonly sources: AttackSources;
+  /** The TLS client fingerprint every attacking connection shares. */
+  readonly ja4: string;
+  readonly userAgent: string;
+};
+
+export type FraudModelVersion = {
+  readonly version: string;
+  readonly deployedAt: number;
+  readonly note: string;
+  /** Share of good customers this version declines. */
+  readonly falseDeclineShare: number;
+  /** Share of fraudulent checkouts this version declines. */
+  readonly catchShare: number;
+};
+
+/** One model input, refreshed by a pipeline. */
+export type FraudFeature = {
+  readonly name: string;
+  readonly pipeline: string;
+  readonly lastSuccessAt: number;
+  /** A refresh in flight; null when none is running. */
+  readonly refresh: { readonly startedAt: number; readonly secondsLeft: number } | null;
+};
+
+/** The fraud scorer in front of the gateway: a decline is a 402 before any charge. */
+export type FraudScoring = {
+  readonly model: string;
+  readonly versions: readonly FraudModelVersion[];
+  /** `version` of the model serving now. */
+  readonly active: string;
+  /** Scores at or above it are declined. */
+  readonly threshold: number;
+  /** Where the threshold was tuned to sit. */
+  readonly tunedThreshold: number;
+  readonly mode: "enforce" | "fail-open";
+  readonly features: readonly FraudFeature[];
+  /** Extra share of good customers declined while a feature is stale. */
+  readonly staleFeatureDeclineShare: number;
+  readonly fraudAttemptsPerSecond: number;
+};
+
+/** App builds below the remote-config minimum get a blocking update screen and can't check out. */
+export type UpdateWall = {
+  /** The remote-config key naming the minimum supported version. */
+  readonly configKey: string;
 };
 
 export type AlertDisposition = "benign" | "false-positive" | "true-positive";
@@ -140,6 +235,8 @@ export type Ledger = {
   readonly minutes: readonly MinuteBucket[];
   readonly refundedCaptures: number;
   readonly refundBatches: readonly RefundBatch[];
+  /** Charges captured for fraudsters; absent where no fraud is modelled. */
+  readonly fraudulentCaptures?: number;
 };
 
 /** What the last second looked like from outside the cluster. */
@@ -162,6 +259,9 @@ export type Commerce = {
   readonly alerts: readonly SiemAlert[];
   readonly ledger: Ledger;
   readonly pulse: Pulse;
+  readonly attack?: Attack;
+  readonly fraud?: FraudScoring;
+  readonly updateWall?: UpdateWall;
 };
 
 export function latestChange<Value>(history: History<Value>): ConfigChange<Value> {

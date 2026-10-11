@@ -6,7 +6,8 @@ import { checkoutPoolLeak } from "./scenarios/checkout-pool-leak.ts";
 import { completeLine, runLine } from "./shell/shell.ts";
 import { unsafeRetryShare } from "./sim/clients.ts";
 import { blockedShare } from "./sim/edge.ts";
-import type { Commerce } from "./sim/commerce.ts";
+import type { Commerce, WafRule } from "./sim/commerce.ts";
+import { customerLossRate } from "./sim/commerce-step.ts";
 
 function play(seconds: number, incident: Incident) {
   const notices: IncidentNotice[] = [];
@@ -80,7 +81,7 @@ describe("checkout meltdown", () => {
     expect(incident.cluster.errorRate).toBeGreaterThan(0.4);
     expect(commerceOf(incident).gateway.timeoutShare).toBe(1);
     expect(scenario.isRootCauseFixed(incident.cluster)).toBe(false);
-    expect(declareResolved(incident).notice?.kind).toBe("refused");
+    expect(declareResolved(incident, scenario).notice?.kind).toBe("refused");
   });
 
   it("stopping the client retries without a rollback leaves pods stranded on the leaking build", () => {
@@ -91,7 +92,7 @@ describe("checkout meltdown", () => {
     expect(commerceOf(incident).gateway.timeoutShare).toBe(0);
     expect(incident.cluster.deployments[0].pods.some((pod) => pod.leaked >= 20)).toBe(true);
     expect(incident.cluster.errorRate).toBeGreaterThan(0.3);
-    expect(declareResolved(incident).notice?.kind).toBe("refused");
+    expect(declareResolved(incident, scenario).notice?.kind).toBe("refused");
     expect(scenario.isRootCauseFixed(incident.cluster)).toBe(false);
   });
 
@@ -102,7 +103,7 @@ describe("checkout meltdown", () => {
 
     expect(text("data", "reconcile preview", incident)).toContain("No new orphaned captures");
     incident = as("data", "reconcile submit", incident);
-    const declared = declareResolved(incident);
+    const declared = declareResolved(incident, scenario);
     expect(declared.notice).toBeUndefined();
     const { incident: closed, notices } = play(700, declared.incident);
     expect(notices.map((notice) => notice.kind)).toEqual(["closed"]);
@@ -116,6 +117,24 @@ describe("checkout meltdown", () => {
     const left = playTo(200, teamPlay());
     const right = playTo(200, teamPlay());
     expect(left.cluster).toEqual(right.cluster);
+  });
+
+  it("counts no customers lost on a calm day, and every customer the WAF turns away", () => {
+    const opened = commerceOf(openIncident(scenario));
+    const calm: Commerce = { ...opened, wafRules: [], pulse: { ...opened.pulse, checkoutFailureRate: 0 } };
+    expect(customerLossRate(calm, 0)).toBe(0);
+
+    const rule: WafRule = { id: "r-0001", action: "block", expression: "ip.src in $top500", createdAt: 0, createdBy: "test", customerShare: 0.4 };
+    expect(customerLossRate({ ...calm, wafRules: [rule] }, 0)).toBeCloseTo(0.4);
+    expect(customerLossRate(opened, 0)).toBeGreaterThan(0.5);
+  });
+
+  // Exact to the last bit: rejection and decline shares this scenario never sets must not move the storm.
+  it("plays out the same storm whatever share seams other scenarios use", () => {
+    const correct = playTo(900, teamPlay());
+    expect(correct.cluster.failedCheckouts).toBe(18454.943714687633);
+    expect(commerceOf(correct).ledger.orphanedCaptures).toBe(39042.050289087696);
+    expect(commerceOf(correct).ledger.paidOrders).toBe(50334.856835737286);
   });
 
   it("blocking the top talkers looks good on the 5xx graph but turns customers away", () => {

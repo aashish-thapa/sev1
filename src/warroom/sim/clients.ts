@@ -6,7 +6,10 @@ import {
   isRetryPolicyName,
   latestChange,
   type ClientBuild,
+  type ClientDefect,
   type Commerce,
+  type ConfigChange,
+  type DefectTrigger,
   type PlatformId,
   type PolicySource,
   type RetryPolicyName,
@@ -42,6 +45,8 @@ export type ClientSegment = {
   readonly timeoutMs: number;
   readonly share: number;
   readonly mix: PolicyMix;
+  /** The bugs shipped in this segment's build. */
+  readonly defects: readonly ClientDefect[];
 };
 
 function expectedRetries(policy: RetryPolicy, failure: number): number {
@@ -82,8 +87,13 @@ export function unsafeRetryWeight(mix: PolicyMix): number {
   return mix.reduce((sum, part) => sum + (RETRY_POLICIES[part.policy].sendsIdempotencyKey ? 0 : part.weight), 0);
 }
 
+/** How far a change has spread through clients `elapsed` seconds after it was made, 0..1. */
+function propagation(elapsed: number, window: number): number {
+  return Math.min(1, Math.max(0, elapsed / window));
+}
+
 function propagated(previous: RetryPolicyName, current: RetryPolicyName, elapsed: number, window: number): PolicyMix {
-  const progress = Math.min(1, Math.max(0, elapsed / window));
+  const progress = propagation(elapsed, window);
   if (previous === current || progress >= 1) return [{ policy: current, weight: 1 }];
   return [
     { policy: previous, weight: 1 - progress },
@@ -116,6 +126,36 @@ export function policyMix(source: PolicySource, commerce: Commerce, t: number): 
   }
 }
 
+/** Share of clients holding a value `fires` matches, while the latest change spreads over `window` seconds. */
+export function firingShare<Value>(change: ConfigChange<Value>, t: number, window: number, fires: (value: Value) => boolean): number {
+  const before = fires(change.from);
+  const after = fires(change.to);
+  if (before === after) return after ? 1 : 0;
+  const progress = propagation(t - change.at, window);
+  return after ? progress : 1 - progress;
+}
+
+function listIncludes(list: string, entry: string): boolean {
+  return list.split(",").some((item) => item.trim() === entry);
+}
+
+/** Share of a build's clients on which a defect's trigger holds at `t`, counting clients that haven't picked up the last change. */
+export function triggerShare(trigger: DefectTrigger, commerce: Commerce, t: number): number {
+  if (trigger === "always") return 1;
+  // Each part's last change spreads on its own clock, so the parts are taken as independent.
+  if ("all" in trigger) return trigger.all.reduce((share, part) => share * triggerShare(part, commerce, t), 1);
+  if ("flag" in trigger) {
+    const flag = findFlag(commerce, trigger.flag);
+    // An unknown flag reads as off, as it does for retry policies.
+    if (!flag) return trigger.failsWhenOn ? 0 : 1;
+    return firingShare(latestChange(flag.history), t, FLAG_PROPAGATION_SECONDS, (on) => on === trigger.failsWhenOn);
+  }
+  const entry = findConfig(commerce, trigger.remoteConfig);
+  if (!entry) return 0;
+  const fires = "failsWithout" in trigger ? (value: string) => !listIncludes(value, trigger.failsWithout) : (value: string) => value === trigger.failsWhen;
+  return firingShare(latestChange(entry.history), t, REMOTE_CONFIG_PROPAGATION_SECONDS, fires);
+}
+
 export function segmentId(platform: PlatformId, build: ClientBuild): string {
   return `${platform}@${build.version}`;
 }
@@ -134,6 +174,7 @@ export function clientSegments(commerce: Commerce, t: number): readonly ClientSe
         timeoutMs: build.timeoutMs,
         share,
         mix: policyMix(build.retry, commerce, t),
+        defects: build.defects ?? [],
       }));
   });
 }

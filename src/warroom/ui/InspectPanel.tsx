@@ -2,6 +2,7 @@ import type { LogEvidenceItem, MetricEvidenceItem } from "../../domain/incident.
 import { FactsList } from "../../ui/evidence/FactsList.tsx";
 import { LogBlock } from "../../ui/evidence/LogBlock.tsx";
 import { MetricSparkline } from "../../ui/evidence/MetricSparkline.tsx";
+import { alertLabel, alertRate } from "../incident.ts";
 import { clockAt, type Scenario } from "../scenario.ts";
 import { revisionOf, type ClusterState, type LogEntry } from "../sim/model.ts";
 import type { NodeId } from "../health.ts";
@@ -70,8 +71,10 @@ function describeNode(node: NodeId, cluster: ClusterState, scenario: Scenario): 
     case "edge":
       return {
         title: "edge-lb",
-        subtitle: `${Math.round(cluster.errorRate * 100)}% of ${cluster.traffic.requestsPerSecond} req/s failing`,
+        subtitle: `${Math.round(cluster.errorRate * 100)}% of ${cluster.traffic.requestsPerSecond} req/s failing with 5xx`,
         metric: metric("checkout 5xx ratio", "%", cluster.series.errorRate.map((rate) => Math.round(rate * 1000) / 10)),
+        // 5xx can read 0% while the pager watches something else; show that too.
+        facts: scenario.alertMetric ? [{ key: alertLabel(scenario), value: `${Math.round(alertRate(scenario, cluster) * 100)}%` }] : undefined,
         log: logBlock("edge-lb access log", cluster.logs["edge-lb"], scenario),
         suggestions: ["kubectl get pods", "curl -s http://checkout-api:8080/actuator/health"],
       };

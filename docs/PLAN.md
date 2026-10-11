@@ -102,7 +102,7 @@ Everything runs on the **Cloudflare Workers Free** plan, with no idle sleep or c
 
 - **Anti-cheat.** Earnings become server-authoritative: the server decides payouts for incidents and card answers before any money can be spent in startup mode.
 - **Leaderboards.** Weekly, per role.
-- **More scenarios per role.** Content quality is the moat.
+- **More scenarios per role.** Content quality is the moat. Every role now has a War Room ladder, tiers 1–4, and 20 or more incident cards; next is a second incident per tier and more hard cards.
 - **Privacy-friendly analytics.**
 
 ## Pending: Pro subscription (real money, Stripe)

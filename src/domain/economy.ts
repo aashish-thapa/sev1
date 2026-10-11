@@ -4,6 +4,7 @@
  */
 import { z } from "zod";
 import type { Level } from "./career.ts";
+import type { Tier } from "./tier.ts";
 
 /**
  * Paid per minute of active play, by career level, at real time: an intern's $24/h up to staff's
@@ -16,10 +17,15 @@ export const CARD_BONUS_CENTS: Readonly<Record<1 | 2 | 3, number>> = { 1: 1_500,
 /** Practice pays a fraction of the rated bonus: it's learning, not the job. */
 export const PRACTICE_SHARE = 0.4;
 
-/** Each debrief point is worth this much, so a perfect 100 pays $600. */
-export const INCIDENT_CENTS_PER_POINT = 600;
+/** Each debrief point is worth this much, by tier: a perfect tier-1 run pays $600, a perfect tier-5 run $3,600. */
+export const INCIDENT_CENTS_PER_POINT_BY_TIER: Readonly<Record<Tier, number>> = { 1: 600, 2: 900, 3: 1_500, 4: 2_400, 5: 3_600 };
 /** Below this the fix did more harm than good (grade D): no bonus. */
 export const INCIDENT_MIN_POINTS = 35;
+
+/** The tier an incident pays at: never above what the player's level unlocks, so an Intern can't draw Staff pay from a meltdown room. */
+export function paidTier(tier: Tier, level: Level): Tier {
+  return Math.min(tier, level + 1) as Tier;
+}
 
 /** Fastest anyone can honestly read and answer a card, and close an incident; plausibility uses these. */
 export const MIN_SECONDS_PER_CARD = 4;
@@ -34,7 +40,7 @@ export const LEDGER_LIMIT = 200;
 export type Payment =
   | { readonly kind: "salary"; readonly ref: string; readonly minutes: number; readonly level: Level }
   | { readonly kind: "card"; readonly ref: string; readonly difficulty: 1 | 2 | 3; readonly mode: "rated" | "practice"; readonly title: string }
-  | { readonly kind: "incident"; readonly ref: string; readonly points: number; readonly title: string; readonly isTeam: boolean }
+  | { readonly kind: "incident"; readonly ref: string; readonly points: number; readonly tier: Tier; readonly title: string; readonly isTeam: boolean }
   /** A company paying you for a work day: the server booked it, the save claims it once (ref `payroll:<payoutId>`). */
   | { readonly kind: "payroll"; readonly ref: string; readonly amountCents: number; readonly workDay: number }
   /** Money an admin granted (test money): the server issued it, the save claims it once (ref `grant:<grantId>`). */
@@ -57,6 +63,12 @@ export const payRef = {
   /** One dividend a company booked for you as an investor. */
   dividend: (payoutId: string) => `dividend:${payoutId}`,
 } as const;
+
+/** The scenario an incident payout was for, read back from its `payRef.incident` ref; null for any other ref. */
+export function scenarioOfIncident(ref: string): string | null {
+  const match = /^incident:(.+):\d+$/.exec(ref);
+  return match ? match[1] : null;
+}
 
 const REASONS = ["salary", "card", "incident", "payroll", "grant", "dividend"] as const satisfies readonly Payment["kind"][];
 export type PayReason = (typeof REASONS)[number];
@@ -124,7 +136,7 @@ export function amountOf(payment: Payment): number {
       return payment.mode === "rated" ? full : Math.round(full * PRACTICE_SHARE);
     }
     case "incident":
-      return payment.points >= INCIDENT_MIN_POINTS ? Math.round(payment.points) * INCIDENT_CENTS_PER_POINT : 0;
+      return payment.points >= INCIDENT_MIN_POINTS ? Math.round(payment.points) * INCIDENT_CENTS_PER_POINT_BY_TIER[payment.tier] : 0;
     case "payroll":
     case "grant":
     case "dividend":

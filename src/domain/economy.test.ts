@@ -3,22 +3,28 @@ import {
   amountOf,
   CARD_BONUS_CENTS,
   emptyWallet,
-  INCIDENT_CENTS_PER_POINT,
+  INCIDENT_CENTS_PER_POINT_BY_TIER,
+  INCIDENT_MIN_POINTS,
   LEDGER_LIMIT,
+  paidTier,
   pay,
   payRef,
   SALARY_CENTS_PER_MINUTE,
+  scenarioOfIncident,
   type Wallet,
 } from "./economy.ts";
 import { isPlausibleProgress, isPlausibleWallet } from "./audit.ts";
 import { earn, emptyProgress, ProgressSchema } from "./progress.ts";
+import type { Tier } from "./tier.ts";
 
 const T0 = 1_760_000_000_000;
 let refCounter = 0;
 /** Each call is a distinct earning, as in play; reuse a returned value to model a retry. */
 const salary = () => ({ kind: "salary", ref: `salary:test:${(refCounter += 1)}`, minutes: 1, level: 2 }) as const;
 const ratedCard = () => ({ kind: "card", ref: `card:test:${(refCounter += 1)}`, difficulty: 2, mode: "rated", title: "Pool exhausted" }) as const;
-const incident = (points: number) => ({ kind: "incident", ref: `incident:test:${(refCounter += 1)}`, points, title: "Checkout meltdown", isTeam: false }) as const;
+const incident = (points: number, tier: Tier = 5) =>
+  ({ kind: "incident", ref: payRef.incident("checkout-meltdown", (refCounter += 1)), points, tier, title: "Checkout meltdown", isTeam: false }) as const;
+const TIERS = [1, 2, 3, 4, 5] as const;
 
 function payMany(wallet: Wallet, payments: readonly Parameters<typeof pay>[1][]): Wallet {
   return payments.reduce((current, payment, index) => pay(current, payment, T0 + index * 1000), wallet);
@@ -36,17 +42,33 @@ describe("pay rules", () => {
     expect(practice).toBeLessThan(CARD_BONUS_CENTS[2]);
   });
 
-  it("scales an incident bonus by points and pays nothing for a botched fix", () => {
-    expect(amountOf(incident(100))).toBe(100 * INCIDENT_CENTS_PER_POINT);
-    expect(amountOf(incident(60))).toBe(60 * INCIDENT_CENTS_PER_POINT);
-    expect(amountOf(incident(20))).toBe(0);
+  it("scales an incident bonus by points and by tier: a perfect tier 1 pays $600, a perfect tier 5 $3,600", () => {
+    expect(amountOf(incident(100, 1))).toBe(60_000);
+    expect(amountOf(incident(100, 5))).toBe(360_000);
+    expect(amountOf(incident(60, 3))).toBe(60 * INCIDENT_CENTS_PER_POINT_BY_TIER[3]);
+    const samePoints = TIERS.map((tier) => amountOf(incident(80, tier)));
+    expect(samePoints.every((cents, index) => index === 0 || cents > samePoints[index - 1])).toBe(true);
+  });
+
+  it("pays at most the tier the player's level unlocks", () => {
+    expect(paidTier(5, 0)).toBe(1);
+    expect(paidTier(5, 4)).toBe(5);
+    expect(paidTier(2, 4)).toBe(2);
+    expect(amountOf(incident(100, paidTier(5, 0)))).toBe(100 * INCIDENT_CENTS_PER_POINT_BY_TIER[1]);
+  });
+
+  it("pays nothing for a botched fix at any tier", () => {
+    for (const tier of TIERS) {
+      expect(amountOf(incident(INCIDENT_MIN_POINTS - 1, tier))).toBe(0);
+      expect(amountOf(incident(INCIDENT_MIN_POINTS, tier))).toBeGreaterThan(0);
+    }
   });
 });
 
 describe("wallet", () => {
   it("credits the balance, the per-reason totals and the ledger together", () => {
     const wallet = payMany(emptyWallet(), [salary(), ratedCard(), incident(80)]);
-    expect(wallet.balanceCents).toBe(SALARY_CENTS_PER_MINUTE[2] + CARD_BONUS_CENTS[2] + 80 * INCIDENT_CENTS_PER_POINT);
+    expect(wallet.balanceCents).toBe(SALARY_CENTS_PER_MINUTE[2] + CARD_BONUS_CENTS[2] + 80 * INCIDENT_CENTS_PER_POINT_BY_TIER[5]);
     expect(wallet.paidUnits).toEqual({ salary: 1, card: 1, incident: 1, payroll: 0, grant: 0, dividend: 0 });
     expect(wallet.ledger.map((entry) => entry.reason)).toEqual(["salary", "card", "incident"]);
     expect(wallet.ledger.every((entry) => Number.isInteger(entry.amountCents))).toBe(true);
@@ -79,10 +101,12 @@ describe("wallet", () => {
 
 describe("isPlausibleWallet", () => {
   const start = payMany(emptyWallet(), [salary(), ratedCard()]);
+  /** Tier caps on incident lines are audit.test.ts's subject; here every incident line counts as fairly paid. */
+  const anyIncidentPay = () => true;
 
   it("accepts honest play", () => {
     const later = payMany(start, [salary(), salary(), ratedCard(), ratedCard(), incident(90)]);
-    expect(isPlausibleWallet(start, later, 3 * 60)).toBe(true);
+    expect(isPlausibleWallet(start, later, 3 * 60, 4, anyIncidentPay)).toBe(true);
   });
 
   it("accepts a ledger truncated by the cap when the totals still add up", () => {
@@ -93,11 +117,6 @@ describe("isPlausibleWallet", () => {
   it("rejects more salary minutes than time passed", () => {
     const later = payMany(start, Array.from({ length: 30 }, () => salary()));
     expect(isPlausibleWallet(start, later, 5 * 60)).toBe(false);
-  });
-
-  it("rejects more incidents than could be closed in the time", () => {
-    const later = payMany(start, Array.from({ length: 10 }, () => incident(100)));
-    expect(isPlausibleWallet(start, later, 60)).toBe(false);
   });
 
   it("rejects a balance edited without earnings behind it", () => {
@@ -150,5 +169,10 @@ describe("payRef", () => {
     expect(payRef.salary(minuteStart)).not.toBe(payRef.salary(minuteStart + 60_000));
     expect(payRef.card("db-pool-1", T0)).not.toBe(payRef.card("db-pool-1", T0 + 1));
     expect(payRef.incident("checkout-meltdown", T0)).toBe("incident:checkout-meltdown:" + T0);
+  });
+
+  it("reads the scenario back out of an incident ref, and nothing out of any other", () => {
+    expect(scenarioOfIncident(payRef.incident("checkout-meltdown", T0))).toBe("checkout-meltdown");
+    expect(scenarioOfIncident(payRef.card("checkout-meltdown", T0))).toBeNull();
   });
 });

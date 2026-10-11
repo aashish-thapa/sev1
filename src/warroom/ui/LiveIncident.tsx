@@ -7,7 +7,7 @@ import type { Role } from "../../domain/incident.ts";
 import type { Incident } from "../incident.ts";
 import { clockAt, type Scenario } from "../scenario.ts";
 import type { WallScreen } from "../floor/office.ts";
-import { calmView, panicOf } from "./mood.ts";
+import { calmScenario, calmView, panicOf } from "./mood.ts";
 import { IncidentHud } from "./IncidentHud.tsx";
 import { InspectPanel } from "./InspectPanel.tsx";
 import { LaptopScreen, type LaptopTab } from "./LaptopScreen.tsx";
@@ -70,6 +70,7 @@ export function LiveIncident({ scenario, role, isPaged, onPage, onClosed, onLeav
   const { incident: liveIncident, terminal, history, comms: liveComms, run, declare, complete } = feed;
   // Until the pager goes off the floor shows a healthy system and the channel is quiet.
   const incident = useMemo(() => (isPaged ? liveIncident : { ...liveIncident, cluster: calmView(liveIncident.cluster) }), [isPaged, liveIncident]);
+  const watched = useMemo(() => (isPaged ? scenario : calmScenario(scenario)), [isPaged, scenario]);
   const comms = isPaged ? liveComms : [];
   const [selected, setSelected] = useState<NodeId | null>(null);
   const [draft, setDraft] = useState("");
@@ -90,9 +91,9 @@ export function LiveIncident({ scenario, role, isPaged, onPage, onClosed, onLeav
     onComplete: complete,
     isDisabled: phase.name === "monitoring",
     prompt: promptFor(role),
-    suggestions: suggestionsFor(role, deploymentName),
+    suggestions: suggestionsFor(scenario, role, deploymentName),
   };
-  const hud = <IncidentHud incident={incident} scenario={scenario} isPaged={isPaged} onPage={onPage} onDeclare={declare} onLeave={onLeave} />;
+  const hud = <IncidentHud incident={incident} scenario={watched} isPaged={isPaged} onPage={onPage} onDeclare={declare} onLeave={onLeave} />;
 
   if (!isImmersive) {
     return (
@@ -101,8 +102,8 @@ export function LiveIncident({ scenario, role, isPaged, onPage, onClosed, onLeav
         <div className="warroom__grid">
           <div className="warroom__left">
             <p className="warroom__hint">This device can’t draw the 3D office, so you get the map.</p>
-            <ServiceMap cluster={cluster} externals={scenario.externals} selected={selected} onSelect={setSelected} />
-            {selected && <InspectPanel node={selected} cluster={cluster} scenario={scenario} onSuggest={setDraft} onClose={() => setSelected(null)} />}
+            <ServiceMap cluster={cluster} scenario={watched} selected={selected} onSelect={setSelected} />
+            {selected && <InspectPanel node={selected} cluster={cluster} scenario={watched} onSuggest={setDraft} onClose={() => setSelected(null)} />}
             <Comms comms={comms} scenario={scenario} />
           </div>
           <Terminal {...terminalProps} />
@@ -114,7 +115,7 @@ export function LiveIncident({ scenario, role, isPaged, onPage, onClosed, onLeav
 
   return (
     <Immersive
-      scenario={scenario}
+      scenario={watched}
       incident={incident}
       comms={comms}
       hud={hud}
@@ -184,7 +185,7 @@ function Immersive({ scenario, incident, comms, hud, selected, onSelect, termina
 
   useEffect(() => () => window.clearTimeout(settleTimer.current), []);
 
-  useSoundscape(engine, { panic: panicOf(incident), zone: where.zone, isLaptopOpen, rackProximity: where.rackProximity });
+  useSoundscape(engine, { panic: panicOf(incident, scenario), zone: where.zone, isLaptopOpen, rackProximity: where.rackProximity });
 
   // The page itself: phone buzzing on the desk, then the robot voice reading the alert.
   useEffect(() => {
@@ -233,7 +234,7 @@ function Immersive({ scenario, incident, comms, hud, selected, onSelect, termina
           comms={comms}
           isLaptopOpen={isLaptopOpen}
           isOverlayOpen={overlay !== null && overlay !== undefined && overlay !== false}
-          panic={panicOf(incident)}
+          panic={panicOf(incident, scenario)}
           laptopScreenRef={screenRef}
           onInspect={inspect}
           onUseScreen={onUseScreen}

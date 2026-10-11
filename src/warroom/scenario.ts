@@ -1,5 +1,8 @@
 import type { IncidentCard, Role } from "../domain/incident.ts";
+import type { Tier } from "../domain/tier.ts";
 import type { ClusterState } from "./sim/model.ts";
+
+export type { Tier };
 
 export type CommsMessage = {
   readonly at: number;
@@ -44,12 +47,25 @@ export type Objective = {
 /** One move of a worked solution: the exact command to run, and in one line why. */
 export type SolutionStep = { readonly command: string; readonly why: string };
 
+export type EvidenceTool = "siem" | "rum" | "warehouse" | "releases" | "models";
+
 /**
- * How hard an incident is, matched to the career level that unlocks it (tier = level + 1):
- * 1 guided, one cause, one fix · 2 diagnose · 3 a plausible fix backfires ·
- * 4 the usual fix does nothing · 5 cloud-scale or cross-team.
+ * A saved view a scenario adds to one of the role tools, listed beside the tool's own
+ * (`siem search <name>`, `rum <name>`, `warehouse run <name>`, `releases <name>`). It lives on
+ * the scenario, not in state, so it costs nothing on the wire.
  */
-export type Tier = 1 | 2 | 3 | 4 | 5;
+export type Evidence = {
+  readonly tool: EvidenceTool;
+  readonly name: string;
+  readonly description: string;
+  readonly run: (state: ClusterState) => readonly string[];
+};
+
+/** What the pager watches when it isn't checkout 5xx: a 0–1 share whose healthy baseline is 0. */
+export type AlertMetric = {
+  readonly label: string;
+  readonly rate: (state: ClusterState) => number;
+};
 
 /** One playable live incident: a starting cluster, what "fixed" means, and the story around it. */
 export type Scenario = {
@@ -70,13 +86,22 @@ export type Scenario = {
   readonly seed: string;
   readonly initialState: () => ClusterState;
   readonly isRootCauseFixed: (state: ClusterState) => boolean;
+  /**
+   * The number the incident pages, resolves and reopens on, in place of checkout 5xx. Set it when the
+   * fix doesn't show in 5xx (customers blocked or declined before the cluster), or the pager lies.
+   */
+  readonly alertMetric?: AlertMetric;
+  /** Saved views this incident adds to the role tools; one named like a built-in view replaces it. */
+  readonly evidence?: readonly Evidence[];
+  /** Starter chips per role; a role without an entry gets neutral look-around commands. */
+  readonly suggestions?: Partial<Record<Role, readonly string[]>>;
   /** Lost checkouts that cost one debrief point; scales scoring to the incident's traffic and unavoidable damage. */
   readonly lostCheckoutsPerPoint?: number;
   /** Per-role outcomes beyond the root cause; each unmet one costs points in the debrief. */
   readonly objectives?: (state: ClusterState) => readonly Objective[];
   /**
-   * What colleagues do when a solo player can't cover every role: each step is the correct
-   * move for one role, made by a named teammate at a realistic moment. The player's own role is never automated.
+   * What colleagues do for the roles no player covers, solo or in a room: each step is the correct
+   * move for one role, made by a named teammate at a realistic moment. A role a player holds is never automated.
    */
   readonly teamPlaybook?: readonly TeamPlay[];
   readonly externals: readonly ExternalService[];

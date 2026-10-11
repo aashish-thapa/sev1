@@ -14,6 +14,7 @@ import {
 import { advance, debrief, declareResolved, openIncident, type Incident } from "../src/warroom/incident.ts";
 import type { CommsMessage, Scenario } from "../src/warroom/scenario.ts";
 import { runLine } from "../src/warroom/shell/shell.ts";
+import { applyTeamwork } from "../src/warroom/teamwork.ts";
 import type { Logger } from "./log.ts";
 import { chatComms, declaredComms, joinedComms, leftComms, noticeComms } from "./notices.ts";
 import type { Paging } from "./paging.ts";
@@ -79,6 +80,8 @@ export class Room {
   readonly scenario: Scenario;
   private incident: Incident;
   private comms: readonly CommsMessage[];
+  /** Playbook steps colleagues have already played for roles nobody in the room holds. */
+  private teamworkDone: ReadonlySet<number> = new Set();
   private readonly seats = new Map<string, Seat>();
   private stopTicker: StopTicker | null = null;
   /** Quiet rooms show a calm floor and run no clock until the pager goes off. */
@@ -218,7 +221,7 @@ export class Room {
       this.send(seat, { type: "error", code: "incident_not_live", message: "The incident is already marked resolved." });
       return;
     }
-    const { incident, notice } = declareResolved(this.incident);
+    const { incident, notice } = declareResolved(this.incident, this.scenario);
     if (notice) {
       this.post(noticeComms(notice, incident.cluster.t));
       return;
@@ -261,11 +264,16 @@ export class Room {
 
   private tick() {
     const previousT = this.incident.cluster.t;
-    const { incident, notice } = advance(this.incident, this.scenario);
+    const { incident: advanced, notice } = advance(this.incident, this.scenario);
+    // A held seat stays in `seats` until it expires, so a colleague never takes a reconnecting player's role.
+    const covered = new Set([...this.seats.values()].map((seat) => seat.role));
+    const { incident, done, messages } = applyTeamwork(advanced, this.scenario, covered, this.teamworkDone);
+    this.teamworkDone = done;
     this.commit(incident);
     const t = incident.cluster.t;
     for (const message of this.scenario.comms) if (message.at > previousT && message.at <= t) this.post(message);
     if (notice) this.post(noticeComms(notice, t));
+    for (const message of messages) this.post(message);
     if (notice?.kind === "closed") {
       this.broadcast(this.closedMessage());
       this.logger("info", "incident_closed", { room: this.code, t, reopens: incident.reopenCount });

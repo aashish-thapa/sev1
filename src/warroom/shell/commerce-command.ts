@@ -1,4 +1,4 @@
-import { clockAt } from "../scenario.ts";
+import { clockAt, type Evidence, type EvidenceTool } from "../scenario.ts";
 import type { CommerceResult } from "../sim/commerce-actions.ts";
 import type { Commerce } from "../sim/commerce.ts";
 import type { ClusterState } from "../sim/model.ts";
@@ -21,6 +21,22 @@ export function commerceCommand(spec: CommerceCommandSpec): Command {
     run: (args, context) => (context.cluster.commerce ? run(args, context, context.cluster.commerce) : { output: err(`bash: ${spec.name}: command not found`) }),
     complete: (args, partial, context) => (context.cluster.commerce && complete ? complete(args, partial, context, context.cluster.commerce) : []),
   };
+}
+
+/** The scenario's own saved views for `tool`. */
+export function evidenceFor(context: ShellContext, tool: EvidenceTool): readonly Evidence[] {
+  return context.scenario.evidence?.filter((entry) => entry.tool === tool) ?? [];
+}
+
+/** Runs the scenario's view called `name`, if it has one; tools ask before their built-ins, so a scenario can replace one. */
+export function runEvidence(context: ShellContext, tool: EvidenceTool, name: string | undefined): ShellResult | null {
+  const entry = evidenceFor(context, tool).find((candidate) => candidate.name === name);
+  return entry ? { output: out(...entry.run(context.cluster)) } : null;
+}
+
+/** A tool's built-in view names followed by the scenario's own, each once. */
+export function viewNames(context: ShellContext, tool: EvidenceTool, builtIns: readonly string[]): string[] {
+  return [...new Set([...builtIns, ...evidenceFor(context, tool).map((entry) => entry.name)])];
 }
 
 export function applied(tool: string, result: CommerceResult, render: (state: ClusterState) => readonly OutputLine[]): ShellResult {

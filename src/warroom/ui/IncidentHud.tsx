@@ -1,8 +1,9 @@
-import type { Incident } from "../incident.ts";
+import { alertLabel, alertRate, type Incident } from "../incident.ts";
 import { SoundToggle } from "../../ui/SoundToggle.tsx";
 import { useCareer } from "../../app/career-context.ts";
 import { WalletChip } from "../../ui/WalletChip.tsx";
 import { clockAt, type Scenario } from "../scenario.ts";
+import { customerLossRate } from "../sim/commerce-step.ts";
 
 const countFormat = new Intl.NumberFormat("en");
 
@@ -12,7 +13,9 @@ const SLA_BUDGET = 9_000;
 function SlaClock({ incident }: { incident: Incident }) {
   const { cluster, phase } = incident;
   const remaining = SLA_BUDGET - cluster.failedCheckouts;
-  const failingPerSecond = cluster.traffic.requestsPerSecond * cluster.errorRate * cluster.traffic.checkoutShare;
+  // What failedCheckouts counts: customers lost where commerce runs, failed checkout requests elsewhere.
+  const lostShare = cluster.commerce ? customerLossRate(cluster.commerce, cluster.t) : cluster.errorRate;
+  const failingPerSecond = cluster.traffic.requestsPerSecond * cluster.traffic.checkoutShare * lostShare;
   if (phase.name !== "live") return null;
   if (remaining <= 0) {
     return (
@@ -47,7 +50,7 @@ type Props = {
 export function IncidentHud({ incident, scenario, isPaged, onPage, onDeclare, onLeave }: Props) {
   const career = useCareer();
   const { cluster, phase } = incident;
-  const errorPercent = Math.round(cluster.errorRate * 100);
+  const alertPercent = Math.round(alertRate(scenario, cluster) * 100);
   if (!isPaged) {
     return (
       <header className="hud">
@@ -85,9 +88,9 @@ export function IncidentHud({ incident, scenario, isPaged, onPage, onDeclare, on
         <p className="hud__clock">{clockAt(scenario, cluster.t)}</p>
       </div>
       <dl className="hud__stats">
-        <div data-tone={errorPercent >= 5 ? "critical" : errorPercent >= 1 ? "warn" : "ok"}>
-          <dt>checkout 5xx</dt>
-          <dd>{errorPercent}%</dd>
+        <div data-tone={alertPercent >= 5 ? "critical" : alertPercent >= 1 ? "warn" : "ok"}>
+          <dt>{alertLabel(scenario)}</dt>
+          <dd>{alertPercent}%</dd>
         </div>
         <div>
           <dt>failed checkouts</dt>

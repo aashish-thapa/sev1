@@ -157,7 +157,7 @@ export function WarRoomView({ scenario, role, onFinish, onBuySolution, hints, on
         </div>
       </dl>
       <ul className="debrief__notes">
-        <li>{result.isRootCauseFixed ? "✓ Root cause removed from production." : "✗ The faulty build was still running when the incident closed."}</li>
+        <li>{result.isRootCauseFixed ? "✓ Root cause removed from production." : "✗ The root cause was still in production when the incident closed."}</li>
         <li>{result.isPostmortemCorrect ? "✓ Postmortem named the real cause." : "✗ Postmortem named the wrong cause."}</li>
         {result.objectives?.map((objective) => (
           <li key={objective.label}>

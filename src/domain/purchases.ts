@@ -1,18 +1,17 @@
 /**
- * What earned money buys. Today: the step-by-step solution to a live incident — priced so it
- * always costs more than the incident pays, and dearer the harder the incident and the more
- * senior you are. A bought solution makes the run assisted: no bonus, no experience.
+ * What earned money buys. Today: the step-by-step solution to a live incident, dearer the harder
+ * the incident and the more senior you are. A bought solution makes the run assisted: no bonus,
+ * no experience.
  */
 import type { Level } from "./career.ts";
 import { LEDGER_LIMIT, pay, payRef, type LedgerEntry, type SpendReason, type Wallet } from "./economy.ts";
-
-export type SolutionTier = 1 | 2 | 3 | 4 | 5;
+import type { Tier } from "./tier.ts";
 
 /** Base price by incident tier, before seniority. A tier-1 guided incident is the cheapest lesson. */
-export const SOLUTION_BASE_CENTS: Readonly<Record<SolutionTier, number>> = { 1: 5_000, 2: 15_000, 3: 40_000, 4: 90_000, 5: 180_000 };
+export const SOLUTION_BASE_CENTS: Readonly<Record<Tier, number>> = { 1: 5_000, 2: 15_000, 3: 40_000, 4: 90_000, 5: 180_000 };
 
 /** Seniors are expected to know: each level adds half the base again (Staff pays 3×). */
-export function solutionPriceCents(tier: SolutionTier, level: Level): number {
+export function solutionPriceCents(tier: Tier, level: Level): number {
   return (SOLUTION_BASE_CENTS[tier] * (2 + level)) / 2;
 }
 
@@ -20,7 +19,7 @@ export type SolutionPurchase = {
   readonly kind: "solution";
   readonly scenarioId: string;
   readonly runStartedAt: number;
-  readonly tier: SolutionTier;
+  readonly tier: Tier;
   readonly level: Level;
   readonly title: string;
 };

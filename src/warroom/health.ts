@@ -1,3 +1,5 @@
+import { alertRate } from "./incident.ts";
+import type { Scenario } from "./scenario.ts";
 import { openConnections } from "./sim/engine.ts";
 import { isLive, type ClusterState, type Pod } from "./sim/model.ts";
 
@@ -27,8 +29,10 @@ export function deploymentHealth(pods: readonly Pod[], poolSize: number): Health
   return health.length > 0 && health.every((value) => value === "pending") ? "pending" : "ok";
 }
 
-export function edgeHealth(cluster: ClusterState): Health {
-  return cluster.errorRate > 0.05 ? "critical" : cluster.errorRate > 0.01 ? "warn" : "ok";
+/** Lit by the rate the pager watches, so a scenario paging on lost customers doesn't look healthy. */
+export function edgeHealth(cluster: ClusterState, scenario: Scenario): Health {
+  const rate = alertRate(scenario, cluster);
+  return rate > 0.05 ? "critical" : rate > 0.01 ? "warn" : "ok";
 }
 
 export function databaseHealth(cluster: ClusterState): Health {

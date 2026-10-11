@@ -1,10 +1,11 @@
-import type { Incident } from "../incident.ts";
+import { alertRate, type Incident } from "../incident.ts";
+import type { Scenario } from "../scenario.ts";
 import type { ClusterState } from "../sim/model.ts";
 
-/** How bad it feels, 0..1: the failure rate dominates; monitoring is a held breath. */
-export function panicOf(incident: Incident): number {
+/** How bad it feels, 0..1: the rate the pager watches dominates; monitoring is a held breath. */
+export function panicOf(incident: Incident, scenario: Scenario): number {
   if (incident.phase.name !== "live") return incident.phase.name === "monitoring" ? 0.1 : 0;
-  return Math.min(1, incident.cluster.errorRate * 1.25);
+  return Math.min(1, alertRate(scenario, incident.cluster) * 1.25);
 }
 
 /**
@@ -21,4 +22,9 @@ export function calmView(cluster: ClusterState): ClusterState {
     errorRate: 0,
     failedCheckouts: 0,
   };
+}
+
+/** Before anyone is paged nothing is watched, so the floor reads the calm view's quiet 5xx, not the scenario's own metric. */
+export function calmScenario(scenario: Scenario): Scenario {
+  return { ...scenario, alertMetric: undefined };
 }

@@ -1,11 +1,20 @@
 import { seededRandom } from "../../domain/random.ts";
+import type { Commerce } from "../sim/commerce.ts";
 import { podName, step } from "../sim/engine.ts";
-import { isLive, revisionOf, templateHash, type ClusterEvent, type ClusterState, type Deployment, type LogEntry, type Pod } from "../sim/model.ts";
+import { isLive, revisionOf, templateHash, type ClusterEvent, type ClusterState, type Deployment, type LogEntry, type Pod, type Traffic } from "../sim/model.ts";
 
 export const CHECKOUT = "checkout-api";
-const WARM_UP_SECONDS = 30;
 /** One pod's ceiling: three pods carry 300 rps with headroom, two shed some of it, one sheds most. */
 const POD_CAPACITY_RPS = 130;
+const TRAFFIC: Traffic = { requestsPerSecond: 300, checkoutShare: 0.4, connectionHoldSeconds: 0.015 };
+
+/**
+ * How the incident ran before the page: for how long, and the demand each second. A surge whose
+ * amplified retries outrun the gateway, while organic demand alone would not, leaves a storm that sustains itself.
+ */
+export type WarmUp = { readonly seconds: number; readonly requestsPerSecond: (second: number) => number };
+
+const STEADY_WARM_UP: WarmUp = { seconds: 30, requestsPerSecond: () => TRAFFIC.requestsPerSecond };
 
 type ClusterSetup = {
   /** Seeds the warm-up, so every player opens on the same logs and graphs. */
@@ -20,6 +29,10 @@ type ClusterSetup = {
   readonly podsStartedAgo?: number;
   readonly events?: readonly ClusterEvent[];
   readonly logs?: Readonly<Record<string, readonly LogEntry[]>>;
+  /** The clients, gateway and edge around the cluster (see `checkoutCommerce`); absent runs plain cluster physics. */
+  readonly commerce?: Commerce;
+  /** Defaults to 30 steady seconds at the cluster's 300 rps. */
+  readonly warmUp?: WarmUp;
 };
 
 /**
@@ -43,13 +56,14 @@ export function checkoutCluster(setup: ClusterSetup): ClusterState {
     connectionHistory: [],
   }));
 
+  const warmUp = setup.warmUp ?? STEADY_WARM_UP;
   let state: ClusterState = {
-    t: -WARM_UP_SECONDS,
+    t: -warmUp.seconds,
     deployments: [
       { name: CHECKOUT, replicas, poolSize: 20, podCapacityRps: POD_CAPACITY_RPS, revision: setup.revision, generation: 0, revisions: setup.revisions, pods },
     ],
     database: { name: "orders-db", host: "orders-db.internal", maxConnections: 100, reservedConnections: 3 },
-    traffic: { requestsPerSecond: 300, checkoutShare: 0.4, connectionHoldSeconds: 0.015 },
+    traffic: TRAFFIC,
     logs: setup.logs ?? {},
     events: setup.events ?? [],
     series: { errorRate: [], p99Ms: [], dbConnections: [] },
@@ -59,10 +73,13 @@ export function checkoutCluster(setup: ClusterSetup): ClusterState {
     crashLoopsCaused: 0,
     sessionsTerminated: 0,
     nameCounter: pods.length,
+    ...(setup.commerce ? { commerce: setup.commerce } : {}),
   };
   const random = seededRandom(`${setup.seed}:warm-up`);
-  for (let second = 0; second < WARM_UP_SECONDS; second += 1) state = step(state, random);
-  return { ...state, failedCheckouts: 0, crashLoopsCaused: 0 };
+  for (let second = 0; second < warmUp.seconds; second += 1) {
+    state = step({ ...state, traffic: { ...TRAFFIC, requestsPerSecond: warmUp.requestsPerSecond(second) } }, random);
+  }
+  return { ...state, traffic: TRAFFIC, failedCheckouts: 0, crashLoopsCaused: 0 };
 }
 
 /** True once no live pod, and not the deployment itself, runs a build with a known defect. */

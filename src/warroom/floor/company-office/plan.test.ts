@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CLUSTERS, DESKS, PLAYER_DESK } from "../office.ts";
-import { boardFigures, FULL_OFFICE, myDeskIn, officePlan, planObstacles, type CompanyLayout } from "./plan.ts";
+import { boardFigures, visitedLayout, FULL_OFFICE, myDeskIn, officePlan, planObstacles, type CompanyLayout } from "./plan.ts";
 
 const member = (username: string, joinedAt: number, isFounder = false) => ({ username, role: "infrastructure" as const, payCents: 12_000, isFounder, joinedAt, canHire: isFounder });
 
@@ -79,5 +79,12 @@ describe("officePlan", () => {
     expect(boardFigures(startup(["bay"], ["small"]))).toEqual({ name: "Acme", fundsCents: 0, trafficPercent: 33 });
     expect(boardFigures(startup(["bay"], [])).trafficPercent).toBe(0);
     expect(boardFigures(startup(["bay"], ["large"])).trafficPercent).toBe(100);
+  });
+});
+
+describe("a visitor's board", () => {
+  it("shows the company and its traffic, never its funds", () => {
+    const layout = visitedLayout({ name: "Sev2", category: "fintech", rooms: ["bay"], servers: [], members: [] });
+    expect(boardFigures(layout)).toMatchObject({ name: "Sev2", fundsCents: null });
   });
 });

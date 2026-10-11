@@ -42,3 +42,5 @@ export interface DealStore {
 export const DEAL_OFFER_PREFIX = "deal:";
 /** The accepted investment offer an agreed deal turns into; its ref is what the investor's wallet spends. */
 export const dealOfferId = (dealId: string) => `${DEAL_OFFER_PREFIX}${dealId}`;
+/** Whether an investment offer was booked by an agreed deal (it shows as that deal, not as an offer of its own). */
+export const isDealOffer = (offerId: string) => offerId.startsWith(DEAL_OFFER_PREFIX);

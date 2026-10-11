@@ -47,7 +47,8 @@ export const FULL_OFFICE: OfficePlan = {
   fixtures: null,
 };
 
-export type CompanyLayout = Pick<Company, "name" | "category" | "fundsCents" | "rooms" | "servers" | "members">;
+/** `fundsCents` is null for a visitor: the books are the company's own. */
+export type CompanyLayout = Pick<Company, "name" | "category" | "rooms" | "servers" | "members"> & { readonly fundsCents: number | null };
 
 const RACK = { width: 0.8, depth: 1.1 } as const;
 /** Desks per cluster: a bay's four seats fill exactly one. */
@@ -82,7 +83,7 @@ function closetRack(cluster: DeskCluster, index: number): Omit<OfficeRack, "serv
 
 /** A visitor's view of another company's office: the same floor, with no money on its board or its payroll. */
 export function visitedLayout(layout: OfficeLayout): CompanyLayout {
-  return { ...layout, fundsCents: 0, members: layout.members.map((member) => ({ ...member, payCents: 0, canHire: false })) };
+  return { ...layout, fundsCents: null, members: layout.members.map((member) => ({ ...member, payCents: 0, canHire: false })) };
 }
 
 export function officePlan(company: CompanyLayout | null): OfficePlan {
@@ -116,7 +117,7 @@ export function officePlan(company: CompanyLayout | null): OfficePlan {
 }
 
 /** What the company's board shows: who it is, what's in the bank, and how much of today's traffic its servers can take. */
-export type BoardFigures = { readonly name: string; readonly fundsCents: number; readonly trafficPercent: number };
+export type BoardFigures = { readonly name: string; readonly fundsCents: number | null; readonly trafficPercent: number };
 
 export function boardFigures(company: CompanyLayout): BoardFigures {
   const { demandRps } = categoryById(company.category);

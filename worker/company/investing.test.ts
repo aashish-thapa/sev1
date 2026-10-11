@@ -267,6 +267,8 @@ describe("deals in person", () => {
     const agreed = second.ok ? second.value.deals[0] : null;
     expect(agreed).toMatchObject({ stage: "agreed", investRef: `company:invest:deal:${deal.id}`, terms: counter });
     expect(await setup.deals.terms(founder, deal.id, counter)).toEqual({ ok: false, problem: "deal_closed" });
+    // Agreed but unpaid, it shows once: as the deal, not also as an accepted offer.
+    expect(MyCompanySchema.parse(await setup.companies.mine(sam)).investmentOffers).toEqual([]);
 
     const progress = setup.wallets.get(sam.id) as Progress;
     const spent = invest(progress.wallet, agreed?.investRef ?? "", counter.amountCents, setup.now());

@@ -6,7 +6,7 @@ const WIDTH = 768;
 const HEIGHT = 432;
 const PADDING = 44;
 
-/** The company's board: its name, the bank balance large, and a bar of today's traffic its servers can take. */
+/** The company's board: its name, the bank balance large (left blank for a visitor), and a bar of today's traffic its servers can take. */
 export function boardTexture({ name, fundsCents, trafficPercent }: BoardFigures): CanvasTexture {
   const canvas = document.createElement("canvas");
   canvas.width = WIDTH;
@@ -24,9 +24,11 @@ export function boardTexture({ name, fundsCents, trafficPercent }: BoardFigures)
   context.font = `600 30px ${token("--font-mono")}`;
   context.fillText(fit(context, name, WIDTH - PADDING * 2), PADDING, 74);
 
-  context.fillStyle = token(fundsCents < 0 ? "--color-critical" : "--color-ink");
-  context.font = `800 92px ${token("--font-display")}`;
-  context.fillText(fit(context, formatCents(fundsCents), WIDTH - PADDING * 2), PADDING, 210);
+  if (fundsCents !== null) {
+    context.fillStyle = token(fundsCents < 0 ? "--color-critical" : "--color-ink");
+    context.font = `800 92px ${token("--font-display")}`;
+    context.fillText(fit(context, formatCents(fundsCents), WIDTH - PADDING * 2), PADDING, 210);
+  }
 
   // Traffic: a bar that fills as servers are bought, green once every request is served.
   const barY = 300;

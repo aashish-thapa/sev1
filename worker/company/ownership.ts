@@ -3,6 +3,7 @@
  * the dividends a week's close books. Reads go through the investor store; every money rule is the
  * shared pure one in src/domain/company/investors.ts.
  */
+import { isDealOffer } from "./deal-store.ts";
 import { roomKindById, serverTierById } from "../../src/domain/company/catalog.ts";
 import {
   DIVIDEND_EVERY_WORK_DAYS,
@@ -98,7 +99,8 @@ export async function myInvesting(userId: string, investors: InvestorReads, prop
     proposals ? proposals.pendingBy(userId) : Promise.resolve([]),
   ]);
   return {
-    investmentOffers: received.map((row) => ({
+    // An agreed deal is listed with the caller's deals until paid; its booked offer would be the same money twice.
+    investmentOffers: received.filter((row) => !isDealOffer(row.id)).map((row) => ({
       ...offerOf(row),
       companyId: row.companyId,
       companyName: row.companyName,

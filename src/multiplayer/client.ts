@@ -69,8 +69,8 @@ type Intent =
   | ({ readonly kind: "create"; readonly scenarioId: string; readonly visibility: RoomVisibility } & Engineer)
   | ({ readonly kind: "join"; readonly roomCode: string; readonly resume?: Resume } & Engineer);
 
-/** Who takes the seat: shown to teammates by name, role and the badge they chose. */
-export type Engineer = { readonly name: string; readonly role: Role; readonly badge: string | null };
+/** Who takes the seat: shown to teammates by name, role, the badge and the body they chose. */
+export type Engineer = { readonly name: string; readonly role: Role; readonly badge: string | null; readonly avatar?: string | null };
 
 type Listeners = { [Type in keyof RoomEvents]: Set<(event: RoomEvents[Type]) => void> };
 
@@ -237,11 +237,11 @@ export class RoomClient {
     this.lastHeardAt = performance.now();
     const seat = this.seatHeld;
     if (seat) {
-      this.transmit({ type: "join", roomCode: seat.roomCode, name: intent.name, role: intent.role, badge: intent.badge, resume: seat.resume });
+      this.transmit({ type: "join", roomCode: seat.roomCode, name: intent.name, role: intent.role, badge: intent.badge, avatar: intent.avatar ?? null, resume: seat.resume });
     } else if (intent.kind === "create") {
-      this.transmit({ type: "create", scenarioId: intent.scenarioId, name: intent.name, role: intent.role, badge: intent.badge, visibility: intent.visibility });
+      this.transmit({ type: "create", scenarioId: intent.scenarioId, name: intent.name, role: intent.role, badge: intent.badge, avatar: intent.avatar ?? null, visibility: intent.visibility });
     } else {
-      this.transmit({ type: "join", roomCode: intent.roomCode, name: intent.name, role: intent.role, badge: intent.badge, resume: intent.resume });
+      this.transmit({ type: "join", roomCode: intent.roomCode, name: intent.name, role: intent.role, badge: intent.badge, avatar: intent.avatar ?? null, resume: intent.resume });
     }
   }
 

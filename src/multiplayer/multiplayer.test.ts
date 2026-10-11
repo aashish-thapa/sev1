@@ -30,7 +30,13 @@ const WAIT_MS = 2000;
 describe("protocol parsing", () => {
   it("accepts a well-formed join and normalises the room code", () => {
     const parsed = parseClientMessage(JSON.stringify({ type: "join", roomCode: " abcd ", name: "  Maya ", role: "security" }));
-    expect(parsed).toEqual({ ok: true, message: { type: "join", roomCode: "ABCD", name: "Maya", role: "security", badge: null } });
+    expect(parsed).toEqual({ ok: true, message: { type: "join", roomCode: "ABCD", name: "Maya", role: "security", badge: null, avatar: null } });
+  });
+
+  it("takes a catalog body to wear and refuses any other", () => {
+    const join = (avatar: string) => parseClientMessage(JSON.stringify({ type: "join", roomCode: "ABCD", name: "Maya", role: "security", avatar }));
+    expect(join("Female_Adult_05")).toMatchObject({ ok: true, message: { avatar: "Female_Adult_05" } });
+    expect(join("Robot_9000")).toMatchObject({ ok: false });
   });
 
   it("reads a quiet office's page, and treats a welcome without a phase as a live incident", () => {

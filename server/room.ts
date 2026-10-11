@@ -41,6 +41,8 @@ export type JoinRequest = {
   readonly name: string;
   readonly role: Role;
   readonly badge: string | null;
+  /** A catalog body, already checked by the protocol; older clients send none. */
+  readonly avatar?: string | null;
   /** From the host's verified identity for this socket, never from the client's message. */
   readonly tags: readonly string[];
   readonly resume?: Resume;
@@ -60,6 +62,7 @@ type Seat = {
   readonly name: string;
   readonly role: Role;
   readonly badge: string | null;
+  readonly avatar: string | null;
   readonly tags: readonly string[];
   /** Null until the client says it can do voice; only then is it sent handshakes. */
   voice: { isMicOn: boolean } | null;
@@ -334,6 +337,7 @@ export class Room {
       name: request.name,
       role: request.role,
       badge: request.badge,
+      avatar: request.avatar ?? null,
       tags: request.tags,
       voice: null,
       position: null,
@@ -364,6 +368,7 @@ export class Room {
       position: seat.position,
       isConnected: seat.connection !== null,
       badge: seat.badge,
+      avatar: seat.avatar,
       tags: [...seat.tags],
       voice: seat.voice,
     }));

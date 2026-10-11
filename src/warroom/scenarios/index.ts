@@ -168,6 +168,12 @@ export function roomWarRooms(role: Role, level: Level): readonly Scenario[] {
   return [TEAM_SCENARIO, ...unlockedWarRooms(role, level).filter((scenario) => scenario !== TEAM_SCENARIO)];
 }
 
+/** A new room's incident: any the host's level offers in rooms, at random. */
+export function roomScenarioFor(role: Role, level: Level, random: () => number = Math.random): Scenario {
+  const pool = roomWarRooms(role, level);
+  return pool[Math.min(pool.length - 1, Math.floor(random() * pool.length))];
+}
+
 /**
  * War Rooms a player may pick to practice (no pay, no experience): whatever their level unlocked,
  * and with Pro every released War Room for their role, hardest first.

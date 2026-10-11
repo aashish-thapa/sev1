@@ -5,7 +5,7 @@ import type { Scenario } from "./scenario.ts";
 import { checkoutMeltdown } from "./scenarios/checkout-meltdown.ts";
 import { checkoutPoolLeak } from "./scenarios/checkout-pool-leak.ts";
 import { crashOnCheckout } from "./scenarios/crash-on-checkout.ts";
-import { isUnlocked, practiceWarRooms, roomWarRooms, SCENARIOS, soloScenarioFor, unlockedWarRooms } from "./scenarios/index.ts";
+import { isUnlocked, practiceWarRooms, roomScenarioFor, roomWarRooms, SCENARIOS, soloScenarioFor, unlockedWarRooms } from "./scenarios/index.ts";
 import { oomAfterDeploy } from "./scenarios/oom-after-deploy.ts";
 import { ordersIndexInvalid } from "./scenarios/orders-index-invalid.ts";
 import { scaledToZero } from "./scenarios/scaled-to-zero.ts";
@@ -184,5 +184,12 @@ describe("the War Room ladder", () => {
         expect(offered).toEqual(expect.arrayContaining([...unlockedWarRooms(role, level)]));
       }
     }
+  });
+
+  it("draws a new room's incident at random from what the host's level offers", () => {
+    const offered = roomWarRooms("mobile", 2);
+    expect(roomScenarioFor("mobile", 2, () => 0)).toBe(offered[0]);
+    expect(roomScenarioFor("mobile", 2, () => 0.9999)).toBe(offered[offered.length - 1]);
+    for (let draw = 0; draw < 20; draw += 1) expect(offered).toContain(roomScenarioFor("mobile", 2, () => draw / 20));
   });
 });

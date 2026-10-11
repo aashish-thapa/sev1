@@ -11,7 +11,6 @@ const LobbyScene = lazy(loadLobbyScene);
 const reduceMotion = typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 import { AccountContext } from "../app/useAccount.ts";
 import { featuredBadge } from "../domain/achievements.ts";
-import { roomWarRooms } from "../warroom/scenarios/index.ts";
 import type { Role } from "../domain/incident.ts";
 import type { Progress } from "../domain/progress.ts";
 import type { RoomVisibility } from "../multiplayer/protocol.ts";
@@ -58,7 +57,7 @@ type Props = {
   rooms: {
     status: string;
     error: string | null;
-    onCreate: (name: string, visibility: RoomVisibility, scenarioId: string) => void;
+    onCreate: (name: string, visibility: RoomVisibility) => void;
     onJoin: (code: string, name: string) => void;
     listPublic: ListPublicRooms;
   };
@@ -166,7 +165,7 @@ export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, onCho
             </button>
           )}
           <TopRanks view={leaderboard} href={RANKS_HASH} />
-          <ModeCard role={role} onRole={roles.onChoose} name={name.trim()} onName={isSignedIn ? null : setTypedName} onSolo={onEnterOffice} incidents={roomWarRooms(role, careerLevel(progress).level)} rooms={rooms} />
+          <ModeCard role={role} onRole={roles.onChoose} name={name.trim()} onName={isSignedIn ? null : setTypedName} onSolo={onEnterOffice} rooms={rooms} />
         </>
       ) : view === "character" ? (
         <CharacterPicker

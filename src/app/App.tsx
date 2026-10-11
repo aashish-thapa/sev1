@@ -7,7 +7,7 @@ import type { ProSale } from "../ui/ProPanel.tsx";
 import type { AdminApi } from "../storage/admin-api.ts";
 import type { CompanyApi } from "../storage/company-api.ts";
 import { DiscussionOverlay } from "../ui/DiscussionOverlay.tsx";
-import { findScenario, soloScenarioFor, TEAM_SCENARIO } from "../warroom/scenarios/index.ts";
+import { findScenario, roomScenarioFor, soloScenarioFor, TEAM_SCENARIO } from "../warroom/scenarios/index.ts";
 import { preloadFloor } from "../warroom/ui/floorLoader.ts";
 import { WarRoomView } from "../warroom/ui/WarRoomView.tsx";
 import { useRoom } from "../multiplayer/useRoom.ts";
@@ -49,7 +49,7 @@ export function App({ shareUrl, proSale, adminApi, companyApi, ...services }: Pr
   const username = useContext(AccountContext)?.account?.username ?? null;
   const role = game.progress.role ?? "infrastructure";
   const isInRoom = room.room !== null && room.status !== "left" && room.status !== "failed";
-  // Solo play rotates through the role's unlocked War Rooms; a room plays the incident its host picked.
+  // Solo play rotates through the role's unlocked War Rooms; a room plays one drawn at random for its host's level.
   const career = useMemo(() => careerLevel(game.progress), [game.progress]);
   const wellbeing = useMemo(
     () => ({ wellbeing: game.progress.wellbeing, takeFromPantry: game.takeFromPantry, consume: game.consume }),
@@ -180,7 +180,7 @@ export function App({ shareUrl, proSale, adminApi, companyApi, ...services }: Pr
           rooms={{
             status: room.status,
             error: room.error?.message ?? null,
-            onCreate: (name, visibility, scenarioId) => room.create(scenarioId, { name, role, badge, avatar }, visibility),
+            onCreate: (name, visibility) => room.create(roomScenarioFor(role, career.level).id, { name, role, badge, avatar }, visibility),
             onJoin: (code, name) => room.join(code, { name, role, badge, avatar }),
             listPublic: fetchPublicRooms,
           }}

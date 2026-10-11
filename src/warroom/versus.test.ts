@@ -3,6 +3,7 @@ import { decide, pickTeam, type LaneStanding } from "./versus.ts";
 
 const lane = (team: LaneStanding["team"], finish: LaneStanding["finish"]): LaneStanding => ({
   team,
+  crew: "players",
   players: 1,
   phase: finish ? "closed" : "live",
   alertRate: finish ? 0 : 0.3,

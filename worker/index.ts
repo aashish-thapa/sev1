@@ -50,6 +50,7 @@ function billingFor(env: Env, store: D1EntitlementStore): BillingService | null 
 }
 
 export { DirectoryObject } from "./directory-object.ts";
+export { MatchmakerObject } from "./matchmaker-object.ts";
 export { RoomObject } from "./room-object.ts";
 
 /** Company writes (found, buy, invite, pay, settle) one account may make per attempt window. */

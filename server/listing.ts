@@ -10,7 +10,8 @@ export type RoomListing = { readonly visibility: RoomVisibility; readonly opened
  */
 export function publicListing(room: Venue, listing: RoomListing): PublicRoom | null {
   const players = room.connectedCount;
-  if (listing.visibility !== "public" || players === 0 || players >= room.capacity || room.isClosed) return null;
+  // A matchmade room is one party looking for opponents: strangers arrive through matchmaking, not the list.
+  if (listing.visibility !== "public" || room.mode === "matchmade" || players === 0 || players >= room.capacity || room.isClosed) return null;
   return {
     code: room.code,
     host: room.hostName ?? "Someone",

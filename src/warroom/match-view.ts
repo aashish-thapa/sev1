@@ -1,4 +1,4 @@
-import type { LanePhase, Team, Winner } from "./versus.ts";
+import { TEAM_LABEL, type LanePhase, type LaneStanding, type Team, type Winner } from "./versus.ts";
 
 export const LANE_PHASE_LABEL: Readonly<Record<LanePhase, string>> = {
   waiting: "Waiting",
@@ -16,10 +16,24 @@ export function outcomeFor(winner: Winner, team: Team | null): MatchOutcome {
   return winner === team ? "won" : "lost";
 }
 
+/** What a lane is called: its side, or the bot crew that plays it. */
+export function laneName(lane: Pick<LaneStanding, "team" | "crew">): string {
+  return lane.crew === "bots" ? "Bot crew" : TEAM_LABEL[lane.team];
+}
+
 /** Overtime left as m:ss, rounded up so the clock never shows 0:00 while time remains. */
 export function formatCountdown(msLeft: number): string {
-  const seconds = Math.max(0, Math.ceil(msLeft / 1000));
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  return asClock(Math.ceil(msLeft / 1000));
+}
+
+/** Time spent so far as m:ss, counting whole seconds. */
+export function formatElapsed(msElapsed: number): string {
+  return asClock(Math.floor(msElapsed / 1000));
+}
+
+function asClock(seconds: number): string {
+  const whole = Math.max(0, seconds);
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
 }
 
 /** The pager's alert rate as a whole percentage. */

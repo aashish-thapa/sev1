@@ -19,8 +19,12 @@ export type LanePhase = "waiting" | "live" | "monitoring" | "closed";
 /** How a closed incident scored: debrief points (postmortem assumed right) and the simulated second it closed. */
 export type Finish = { readonly points: number; readonly closedAt: number };
 
+/** Who plays a side: people, or the bot crew that stands in when matchmaking finds nobody. */
+export type Crew = "players" | "bots";
+
 export type LaneStanding = {
   readonly team: Team;
+  readonly crew: Crew;
   readonly players: number;
   readonly phase: LanePhase;
   /** The rate the pager watches, 0…1. */
@@ -53,12 +57,22 @@ export function decide(standings: readonly LaneStanding[], isOvertimeOver: boole
   return first.team;
 }
 
-/** Where the match is: picking sides, racing, one side done and the clock on the other, or over. */
+/**
+ * Where the match is: picking sides (or, matchmade, looking for opponents and waiting for them to
+ * arrive), racing, one side done and the clock on the other, or over.
+ */
 export type MatchStage =
   | { readonly name: "lineup" }
+  | { readonly name: "searching"; readonly msElapsed: number }
+  | { readonly name: "found" }
   | { readonly name: "racing" }
   | { readonly name: "overtime"; readonly msLeft: number }
   | { readonly name: "decided"; readonly winner: Winner };
 
 /** A race nobody closes ends here, with whatever has closed by then. */
 export const MATCH_TIME_LIMIT_MS = 30 * 60_000;
+
+/** How long a matchmade room looks for opponents before a bot crew takes the other side. */
+export const SEARCH_TIMEOUT_MS = 30_000;
+/** How long a paired room waits for its opponents to arrive before racing whoever came, or bots. */
+export const ARRIVAL_TIMEOUT_MS = 20_000;

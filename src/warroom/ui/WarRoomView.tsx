@@ -137,7 +137,7 @@ export function WarRoomView({ scenario, role, onFinish, onBuySolution, hints, on
     <main className="debrief">
       <p className="paged__source">{scenario.title} · debrief</p>
       {/* A side that closes first waits out the other's overtime here, so it watches the race until it's decided. */}
-      {room?.match && (room.match.stage.name === "decided" ? <MatchResult match={room.match} team={room.room?.team ?? null} /> : <RivalStrip match={room.match} team={room.room?.team ?? null} />)}
+      {room?.match && (room.match.stage.name === "decided" ? <MatchResult match={room.match} team={room.room?.team ?? null} /> : <RivalStrip match={room.match} team={room.room?.team ?? null} mode={room.room?.mode ?? "coop"} />)}
       <h1 className="debrief__grade" data-grade={result.grade}>
         {result.grade}
         <span className="debrief__points">{result.points} / 100</span>

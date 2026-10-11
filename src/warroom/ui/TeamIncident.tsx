@@ -105,7 +105,7 @@ export function TeamIncident({ room, scenario, role, overlay, onUseScreen, onClo
         team={team}
       />
       <aside className="team-panel" aria-label="Your team">
-        {room.match && <RivalStrip match={room.match} team={room.room?.team ?? null} />}
+        {room.match && <RivalStrip match={room.match} team={room.room?.team ?? null} mode={room.room?.mode ?? "coop"} />}
         <VoiceControls voice={voice} selfId={team.selfId} members={members} />
         <TeamChat comms={room.comms} onSend={room.chat} />
       </aside>

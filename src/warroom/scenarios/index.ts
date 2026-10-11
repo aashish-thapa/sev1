@@ -1,6 +1,7 @@
 import type { Level } from "../../domain/career.ts";
 import { isPro, isReleasedFor, type Entitlements } from "../../domain/entitlements.ts";
 import type { Role } from "../../domain/incident.ts";
+import type { Random } from "../../domain/random.ts";
 import type { Scenario } from "../scenario.ts";
 import { addressAutocomplete500s } from "./address-autocomplete-500s.ts";
 import { androidStagedRollout500s } from "./android-staged-rollout-500s.ts";
@@ -158,6 +159,23 @@ export function soloScenarioFor(role: Role, rotation = 0, level: Level = 0): Sce
   const pool = unlockedWarRooms(role, level);
   const turn = ((Math.trunc(rotation) % pool.length) + pool.length) % pool.length;
   return pool[turn];
+}
+
+/**
+ * The incident for a random match: one of the role's own War Rooms at the hardest tier the player
+ * has unlocked, never the cross-team one. Null when the role's ladder has nothing open yet.
+ */
+export function randomMatchScenario(role: Role, level: Level, random: Random): Scenario | null {
+  const open = LADDERS[role].filter((scenario) => isUnlocked(scenario, level));
+  const hardest = Math.max(...open.map((scenario) => scenario.tier));
+  const pool = open.filter((scenario) => scenario.tier === hardest);
+  return pool[Math.floor(random() * pool.length)] ?? null;
+}
+
+/** The incident a by-code room plays (co-op or versus): drawn from everything its host may open a room on. */
+export function randomRoomScenario(role: Role, level: Level, random: Random): Scenario {
+  const pool = roomWarRooms(role, level);
+  return pool[Math.floor(random() * pool.length)] ?? TEAM_SCENARIO;
 }
 
 /** The cross-team incident: every room may play it, and a new room starts on it. */

@@ -4,6 +4,7 @@ import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import { encodeServerMessage, MAX_INBOUND_BYTES, PUBLIC_ROOMS_PATH, type PublicRoomList } from "../src/multiplayer/protocol.ts";
 import type { Logger } from "./log.ts";
+import { LocalMatchmaker } from "./local-matchmaker.ts";
 import { RoomRegistry } from "./registry.ts";
 import type { Connection, RoomTiming } from "./room.ts";
 import type { ScenarioCatalog } from "./scenarios.ts";
@@ -34,6 +35,8 @@ const GOING_AWAY = 1001;
 
 export async function startServer(options: ServerOptions): Promise<RunningServer> {
   const { logger } = options;
+  // Outcomes reach rooms through the registry, which needs the matchmaker first: the lookup runs only once both exist.
+  const matchmaking = new LocalMatchmaker((code, outcome) => registry.find(code)?.onMatchmaking?.(outcome));
   const registry = new RoomRegistry({
     maxRooms: options.maxRooms,
     roomGraceMs: options.roomGraceMs,
@@ -41,6 +44,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     random: options.random,
     logger,
     now: Date.now,
+    matchmaking,
   });
   const sockets = new WebSocketServer({ noServer: true, maxPayload: HARD_MAX_PAYLOAD });
   const http = createServer((request, response) => {
@@ -97,6 +101,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       clearInterval(heartbeat);
       for (const socket of sockets.clients) socket.close(GOING_AWAY, "server shutting down");
       registry.closeAll();
+      matchmaking.dispose();
       await new Promise<void>((resolve) => sockets.close(() => resolve()));
       http.closeAllConnections();
       await new Promise<void>((resolve, reject) => http.close((error) => (error ? reject(error) : resolve())));

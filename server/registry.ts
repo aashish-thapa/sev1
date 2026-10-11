@@ -6,6 +6,7 @@ import { generateRoomCode } from "./room-code.ts";
 import type { RoomTiming } from "./room.ts";
 import type { RoomDirectory } from "./session.ts";
 import { openVenue, type Venue } from "./venue.ts";
+import type { Matchmaking } from "./matchmaking.ts";
 
 export type RegistryOptions = {
   readonly maxRooms: number;
@@ -16,6 +17,7 @@ export type RegistryOptions = {
   readonly logger: Logger;
   /** Epoch milliseconds, for when each room opened. */
   readonly now: () => number;
+  readonly matchmaking: Matchmaking;
 };
 
 /** Owns every live room in the process: creation under a cap, lookup by code, and expiry once abandoned. */
@@ -38,7 +40,7 @@ export class RoomRegistry implements RoomDirectory {
     if (this.rooms.size >= this.options.maxRooms) return null;
     const code = generateRoomCode(this.options.random, (candidate) => this.rooms.has(candidate));
     if (!code) return null;
-    const room = openVenue(mode, { code, scenario, timing: this.options.timing, logger: this.options.logger, onOccupancyChange: (changed) => this.occupancyChanged(changed) });
+    const room = openVenue(mode, { code, scenario, timing: this.options.timing, logger: this.options.logger, onOccupancyChange: (changed) => this.occupancyChanged(changed), matchmaking: this.options.matchmaking });
     this.rooms.set(code, room);
     this.listings.set(code, { visibility, openedAt: this.options.now() });
     this.options.logger("info", "room_created", { room: code, scenario: scenario.id, visibility, mode, rooms: this.rooms.size });

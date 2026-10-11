@@ -9,7 +9,7 @@ import { loopThrough, WALK_SPEED, type Point } from "./navigation.ts";
 import { carriedAt, walkerPose } from "./people/walkers.ts";
 import { seatOf, type Person, type Carried } from "./office.ts";
 import { Avatar } from "./people/Avatar.tsx";
-import { avatarFor, HEAD_HEIGHT } from "./people/avatars.ts";
+import { HEAD_HEIGHT, wornAvatar } from "./people/avatars.ts";
 import { motionFor, type Situation } from "./people/behaviour.ts";
 import { bubbleTexture } from "./people/bubble.ts";
 import { easeSidestep, rightOf, sidestepFor, type Crowd } from "./people/crowd.ts";
@@ -222,7 +222,7 @@ function TeammateModel({ teammate, reduceMotion }: { teammate: Teammate; reduceM
   return (
     <group ref={body} position={arrival}>
       <Suspense fallback={<StandIn isSeated={false} />}>
-        <Avatar id={avatarFor(teammate.id)} motion={motion} carried={() => target?.holding ?? null} />
+        <Avatar id={wornAvatar(teammate.avatar, teammate.id)} motion={motion} carried={() => target?.holding ?? null} />
       </Suspense>
       <SpeakingRing level={() => levelsRef.current.get(teammate.id) ?? 0} />
       {isOnLaptop && <HeldLaptop position={isSeated ? LAPTOP_ON_DESK : LAPTOP_IN_HANDS} />}

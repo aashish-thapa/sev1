@@ -19,6 +19,7 @@ import { PromotionToast } from "../ui/PromotionToast.tsx";
 import { CareerContext } from "./career-context.ts";
 import { useActivityClock } from "./useActivityClock.ts";
 import { useShiftGame, type GameServices } from "./useShiftGame.ts";
+import { LookContext } from "./look-context.ts";
 import { WalletContext } from "./wallet-context.ts";
 import { AccountContext } from "./useAccount.ts";
 import { CompanyOfficeContext } from "../warroom/floor/company-office/context.ts";
@@ -76,6 +77,8 @@ export function App({ shareUrl, proSale, adminApi, companyApi, ...services }: Pr
 
   // Rooms show it by your name; only an earned badge is ever sent.
   const badge = featuredBadge(game.progress)?.id ?? null;
+  // Null leaves it to the server: you are then drawn from your player id, as before.
+  const avatar = game.progress.look.avatar ?? undefined;
   // The company whose office room you walked into from the HQ: its floor shows only what it bought.
   const [companyOffice, setCompanyOffice] = useState<{ readonly code: string; readonly companyId: string; readonly company: CompanyLayout } | null>(null);
   const enterCompanyOffice = useCallback(
@@ -86,9 +89,9 @@ export function App({ shareUrl, proSale, adminApi, companyApi, ...services }: Pr
       if (company) setCompanyOffice({ code, companyId: company.id, company });
       // In the office you're who the company hired you as, not your lobby role.
       const companyRole = company?.members.find((member) => member.username === username)?.role ?? role;
-      room.join(code, { name: username ?? "", role: companyRole, badge });
+      room.join(code, { name: username ?? "", role: companyRole, badge, avatar });
     },
-    [badge, companyApi, role, room, username],
+    [avatar, badge, companyApi, role, room, username],
   );
   // A meeting in your own company's office is just going to work; a visitor walks in on the deal's pass.
   const enterCompanyMeeting = useCallback(
@@ -98,9 +101,9 @@ export function App({ shareUrl, proSale, adminApi, companyApi, ...services }: Pr
       // A visitor walks into someone else's office: draw what that company bought, then step in as yourself.
       const layout = await companyApi.officeLayout(companyId);
       if (layout.ok) setCompanyOffice({ code, companyId, company: visitedLayout(layout.value) });
-      room.join(code, { name: username ?? "", role, badge });
+      room.join(code, { name: username ?? "", role, badge, avatar });
     },
-    [badge, companyApi, enterCompanyOffice, role, room, username],
+    [avatar, badge, companyApi, enterCompanyOffice, role, room, username],
   );
   const officeVisit = useMemo(
     () => (companyOffice && isInRoom && room.room?.code === companyOffice.code ? { company: companyOffice.company, me: username } : null),
@@ -129,6 +132,7 @@ export function App({ shareUrl, proSale, adminApi, companyApi, ...services }: Pr
 
   return (
     <WalletContext value={game.progress.wallet}>
+    <LookContext value={game.progress.look}>
       <CareerContext value={career}>
       <WellbeingContext value={wellbeing}>
       {isInOffice ? (
@@ -175,14 +179,15 @@ export function App({ shareUrl, proSale, adminApi, companyApi, ...services }: Pr
           rooms={{
             status: room.status,
             error: room.error?.message ?? null,
-            onCreate: (name, visibility) => room.create(TEAM_SCENARIO.id, { name, role, badge }, visibility),
-            onJoin: (code, name) => room.join(code, { name, role, badge }),
+            onCreate: (name, visibility) => room.create(TEAM_SCENARIO.id, { name, role, badge, avatar }, visibility),
+            onJoin: (code, name) => room.join(code, { name, role, badge, avatar }),
             listPublic: fetchPublicRooms,
           }}
         />
       )}
       </WellbeingContext>
       </CareerContext>
+    </LookContext>
     </WalletContext>
   );
 }

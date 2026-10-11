@@ -1,9 +1,10 @@
+import { useLook } from "../../../app/look-context.ts";
 import { useFrame } from "@react-three/fiber";
 import { Suspense, useRef } from "react";
 import type { Group } from "three";
 import type { Point } from "../navigation.ts";
 import { Avatar } from "./Avatar.tsx";
-import { avatarFor } from "./avatars.ts";
+import { wornAvatar } from "./avatars.ts";
 import { motionFor } from "./behaviour.ts";
 import { follow, STILL_SPEED, type Follower } from "./follow.ts";
 import { chairOf, type Stance } from "../interactions/stance.ts";
@@ -22,6 +23,7 @@ type Props = {
 
 /** Your own body in first person: look down and you see yourself standing, walking, turning. */
 export function SelfBody({ seed, getPlayer, getStance, reduceMotion }: Props) {
+  const look = useLook();
   const body = useRef<Group>(null);
   const follower = useRef<Follower | null>(null);
   const motion = () => {
@@ -51,7 +53,7 @@ export function SelfBody({ seed, getPlayer, getStance, reduceMotion }: Props) {
   return (
     <group ref={body}>
       <Suspense fallback={null}>
-        <Avatar id={avatarFor(seed)} motion={motion} isFirstPerson />
+        <Avatar id={wornAvatar(look.avatar, seed)} motion={motion} isFirstPerson />
       </Suspense>
     </group>
   );

@@ -26,6 +26,8 @@ export type Teammate = {
   readonly badge: string | null;
   /** Granted tags (e.g. "creator") from the server; render with knownTags, which skips permissions. */
   readonly tags: readonly string[];
+  /** The body they say they wear, as the room passed it on; the floor draws a seeded one for null or an unknown id. */
+  readonly avatar: string | null;
   /** Where they are and what they're doing; null until their first update arrives. */
   readonly position: PlayerPresence | null;
 };

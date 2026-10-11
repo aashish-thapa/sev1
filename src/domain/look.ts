@@ -15,6 +15,12 @@ export const LookSchema = z.object({
 });
 export type Look = z.output<typeof LookSchema>;
 
+/** A look as kept in a save: a body or pose that's since been retired falls back instead of spoiling the whole save. */
+export const SavedLookSchema = z.object({
+  avatar: LookSchema.shape.avatar.catch(null),
+  pose: LookSchema.shape.pose.catch("idle"),
+});
+
 export const DEFAULT_LOOK: Look = { avatar: null, pose: "idle" };
 
 /** The next body along the wardrobe, wrapping at either end. */

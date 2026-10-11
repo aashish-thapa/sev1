@@ -25,6 +25,11 @@ export function avatarFor(seed: string): AvatarId {
   return AVATARS[Math.abs(hash) % AVATARS.length].id;
 }
 
+/** The body someone chose, when it's one this build has; otherwise the stable pick for `seed`. */
+export function wornAvatar(chosen: string | null, seed: string): AvatarId {
+  return AVATARS.find((avatar) => avatar.id === chosen)?.id ?? avatarFor(seed);
+}
+
 /** Height of a standing avatar's crown, for name tags and speech bubbles. */
 export const HEAD_HEIGHT = 1.78;
 

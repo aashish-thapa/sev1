@@ -12,6 +12,7 @@ import {
   chooseRole,
   consume,
   earn,
+  chooseLook as chooseLookOn,
   featureBadge,
   hasFinishedShift,
   hintsUsedOn,
@@ -31,6 +32,7 @@ import { overallRating, rateAttempt, STARTING_RATING } from "../domain/rating.ts
 import { planShift, presentIncident, type Pace, type PresentedIncident } from "../domain/shift.ts";
 import type { ProgressStore } from "../storage/progress-store.ts";
 import type { Debrief } from "../warroom/incident.ts";
+import type { Look } from "../domain/look.ts";
 
 export type RunMode = "rated" | "practice";
 
@@ -70,6 +72,8 @@ export type ShiftGame = {
   chooseRole(role: Role): void;
   /** Shows an earned badge next to your name in rooms and on the leaderboard; null shows none. */
   featureBadge(badgeId: string | null): void;
+  /** Wear a body and lobby pose; cosmetic, saved with your progress. */
+  chooseLook(look: Look): void;
   /**
    * Your role's screen holds your rated daily problems (practice once they're done);
    * another role's screen is unrated practice in their field; the library (`null`) mixes everyone's.
@@ -191,6 +195,7 @@ export function useShiftGame({ library, store, today: clock, now = Date.now }: G
     },
     [commit, now, progress],
   );
+  const chooseLook = useCallback((look: Look) => commit(chooseLookOn(progress, look)), [commit, progress]);
   const spendHint = useCallback(() => commit(spendHintOn(progress, today)), [commit, progress, today]);
   const buySolution = useCallback(
     (scenario: { readonly id: string; readonly title: string; readonly tier: SolutionTier }, runStartedAt: number): SpendOutcome => {
@@ -271,6 +276,7 @@ export function useShiftGame({ library, store, today: clock, now = Date.now }: G
     leaveOffice,
     chooseRole: onChooseRole,
     featureBadge: onFeatureBadge,
+    chooseLook,
     openDiscussion,
     answer,
     wrapUpDiscussion,

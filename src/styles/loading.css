@@ -1,0 +1,190 @@
+/* The title screen: key art full-bleed, the name bottom left, a tip and the load bar along the foot.
+ * It sits over the app while the lobby loads underneath, then lifts on the first key or tap. */
+
+.loading {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-toast) + 1);
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: var(--space-xl);
+  padding: max(var(--space-xl), env(safe-area-inset-top)) max(var(--space-xl), env(safe-area-inset-right)) max(var(--space-xl), env(safe-area-inset-bottom))
+    max(var(--space-xl), env(safe-area-inset-left));
+  overflow: clip;
+  background: var(--color-paper);
+  color: var(--color-ink);
+}
+
+.loading[data-ready="true"] {
+  cursor: pointer;
+}
+
+.loading__art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: saturate(0.9) brightness(0.6);
+  animation: loading-drift 40s var(--ease-in-out) infinite alternate;
+}
+
+/* Darken the foot and the left so the words read over the art. */
+.loading::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(to top, var(--color-paper) 0%, color-mix(in oklch, var(--color-paper) 70%, transparent) 30%, transparent 60%),
+    linear-gradient(to right, color-mix(in oklch, var(--color-paper) 75%, transparent), transparent 55%);
+  pointer-events: none;
+}
+
+.loading > :not(.loading__art) {
+  position: relative;
+  z-index: 1;
+}
+
+.loading__title {
+  align-self: end;
+  display: grid;
+  gap: var(--space-xs);
+}
+
+.loading__kicker {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+}
+
+.loading__name {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(4.5rem, 16vw, 10rem);
+  font-weight: 800;
+  font-stretch: 75%;
+  line-height: 0.85;
+  letter-spacing: -0.03em;
+}
+
+.loading__tagline {
+  margin: 0;
+  max-inline-size: 32ch;
+  font-size: var(--text-md);
+  color: var(--color-ink-2);
+}
+
+.loading__foot {
+  display: grid;
+  gap: var(--space-lg);
+  max-inline-size: 60rem;
+}
+
+.loading__tip {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: baseline;
+  margin: 0;
+  min-block-size: 3lh;
+  max-inline-size: 60ch;
+  color: var(--color-ink-2);
+  animation: loading-tip var(--dur-long) var(--ease-out) both;
+}
+
+.loading__tip-label {
+  flex: none;
+  padding: var(--space-3xs) var(--space-xs);
+  border-radius: var(--radius-sm);
+  background: var(--color-accent);
+  color: var(--color-accent-ink);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.loading__bar {
+  position: relative;
+  block-size: 6px;
+  border-radius: 999px;
+  background: var(--color-rule-2);
+}
+
+.loading__fill {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  border-radius: inherit;
+  background: var(--color-accent);
+  transition: inline-size var(--dur-long) var(--ease-out);
+}
+
+.loading__percent {
+  position: absolute;
+  inset-inline-end: 0;
+  inset-block-end: calc(100% + var(--space-xs));
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-muted);
+}
+
+.loading__enter {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-accent);
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  animation: loading-pulse 1.6s var(--ease-in-out) infinite;
+}
+
+.loading__enter:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 6px;
+}
+
+@keyframes loading-drift {
+  from {
+    transform: scale(1.05);
+  }
+  to {
+    transform: scale(1.15) translateX(-2%);
+  }
+}
+
+@keyframes loading-tip {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@keyframes loading-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading__art,
+  .loading__tip,
+  .loading__enter {
+    animation: none;
+  }
+}
+
+@media (max-width: 40rem) {
+  .loading {
+    gap: var(--space-lg);
+    padding-inline: max(var(--space-md), env(safe-area-inset-left));
+  }
+}

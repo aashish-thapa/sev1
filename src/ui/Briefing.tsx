@@ -4,8 +4,10 @@ import { CharacterPicker, LobbyRail, ModeCard, PlayerCard, TopRanks } from "./lo
 import { useLook } from "../app/look-context.ts";
 import type { Look } from "../domain/look.ts";
 import { wornAvatar } from "../warroom/floor/people/avatars.ts";
+import { loadLobbyScene } from "./lobby/lobbySceneLoader.ts";
+import { LOBBY_BACKDROP } from "./lobby/backdrop.ts";
 
-const LobbyScene = lazy(() => import("./lobby/LobbyScene.tsx"));
+const LobbyScene = lazy(loadLobbyScene);
 const reduceMotion = typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 import { AccountContext } from "../app/useAccount.ts";
 import { featuredBadge } from "../domain/achievements.ts";
@@ -120,7 +122,7 @@ export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, onCho
   return (
     <main className="lobby" data-view={view}>
       <div className="lobby__stage" aria-hidden="true">
-        <img className="lobby__backdrop" src="/home/data-centre.webp" alt="" />
+        <img className="lobby__backdrop" src={LOBBY_BACKDROP} alt="" />
         <Suspense fallback={null}>
           <LobbyScene avatar={shownLook.avatar} pose={shownLook.pose} isAside={view !== "home" && view !== "character"} reduceMotion={reduceMotion} />
         </Suspense>

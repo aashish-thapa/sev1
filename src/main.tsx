@@ -9,10 +9,16 @@ import "./styles/voice.css";
 import "./styles/admin.css";
 import "./styles/company.css";
 import "./styles/work.css";
+import "./styles/loading.css";
 
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { Root } from "./app/Root.tsx";
+import { LoadingGate } from "./app/LoadingGate.tsx";
+import { loadImage } from "./app/boot.ts";
+import { LOBBY_BACKDROP } from "./ui/lobby/backdrop.ts";
+import { loadLobbyScene } from "./ui/lobby/lobbySceneLoader.ts";
+import { loadFloor } from "./warroom/ui/floorLoader.ts";
 import { reloadOnStaleBuild } from "./app/staleBuild.ts";
 import { createLibrary } from "./content/library.ts";
 import { localDateOf } from "./domain/calendar.ts";
@@ -39,9 +45,18 @@ reloadOnStaleBuild(window, safeSessionStorage() ?? null);
 const root = document.getElementById("root");
 if (!root) throw new Error("index.html is missing #root");
 
+// What the lobby needs to look finished; the title screen holds until these settle.
+const loading = [document.fonts.ready, loadImage(LOBBY_BACKDROP), loadLobbyScene(), loadFloor()];
+
+const setAppInert = (isInert: boolean) => {
+  root.inert = isInert;
+};
+
 createRoot(root).render(
   <StrictMode>
-    <Root library={library} store={store} sync={store} accounts={accounts} today={today} shareUrl={window.location.origin} proSale={proSale} adminApi={new HttpAdminApi()} companyApi={new HttpCompanyApi()} />
+    <LoadingGate tasks={loading} setAppInert={setAppInert}>
+      <Root library={library} store={store} sync={store} accounts={accounts} today={today} shareUrl={window.location.origin} proSale={proSale} adminApi={new HttpAdminApi()} companyApi={new HttpCompanyApi()} />
+    </LoadingGate>
   </StrictMode>,
 );
 

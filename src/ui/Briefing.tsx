@@ -1,6 +1,9 @@
 import { lazy, Suspense, useContext, useEffect, useState } from "react";
 import { careerLevel } from "../domain/career.ts";
-import { LobbyRail, ModeCard, PlayerCard, TopRanks } from "./lobby/LobbyParts.tsx";
+import { CharacterPicker, LobbyRail, ModeCard, PlayerCard, TopRanks } from "./lobby/LobbyParts.tsx";
+import { useLook } from "../app/look-context.ts";
+import type { Look } from "../domain/look.ts";
+import { wornAvatar } from "../warroom/floor/people/avatars.ts";
 
 const LobbyScene = lazy(() => import("./lobby/LobbyScene.tsx"));
 const reduceMotion = typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -48,6 +51,8 @@ type Props = {
     /** Joins a company's office for an investment meeting, as member or visitor. */
     enterMeeting: (code: string, companyId: string) => void;
   };
+  /** Saves the body and pose you chose to wear. */
+  onChooseLook: (look: Look) => void;
   rooms: {
     status: string;
     error: string | null;
@@ -63,8 +68,9 @@ const PROFILE_HASH = "#profile";
 const ADMIN_HASH = "#admin";
 const COMPANY_HASH = "#company";
 const RANKS_HASH = "#ranks";
+const CHARACTER_HASH = "#character";
 
-type LobbyView = "home" | "profile" | "admin" | "company" | "ranks";
+type LobbyView = "home" | "character" | "profile" | "admin" | "company" | "ranks";
 
 function useLobbyView(): LobbyView {
   const [hash, setHash] = useState(() => window.location.hash);
@@ -73,12 +79,12 @@ function useLobbyView(): LobbyView {
     window.addEventListener("hashchange", follow);
     return () => window.removeEventListener("hashchange", follow);
   }, []);
-  return hash === PROFILE_HASH ? "profile" : hash === ADMIN_HASH ? "admin" : hash === COMPANY_HASH ? "company" : hash === RANKS_HASH ? "ranks" : "home";
+  return hash === PROFILE_HASH ? "profile" : hash === ADMIN_HASH ? "admin" : hash === COMPANY_HASH ? "company" : hash === RANKS_HASH ? "ranks" : hash === CHARACTER_HASH ? "character" : "home";
 }
 
 
 /** The lobby: what the game is, who you are in it, the three ways to start, and the board. Your profile opens in its place. */
-export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, fetchLeaderboard, rooms, proSale, adminApi, company }: Props) {
+export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, onChooseLook, fetchLeaderboard, rooms, proSale, adminApi, company }: Props) {
   const session = useContext(AccountContext);
   const role = roles.chosen ?? "infrastructure";
   // Until the player types, rooms use their account name, which may arrive after the first render.
@@ -97,8 +103,14 @@ export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, fetch
 
   const experience = careerLevel(progress).experience;
   const playerName = isSignedIn ? (session?.account?.username ?? "") : name;
+  const look = useLook();
+  const worn = { avatar: wornAvatar(look.avatar, playerName || "guest"), pose: look.pose };
+  // What you're trying on in the wardrobe; null until you change something, so it follows what you wear.
+  const [tryingOn, setTryingOn] = useState<typeof worn | null>(null);
+  const shownLook = view === "character" ? (tryingOn ?? worn) : worn;
   const rail = [
     { href: "#", label: "Play", isCurrent: view === "home" },
+    { href: CHARACTER_HASH, label: "Character", isCurrent: view === "character" },
     { href: PROFILE_HASH, label: "Career", isCurrent: view === "profile" },
     { href: COMPANY_HASH, label: "Company", isCurrent: view === "company" },
     { href: RANKS_HASH, label: "Ranks", isCurrent: view === "ranks" },
@@ -110,7 +122,7 @@ export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, fetch
       <div className="lobby__stage" aria-hidden="true">
         <img className="lobby__backdrop" src="/home/data-centre.webp" alt="" />
         <Suspense fallback={null}>
-          <LobbyScene seed={playerName || "guest"} reduceMotion={reduceMotion} />
+          <LobbyScene avatar={shownLook.avatar} pose={shownLook.pose} isAside={view !== "home" && view !== "character"} reduceMotion={reduceMotion} />
         </Suspense>
       </div>
 
@@ -154,6 +166,16 @@ export function Briefing({ progress, roles, onEnterOffice, onFeatureBadge, fetch
           <TopRanks view={leaderboard} href={RANKS_HASH} />
           <ModeCard role={role} onRole={roles.onChoose} name={name.trim()} onName={isSignedIn ? null : setTypedName} onSolo={onEnterOffice} incidents={roomWarRooms(role, careerLevel(progress).level)} rooms={rooms} />
         </>
+      ) : view === "character" ? (
+        <CharacterPicker
+          draft={shownLook}
+          onDraft={setTryingOn}
+          isWorn={look.avatar === shownLook.avatar && look.pose === shownLook.pose}
+          onWear={() => {
+            onChooseLook({ avatar: shownLook.avatar, pose: shownLook.pose });
+            setTryingOn(null);
+          }}
+        />
       ) : (
         <section className="lobby__panel">
           {view === "company" ? (

@@ -111,3 +111,18 @@ describe("first saves carrying older correct answers", () => {
     expect(progressProblem(legacy, { ...legacy, correctCards: 13, wallet: { ...legacy.wallet, nextSeq: 1 } }, 3600)).not.toBeNull();
   });
 });
+
+describe("the player's look", () => {
+  it("defaults older saves, keeps a choice, and lets a retired body fall back rather than spoil the save", async () => {
+    const { chooseLook, ProgressSchema } = await import("./progress.ts");
+    const { isPlausibleProgress } = await import("./audit.ts");
+    const { look: _look, ...older } = emptyProgress();
+    expect(ProgressSchema.parse(older).look).toEqual({ avatar: null, pose: "idle" });
+
+    const chosen = chooseLook(emptyProgress(), { avatar: "Female_Adult_05", pose: "phone" });
+    expect(ProgressSchema.parse(JSON.parse(JSON.stringify(chosen))).look).toEqual({ avatar: "Female_Adult_05", pose: "phone" });
+    expect(ProgressSchema.parse({ ...chosen, look: { avatar: "Robot_01", pose: "dance" } }).look).toEqual({ avatar: null, pose: "idle" });
+    // Cosmetic: changing it is always an honest save.
+    expect(isPlausibleProgress(emptyProgress(), chosen, 0)).toBe(true);
+  });
+});

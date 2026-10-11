@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { badgeById } from "../domain/achievements.ts";
+import { AVATARS } from "../warroom/floor/assets/catalog.ts";
 import { ROLE_IDS, type Role } from "../domain/incident.ts";
 import type { Debrief } from "../warroom/incident.ts";
 import type { CommsMessage } from "../warroom/scenario.ts";
@@ -62,6 +63,15 @@ const OfferedBadgeSchema = z
 /** What clients accept back: any short id, so a client older than the catalog still parses the room. */
 const ShownBadgeSchema = z.string().max(40).nullable().default(null);
 
+/** The body a player chose to wear; only catalog bodies are taken. Older clients send none. */
+const OfferedAvatarSchema = z
+  .string()
+  .refine((id) => AVATARS.some((avatar) => avatar.id === id), "unknown avatar")
+  .nullable()
+  .default(null);
+/** Read back loosely, like the badge: an unknown body falls back to the seeded one on the floor. */
+const ShownAvatarSchema = z.string().max(40).nullable().default(null);
+
 /** One step of a voice call's WebRTC handshake, passed between two players by the room. */
 export const SignalSchema = z.discriminatedUnion("kind", [
   z.object({
@@ -103,6 +113,7 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
     // Clients from before public rooms never send it; their rooms stay invite-only.
     visibility: z.enum(ROOM_VISIBILITIES).default("private"),
     badge: OfferedBadgeSchema,
+    avatar: OfferedAvatarSchema,
   }),
   z.strictObject({
     type: z.literal("join"),
@@ -110,6 +121,7 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
     name: PlayerNameSchema,
     role: RoleSchema,
     badge: OfferedBadgeSchema,
+    avatar: OfferedAvatarSchema,
     /** Reclaims a seat (and its shell history) after a dropped connection. */
     resume: ResumeSchema.optional(),
   }),
@@ -151,6 +163,8 @@ const PlayerSchema = z.object({
   /** False while a dropped player's seat is held for them to reconnect. */
   isConnected: z.boolean(),
   badge: ShownBadgeSchema,
+  /** The body they chose; null means the floor picks one from their id. */
+  avatar: ShownAvatarSchema,
   /** Granted tags (e.g. "creator"), set by the server from the account, never by the client. */
   tags: z.array(z.string().max(40)).max(8).default([]),
   /** Null for a client without voice; it's never sent a handshake it couldn't read. */

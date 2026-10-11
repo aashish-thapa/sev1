@@ -53,6 +53,8 @@ export type JoinRequest = {
   /** From the host's verified identity for this socket, never from the client's message. */
   readonly tags: readonly string[];
   readonly resume?: Resume;
+  /** The side asked for in a versus match; the match decides whether it's given. */
+  readonly team?: Team;
 };
 
 /** `room` is where the seat landed: the venue joined, or one side of a match. */

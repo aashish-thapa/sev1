@@ -9,6 +9,8 @@ import { findScenario } from "../server/scenarios.ts";
 import { openSession, type RoomDirectory } from "../server/session.ts";
 import { IDENTITY_TAGS_HEADER, IDENTITY_USER_HEADER, OFFICE_SCENARIO_HEADER, VISITOR_HEADER } from "./rooms.ts";
 import { DIRECTORY_NAME } from "./directory-object.ts";
+import { MATCHMAKER_NAME } from "./matchmaker-object.ts";
+import type { Matchmaking, MatchmakingOutcome } from "../server/matchmaking.ts";
 import type { Env } from "./env.ts";
 import { workerLogger } from "./log.ts";
 
@@ -34,6 +36,11 @@ export class RoomObject extends DurableObject<Env> {
     if (this.claimedCode !== null || this.room !== null) return false;
     this.claimedCode = code;
     return true;
+  }
+
+  /** The matchmaker's answer to this room's search for opponents. */
+  matchmaking(outcome: MatchmakingOutcome): void {
+    this.room?.onMatchmaking?.(outcome);
   }
 
   /** Who's connected right now, by user id; the worker asks before letting a deal close in a meeting. */
@@ -89,7 +96,7 @@ export class RoomObject extends DurableObject<Env> {
       create: (scenario, visibility, mode) => {
         if (this.room !== null || this.claimedCode !== code) return null;
         this.listing = { visibility, openedAt: Date.now() };
-        this.room = openVenue(mode, { code, scenario, timing: DEFAULT_ROOM_TIMING, logger: workerLogger, onOccupancyChange: (room) => this.occupancyChanged(room) });
+        this.room = openVenue(mode, { code, scenario, timing: DEFAULT_ROOM_TIMING, logger: workerLogger, onOccupancyChange: (room) => this.occupancyChanged(room), matchmaking: this.matchmaker() });
         workerLogger("info", "room_created", { room: code, scenario: scenario.id, visibility, mode });
         return this.room;
       },
@@ -103,6 +110,17 @@ export class RoomObject extends DurableObject<Env> {
         workerLogger("info", "office_opened", { room: code, scenario: scenario.id });
         return this.room;
       },
+    };
+  }
+
+  /** Calls to the matchmaker don't hold up the room; one that fails is logged, and the room's safety net takes over. */
+  private matchmaker(): Matchmaking {
+    const matchmaker = () => this.env.MATCHMAKER.getByName(MATCHMAKER_NAME);
+    const send = (event: string, call: Promise<void>) =>
+      this.ctx.waitUntil(call.catch((error: unknown) => workerLogger("warn", event, { message: error instanceof Error ? error.message : String(error) })));
+    return {
+      seek: (ticket) => send("matchmaking_seek_failed", matchmaker().seek(ticket)),
+      withdraw: (code) => send("matchmaking_withdraw_failed", matchmaker().withdraw(code)),
     };
   }
 

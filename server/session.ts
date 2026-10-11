@@ -78,7 +78,7 @@ export function openSession({ connection, rooms, findScenario, logger, now = Dat
         if (seated) return fail("already_in_room", `You are already in room ${seated.room.code}.`);
         const room = rooms.find(message.roomCode);
         if (!room) return fail("room_not_found", `No war room with code ${message.roomCode}.`);
-        return enter(room, { name: message.name, role: message.role, badge: message.badge, avatar: message.avatar, tags: identity.tags, resume: message.resume });
+        return enter(room, { name: message.name, role: message.role, badge: message.badge, avatar: message.avatar, tags: identity.tags, resume: message.resume, team: message.team });
       }
       case "leave":
         if (!seated) return fail("not_in_room", "You are not in a war room.");

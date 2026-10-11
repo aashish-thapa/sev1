@@ -15,13 +15,16 @@
     "bindings": [
       { "name": "ROOMS", "class_name": "RoomObject" },
       // One instance, the public room list the lobby reads.
-      { "name": "DIRECTORY", "class_name": "DirectoryObject" }
+      { "name": "DIRECTORY", "class_name": "DirectoryObject" },
+      // One instance, the queue matchmade rooms wait in for opponents.
+      { "name": "MATCHMAKER", "class_name": "MatchmakerObject" }
     ]
   },
   // The free plan only offers SQLite-backed Durable Objects.
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["RoomObject"] },
-    { "tag": "v2", "new_sqlite_classes": ["DirectoryObject"] }
+    { "tag": "v2", "new_sqlite_classes": ["DirectoryObject"] },
+    { "tag": "v3", "new_sqlite_classes": ["MatchmakerObject"] }
   ],
   "d1_databases": [
     {

@@ -71,3 +71,8 @@ export type MatchStage =
 
 /** A race nobody closes ends here, with whatever has closed by then. */
 export const MATCH_TIME_LIMIT_MS = 30 * 60_000;
+
+/** How long a matchmade room looks for opponents before a bot crew takes the other side. */
+export const SEARCH_TIMEOUT_MS = 30_000;
+/** How long a paired room waits for its opponents to arrive before racing whoever came, or bots. */
+export const ARRIVAL_TIMEOUT_MS = 20_000;

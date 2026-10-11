@@ -8,6 +8,7 @@ import {
   type ClientMessageInput,
   type Position,
   type Resume,
+  type RoomMode,
   type RoomVisibility,
   type ServerMessage,
   type Signal,
@@ -48,6 +49,7 @@ export type RoomEvents = {
   readonly closed: ServerMessageOf<"closed">;
   readonly signal: ServerMessageOf<"signal">;
   readonly phase: ServerMessageOf<"phase">;
+  readonly match: ServerMessageOf<"match">;
 };
 
 export type RoomClientOptions = {
@@ -66,7 +68,7 @@ export function seatOf(welcome: ServerMessageOf<"welcome">): Seat {
 }
 
 type Intent =
-  | ({ readonly kind: "create"; readonly scenarioId: string; readonly visibility: RoomVisibility } & Engineer)
+  | ({ readonly kind: "create"; readonly scenarioId: string; readonly visibility: RoomVisibility; readonly mode?: RoomMode } & Engineer)
   | ({ readonly kind: "join"; readonly roomCode: string; readonly resume?: Resume } & Engineer);
 
 /** Who takes the seat: shown to teammates by name, role, the badge and the body they chose. */
@@ -97,6 +99,7 @@ export class RoomClient {
     closed: new Set(),
     signal: new Set(),
     phase: new Set(),
+    match: new Set(),
   };
   /** Null until voice starts; resent on every new seat, since the server forgets it with the old one. */
   private voiceHeld: boolean | null = null;
@@ -142,7 +145,8 @@ export class RoomClient {
     return () => set.delete(listener);
   }
 
-  create(request: { scenarioId: string; visibility: RoomVisibility } & Engineer) {
+  /** `mode` defaults to co-op on the server. */
+  create(request: { scenarioId: string; visibility: RoomVisibility; mode?: RoomMode } & Engineer) {
     this.begin({ kind: "create", ...request });
   }
 
@@ -239,7 +243,7 @@ export class RoomClient {
     if (seat) {
       this.transmit({ type: "join", roomCode: seat.roomCode, name: intent.name, role: intent.role, badge: intent.badge, avatar: intent.avatar ?? null, resume: seat.resume });
     } else if (intent.kind === "create") {
-      this.transmit({ type: "create", scenarioId: intent.scenarioId, name: intent.name, role: intent.role, badge: intent.badge, avatar: intent.avatar ?? null, visibility: intent.visibility });
+      this.transmit({ type: "create", scenarioId: intent.scenarioId, name: intent.name, role: intent.role, badge: intent.badge, avatar: intent.avatar ?? null, visibility: intent.visibility, mode: intent.mode });
     } else {
       this.transmit({ type: "join", roomCode: intent.roomCode, name: intent.name, role: intent.role, badge: intent.badge, avatar: intent.avatar ?? null, resume: intent.resume });
     }

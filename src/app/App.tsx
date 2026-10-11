@@ -180,7 +180,7 @@ export function App({ shareUrl, proSale, adminApi, companyApi, ...services }: Pr
           rooms={{
             status: room.status,
             error: room.error?.message ?? null,
-            onCreate: (name, visibility, scenarioId) => room.create(scenarioId, { name, role, badge, avatar }, visibility),
+            onCreate: (name, visibility, scenarioId, format) => room.create(scenarioId, { name, role, badge, avatar }, visibility, format),
             onJoin: (code, name) => room.join(code, { name, role, badge, avatar }),
             listPublic: fetchPublicRooms,
           }}

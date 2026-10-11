@@ -40,6 +40,10 @@
   /* Data */
   --color-series: oklch(66% 0.120 74);
 
+  /* Versus sides — always paired with the team's name */
+  --color-team-red: oklch(70% 0.160 25);
+  --color-team-blue: oklch(72% 0.120 250);
+
   /* World — materials and people in the 3D office (never used for UI chrome) */
   --color-world-carpet: oklch(34% 0.018 250);
   --color-world-tile: oklch(58% 0.008 80);

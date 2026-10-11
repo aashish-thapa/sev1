@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { careerAt } from "../../domain/career.ts";
 import { ROLE_IDS, type Role } from "../../domain/incident.ts";
 import { ROLE_INFO } from "../../domain/roles.ts";
-import type { RoomVisibility } from "../../multiplayer/protocol.ts";
+import { ROOM_MODES, type RoomMode, type RoomVisibility } from "../../multiplayer/protocol.ts";
 import { usePublicRooms, type ListPublicRooms } from "../../multiplayer/usePublicRooms.ts";
 import type { LeaderboardView } from "../../storage/leaderboard-api.ts";
 import { AVATAR_COUNT, avatarNumber, POSES, stepAvatar, type Pose } from "../../domain/look.ts";
@@ -74,6 +74,15 @@ export function TopRanks({ view, href }: { view: LeaderboardView; href: string }
 
 type Mode = "solo" | "host" | "join";
 
+/** What the lobby can do with rooms: host one, join one, and list the open ones. */
+export type RoomActions = {
+  status: string;
+  error: string | null;
+  onCreate: (name: string, visibility: RoomVisibility, scenarioId: string, format: RoomMode) => void;
+  onJoin: (code: string, name: string) => void;
+  listPublic: ListPublicRooms;
+};
+
 type ModeCardProps = {
   role: Role;
   onRole: (role: Role) => void;
@@ -83,13 +92,14 @@ type ModeCardProps = {
   onSolo: () => void;
   /** What a room this player hosts may play: their unlocked War Rooms and the cross-team incident. */
   incidents: readonly { readonly id: string; readonly title: string; readonly tier: number }[];
-  rooms: { status: string; error: string | null; onCreate: (name: string, visibility: RoomVisibility, scenarioId: string) => void; onJoin: (code: string, name: string) => void; listPublic: ListPublicRooms };
+  rooms: RoomActions;
 };
 
 /** Bottom right: pick a role and a way to play, then START. */
 export function ModeCard({ role, onRole, name, onName, onSolo, incidents, rooms }: ModeCardProps) {
   const [mode, setMode] = useState<Mode>("solo");
   const [visibility, setVisibility] = useState<RoomVisibility>("private");
+  const [format, setFormat] = useState<RoomMode>("coop");
   // The list follows role and level, so a pick it no longer holds falls back to the first: the cross-team incident.
   const [pickedId, setPickedId] = useState<string | null>(null);
   const incident = incidents.find((candidate) => candidate.id === pickedId) ?? incidents[0];
@@ -100,7 +110,7 @@ export function ModeCard({ role, onRole, name, onName, onSolo, incidents, rooms 
 
   const start = () => {
     if (mode === "solo") onSolo();
-    else if (mode === "host") rooms.onCreate(name, visibility, incident.id);
+    else if (mode === "host") rooms.onCreate(name, visibility, incident.id, format);
     else if (code.length === 4) rooms.onJoin(code, name);
   };
   const canStart = !isBusy && !needsName && (mode !== "join" || code.length === 4);
@@ -135,6 +145,15 @@ export function ModeCard({ role, onRole, name, onName, onSolo, incidents, rooms 
           </div>
         )}
         {mode === "host" && (
+          <div className="mode-card__choice" role="radiogroup" aria-label="Format">
+            {ROOM_MODES.map((option) => (
+              <button key={option} type="button" role="radio" aria-checked={format === option} className="mode-card__pill" onClick={() => setFormat(option)}>
+                {FORMAT_LABEL[option]}
+              </button>
+            ))}
+          </div>
+        )}
+        {mode === "host" && (
           <div className="mode-card__choice" role="radiogroup" aria-label="Who can join">
             {(["private", "public"] as const).map((option) => (
               <button key={option} type="button" role="radio" aria-checked={visibility === option} className="mode-card__pill" onClick={() => setVisibility(option)}>
@@ -159,7 +178,10 @@ export function ModeCard({ role, onRole, name, onName, onSolo, incidents, rooms 
                 {publicRooms.rooms.slice(0, 4).map((room) => (
                   <li key={room.code}>
                     <button type="button" className="mode-card__room" aria-pressed={code === room.code} onClick={() => setCode(room.code)}>
-                      <span>{room.host}</span>
+                      <span>
+                        {room.host}
+                        {room.mode === "versus" && <span className="mode-card__versus"> Versus</span>}
+                      </span>
                       <span className="admin__dim">
                         {room.players}/{room.maxPlayers}
                       </span>
@@ -230,5 +252,7 @@ export function CharacterPicker({
     </section>
   );
 }
+
+const FORMAT_LABEL: Readonly<Record<RoomMode, string>> = { coop: "Co-op", versus: "Versus · red vs blue" };
 
 const POSE_LABEL: Readonly<Record<Pose, string>> = { idle: "Standing", phone: "On the phone", talk: "Talking" };

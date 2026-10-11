@@ -3,6 +3,7 @@ import { DurableObject } from "cloudflare:workers";
 import { encodeServerMessage, ROOM_CODE_QUERY } from "../src/multiplayer/protocol.ts";
 import { publicListing, type RoomListing } from "../server/listing.ts";
 import { DEFAULT_ROOM_TIMING, Room, type Connection } from "../server/room.ts";
+import { openVenue, type Venue } from "../server/venue.ts";
 import { officePaging } from "../server/paging.ts";
 import { findScenario } from "../server/scenarios.ts";
 import { openSession, type RoomDirectory } from "../server/session.ts";
@@ -21,7 +22,7 @@ const ROOM_GRACE_MS = 5 * 60_000;
  * socket closes the runtime is free to evict the object.
  */
 export class RoomObject extends DurableObject<Env> {
-  private room: Room | null = null;
+  private room: Venue | null = null;
   private listing: RoomListing | null = null;
   private claimedCode: string | null = null;
   private expiry: ReturnType<typeof setTimeout> | null = null;
@@ -85,11 +86,11 @@ export class RoomObject extends DurableObject<Env> {
    */
   private directory(code: string, officeScenario: string | null): RoomDirectory {
     return {
-      create: (scenario, visibility) => {
+      create: (scenario, visibility, mode) => {
         if (this.room !== null || this.claimedCode !== code) return null;
         this.listing = { visibility, openedAt: Date.now() };
-        this.room = new Room(code, scenario, DEFAULT_ROOM_TIMING, workerLogger, (room) => this.occupancyChanged(room));
-        workerLogger("info", "room_created", { room: code, scenario: scenario.id, visibility });
+        this.room = openVenue(mode, { code, scenario, timing: DEFAULT_ROOM_TIMING, logger: workerLogger, onOccupancyChange: (room) => this.occupancyChanged(room) });
+        workerLogger("info", "room_created", { room: code, scenario: scenario.id, visibility, mode });
         return this.room;
       },
       find: (candidate) => {
@@ -98,14 +99,14 @@ export class RoomObject extends DurableObject<Env> {
         if (!scenario) return undefined;
         this.listing = { visibility: "private", openedAt: Date.now() };
         // An office is calm when members walk in; the pager goes off a few minutes later.
-        this.room = new Room(code, scenario, DEFAULT_ROOM_TIMING, workerLogger, (room) => this.occupancyChanged(room), officePaging(Math.random));
+        this.room = new Room(code, scenario, DEFAULT_ROOM_TIMING, workerLogger, (room) => this.occupancyChanged(room), { paging: officePaging(Math.random) });
         workerLogger("info", "office_opened", { room: code, scenario: scenario.id });
         return this.room;
       },
     };
   }
 
-  private occupancyChanged(room: Room) {
+  private occupancyChanged(room: Venue) {
     this.reportToDirectory(room.code, this.listing && publicListing(room, this.listing));
     if (room.connectedCount > 0) {
       if (this.expiry) clearTimeout(this.expiry);

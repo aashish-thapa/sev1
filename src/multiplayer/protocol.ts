@@ -4,6 +4,8 @@ import { AVATARS } from "../warroom/floor/assets/catalog.ts";
 import { ROLE_IDS, type Role } from "../domain/incident.ts";
 import type { Debrief } from "../warroom/incident.ts";
 import type { CommsMessage } from "../warroom/scenario.ts";
+import type { Tally } from "../warroom/scorecard.ts";
+import { TEAMS, type LaneStanding, type MatchStage } from "../warroom/versus.ts";
 import type { OutputLine } from "../warroom/shell/types.ts";
 import { IncidentFrameSchema } from "./frame.ts";
 
@@ -104,6 +106,13 @@ const RoomPhaseSchema = z.enum(ROOM_PHASES);
 export const ROOM_VISIBILITIES = ["public", "private"] as const;
 export type RoomVisibility = (typeof ROOM_VISIBILITIES)[number];
 
+/** Co-op: one shared incident. Versus: two teams race their own copy of the same incident. */
+export const ROOM_MODES = ["coop", "versus"] as const;
+export type RoomMode = (typeof ROOM_MODES)[number];
+const RoomModeSchema = z.enum(ROOM_MODES);
+
+export const TeamSchema = z.enum(TEAMS);
+
 export const ClientMessageSchema = z.discriminatedUnion("type", [
   z.strictObject({
     type: z.literal("create"),
@@ -112,6 +121,7 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
     role: RoleSchema,
     // Clients from before public rooms never send it; their rooms stay invite-only.
     visibility: z.enum(ROOM_VISIBILITIES).default("private"),
+    mode: RoomModeSchema.default("coop"),
     badge: OfferedBadgeSchema,
     avatar: OfferedAvatarSchema,
   }),
@@ -188,6 +198,32 @@ const DebriefSchema = z.object({
   objectives: z.array(z.object({ role: z.enum(ROLE_IDS as [Role, ...Role[]]), label: z.string(), isMet: z.boolean() })).readonly().optional(),
 }) satisfies z.ZodType<Debrief>;
 
+const TallySchema = z.object({
+  playerId: PlayerIdSchema,
+  name: z.string(),
+  role: RoleSchema,
+  commands: z.int().nonnegative(),
+  changes: z.int().nonnegative(),
+  earlyDeclares: z.int().nonnegative(),
+  isFixer: z.boolean(),
+}) satisfies z.ZodType<Tally>;
+
+const LaneStandingSchema = z.object({
+  team: TeamSchema,
+  players: z.int().nonnegative(),
+  phase: z.enum(["waiting", "live", "monitoring", "closed"]),
+  alertRate: z.number().min(0).max(1),
+  reopenCount: z.int().nonnegative(),
+  finish: z.object({ points: z.number(), closedAt: z.number() }).nullable(),
+}) satisfies z.ZodType<LaneStanding>;
+
+const MatchStageSchema = z.discriminatedUnion("name", [
+  z.object({ name: z.literal("lineup") }),
+  z.object({ name: z.literal("racing") }),
+  z.object({ name: z.literal("overtime"), msLeft: z.number().nonnegative() }),
+  z.object({ name: z.literal("decided"), winner: z.union([TeamSchema, z.literal("draw")]) }),
+]) satisfies z.ZodType<MatchStage>;
+
 export const ServerMessageSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("welcome"),
@@ -203,6 +239,8 @@ export const ServerMessageSchema = z.discriminatedUnion("type", [
     /** This player's own shell history, so ↑ and `history` survive a reconnect. */
     history: z.array(z.string()),
     phase: RoomPhaseSchema.default("incident"),
+    /** The side this player is on in a versus match; null in a co-op room. */
+    team: TeamSchema.nullable().default(null),
   }),
   /** The room went quiet, or the pager went off; a full `state` frame follows with the incident to show. */
   z.object({ type: z.literal("phase"), phase: RoomPhaseSchema }),
@@ -232,7 +270,11 @@ export const ServerMessageSchema = z.discriminatedUnion("type", [
     type: z.literal("closed"),
     /** The postmortem answer is each player's own, so both outcomes are scored here. */
     debrief: z.object({ ifPostmortemCorrect: DebriefSchema, ifPostmortemWrong: DebriefSchema }),
+    /** What each engineer did, including those who have since left; older servers send none. */
+    scorecard: z.array(TallySchema).default([]),
   }),
+  /** A versus match's standings: sent as they change, and about once a second while it's on. */
+  z.object({ type: z.literal("match"), stage: MatchStageSchema, lanes: z.array(LaneStandingSchema) }),
   z.object({ type: z.literal("pong"), nonce: z.int().nonnegative().optional() }),
 ]);
 export type ServerMessage = z.infer<typeof ServerMessageSchema>;
@@ -259,6 +301,7 @@ export const PublicRoomSchema = z.object({
   players: z.int().nonnegative(),
   maxPlayers: z.int().positive(),
   scenarioTitle: z.string(),
+  mode: RoomModeSchema.default("coop"),
   /** Epoch milliseconds the room opened. */
   openedAt: z.number(),
 });

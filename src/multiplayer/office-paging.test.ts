@@ -24,7 +24,7 @@ function listener() {
 
 const rooms: Room[] = [];
 function open(paging: Paging | null) {
-  const room = new Room("ABCD", TEAM_SCENARIO, TIMING, silent, () => {}, paging);
+  const room = new Room("ABCD", TEAM_SCENARIO, TIMING, silent, () => {}, { paging });
   rooms.push(room);
   return room;
 }

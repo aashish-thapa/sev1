@@ -24,6 +24,8 @@ export type Career = {
   readonly level: Level;
   readonly title: Title;
   readonly experience: number;
+  /** Experience at which this level began, so progress to the next can be shown. */
+  readonly levelStartsAt: number;
   /** Experience at which the next promotion lands; null at the top. */
   readonly nextAt: number | null;
 };
@@ -42,5 +44,5 @@ export function careerAt(experience: number): Career {
   const levels = Object.keys(LEVEL_THRESHOLDS).map(Number) as Level[];
   const level = levels.reduce<Level>((reached, candidate) => (experience >= LEVEL_THRESHOLDS[candidate] ? candidate : reached), 0);
   const next = levels.find((candidate) => candidate > level);
-  return { level, title: TITLES[level], experience, nextAt: next === undefined ? null : LEVEL_THRESHOLDS[next] };
+  return { level, title: TITLES[level], experience, levelStartsAt: LEVEL_THRESHOLDS[level], nextAt: next === undefined ? null : LEVEL_THRESHOLDS[next] };
 }

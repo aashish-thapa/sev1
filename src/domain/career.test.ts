@@ -9,7 +9,7 @@ import { DEFAULT_PACE, planShift, rampFor } from "./shift.ts";
 
 describe("career ladder", () => {
   it("starts everyone as an intern with the next promotion in sight", () => {
-    expect(careerLevel(emptyProgress())).toEqual({ level: 0, title: "Intern", experience: 0, nextAt: 100 });
+    expect(careerLevel(emptyProgress())).toEqual({ level: 0, title: "Intern", experience: 0, levelStartsAt: 0, nextAt: 100 });
   });
 
   it("promotes on correct cards and passed War Rooms, and tops out at staff", () => {

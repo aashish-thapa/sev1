@@ -82,3 +82,26 @@ describe("a company office's pager", () => {
     expect(maya.ofType("phase")).toEqual([]);
   });
 });
+
+describe("a visitor in a company office", () => {
+  it("can't page the company: only its own people can", async () => {
+    const { openSession } = await import("../../server/session.ts");
+    const room = open({ quietMs: () => 60_000, resetAfterCloseMs: 10 });
+    const investor = listener();
+    const send = (message: object) => {
+      const text = JSON.stringify(message);
+      session.receive(text, text.length);
+    };
+    const session = openSession({
+      connection: investor.connection,
+      rooms: { create: () => null, find: (code) => (code === room.code ? room : undefined) },
+      findScenario: () => undefined,
+      logger: silent,
+      identity: { tags: [], isVisitor: true },
+    });
+    send({ type: "join", roomCode: room.code, name: "Sam", role: "data" });
+    expect(investor.ofType("welcome")).toHaveLength(1);
+    send({ type: "page" });
+    expect(investor.ofType("phase")).toEqual([]);
+  });
+});

@@ -26,8 +26,11 @@ export type SessionOptions = {
   readonly logger: Logger;
   /** Milliseconds, for rate limits; injectable so tests can move time. */
   readonly now?: () => number;
-  /** Who the host verified this socket belongs to (from its session cookie); guests have no tags. */
-  readonly identity?: { readonly tags: readonly string[] };
+  /**
+   * Who the host verified this socket belongs to (from its session cookie); guests have no tags. A visitor is in an
+   * office they don't work in, so they can watch and talk but not page the company.
+   */
+  readonly identity?: { readonly tags: readonly string[]; readonly isVisitor?: boolean };
 };
 
 /** What a transport hands the session: each text frame, and the socket going away. */
@@ -85,6 +88,8 @@ export function openSession({ connection, rooms, findScenario, logger, now = Dat
       case "command":
         return inRoom((room, playerId) => room.command(playerId, message.line));
       case "page":
+        // A visitor watches and talks; only the company's own people can page it.
+        if (identity.isVisitor) return;
         return inRoom((room, playerId) => room.page(playerId));
       case "declare":
         return inRoom((room, playerId) => room.declare(playerId));

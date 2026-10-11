@@ -6,7 +6,7 @@ import { DEFAULT_ROOM_TIMING, Room, type Connection } from "../server/room.ts";
 import { officePaging } from "../server/paging.ts";
 import { findScenario } from "../server/scenarios.ts";
 import { openSession, type RoomDirectory } from "../server/session.ts";
-import { IDENTITY_TAGS_HEADER, IDENTITY_USER_HEADER, OFFICE_SCENARIO_HEADER } from "./rooms.ts";
+import { IDENTITY_TAGS_HEADER, IDENTITY_USER_HEADER, OFFICE_SCENARIO_HEADER, VISITOR_HEADER } from "./rooms.ts";
 import { DIRECTORY_NAME } from "./directory-object.ts";
 import type { Env } from "./env.ts";
 import { workerLogger } from "./log.ts";
@@ -54,7 +54,7 @@ export class RoomObject extends DurableObject<Env> {
       close: (closeCode, reason) => socket.close(closeCode, reason),
     };
     const officeScenario = request.headers.get(OFFICE_SCENARIO_HEADER);
-    const session = openSession({ connection, rooms: this.directory(code, officeScenario), findScenario, logger: workerLogger, identity: { tags: tagsOf(request) } });
+    const session = openSession({ connection, rooms: this.directory(code, officeScenario), findScenario, logger: workerLogger, identity: { tags: tagsOf(request), isVisitor: request.headers.get(VISITOR_HEADER) === "1" } });
     const bytes = new TextEncoder();
     socket.addEventListener("message", (event) => {
       if (typeof event.data !== "string") {

@@ -15,6 +15,9 @@ export const IDENTITY_USER_HEADER = "x-sev1-user";
 /** Set on a socket the worker forwards into a company office: the scenario to open it with if nobody's in yet. */
 export const OFFICE_SCENARIO_HEADER = "x-sev1-office";
 
+/** Set on a socket the worker forwards for someone visiting an office they don't work in (an investor at a meeting). */
+export const VISITOR_HEADER = "x-sev1-visitor";
+
 /** Who opened the socket, from their session: their user id (null for guests) and granted tags. */
 export type Identify = (request: Request) => Promise<{ readonly userId: string | null; readonly tags: readonly string[] }>;
 
@@ -35,7 +38,7 @@ export async function routeRoomSocket(request: Request, env: Env, random: () => 
     const access = await office(request, code.data);
     if (access.kind === "denied") return new Response("This office is for the company's members", { status: 403 });
     // A visiting investor may be first in for the meeting, so they open the office just as a member would.
-    return forward(request, env, code.data, identity, access.kind === "not-an-office" ? null : officeScenarioId);
+    return forward(request, env, code.data, identity, access.kind === "not-an-office" ? null : officeScenarioId, access.kind === "visitor");
   }
 
   for (let attempt = 0; attempt < CLAIM_ATTEMPTS; attempt += 1) {
@@ -45,7 +48,7 @@ export async function routeRoomSocket(request: Request, env: Env, random: () => 
   return new Response("No free room code right now", { status: 503 });
 }
 
-function forward(request: Request, env: Env, code: string, identity: Awaited<ReturnType<Identify>>, officeScenarioId: string | null): Promise<Response> {
+function forward(request: Request, env: Env, code: string, identity: Awaited<ReturnType<Identify>>, officeScenarioId: string | null, isVisitor = false): Promise<Response> {
   const url = new URL(request.url);
   url.searchParams.set(ROOM_CODE_QUERY, code);
   const forwarded = new Request(url, request);
@@ -54,6 +57,8 @@ function forward(request: Request, env: Env, code: string, identity: Awaited<Ret
   // Only the worker decides what's an office; a client can't open one by sending the header itself.
   forwarded.headers.delete(OFFICE_SCENARIO_HEADER);
   if (officeScenarioId) forwarded.headers.set(OFFICE_SCENARIO_HEADER, officeScenarioId);
+  forwarded.headers.delete(VISITOR_HEADER);
+  if (isVisitor) forwarded.headers.set(VISITOR_HEADER, "1");
   return env.ROOMS.getByName(code).fetch(forwarded);
 }
 

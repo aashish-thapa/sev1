@@ -26,7 +26,7 @@ import { TASKS } from "./company/tasks.ts";
 import { CompanyService } from "./company/service.ts";
 import { COMPANIES_PATH, COMPANY_PATH, DEALS_PATH, TOP_COMPANIES_PATH } from "../src/storage/company-protocol.ts";
 import { careerLevel } from "../src/domain/career.ts";
-import { emptyProgress, ProgressSchema, type Progress } from "../src/domain/progress.ts";
+import { emptyProgress, hasDiscussedOn, ProgressSchema, type Progress } from "../src/domain/progress.ts";
 import type { AccountStore } from "./api/store.ts";
 import { D1AdminStore } from "./admin/d1-store.ts";
 import { ADMIN_PREFIX, handleAdmin } from "./admin/routes.ts";
@@ -126,6 +126,7 @@ export default {
           hiring: hiringStore,
           work: workStore,
           pantryOf: async (userId, day) => pantryCostOn((await savedProgressOf(accountStore, userId)).pantry, day),
+          discussedOn: async (userId, day) => hasDiscussedOn(await savedProgressOf(accountStore, userId), day),
           investors: investorStore,
           proposals: proposalStore,
           dealsOf: async (userId) => (await dealStore.openFor(userId)).map(dealWireOf),

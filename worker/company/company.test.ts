@@ -62,13 +62,13 @@ class MemoryAccounts implements AccountStore {
   }
 }
 
-function world(pantryOf?: (userId: string, day: string) => Promise<number>) {
+function world(pantryOf?: (userId: string, day: string) => Promise<number>, discussedOn?: (userId: string, day: string) => Promise<boolean>) {
   let now = START;
   let ids = 0;
   const store = new MemoryCompanyStore();
   // Every seed run is a tier-1 War Room, so the audit can price its pay.
   const accounts = new AccountService(new MemoryAccounts(store), () => now, { bank: store, tierOf: () => 1 });
-  const companies = new CompanyService({ store, now: () => now, newId: () => `id-${(ids += 1)}`, isOverLimit: async () => false, pantryOf });
+  const companies = new CompanyService({ store, now: () => now, newId: () => `id-${(ids += 1)}`, isOverLimit: async () => false, pantryOf, discussedOn });
   const user = (id: string, username: string): User => {
     store.addUser(id, username);
     return { id, username, passwordHash: "", createdAt: START - DAY_MS, tags: [] };
@@ -185,6 +185,19 @@ describe("work days and payroll", () => {
     expect((await setup.companies.settle(founder)).ok).toBe(true);
   });
 
+  it("lets only the founder close the day", async () => {
+    const setup = world();
+    const founder = setup.user("u1", "maya");
+    const sam = setup.user("u2", "sam");
+    await foundedCompany(setup, founder);
+    expect((await setup.companies.invite(founder, { username: "sam", role: "frontend", payCents: 20_000 })).ok).toBe(true);
+    const [offer] = (await setup.companies.mine(sam)).invitations;
+    expect((await setup.companies.accept(sam, offer.id)).ok).toBe(true);
+
+    expect(await setup.companies.settle(sam)).toEqual({ ok: false, problem: "not_founder" });
+    expect((await setup.companies.settle(founder)).ok).toBe(true);
+  });
+
   it("charges the company for what its members took from the pantry that day", async () => {
     const asked: string[] = [];
     const setup = world(async (userId, day) => (asked.push(`${userId}:${day}`), 235));
@@ -194,6 +207,23 @@ describe("work days and payroll", () => {
     if (!settled.ok) throw new Error("settle failed");
     expect(settled.value.lines.filter((line) => line.reason === "pantry").map((line) => line.amountCents)).toEqual([-235]);
     expect(asked).toEqual([`u1:${new Date(setup.now()).toISOString().slice(0, 10)}`]);
+  });
+
+  it("pays half to a member who answered no discussion card that day", async () => {
+    const full = world();
+    const skipped = world(undefined, async () => false);
+    const [fullDay, skippedDay] = await Promise.all(
+      [full, skipped].map(async (setup) => {
+        const founder = setup.user("u1", "maya");
+        await foundedCompany(setup, founder);
+        return setup.companies.settle(founder);
+      }),
+    );
+    if (!fullDay.ok || !skippedDay.ok) throw new Error("settle failed");
+    const payroll = (day: typeof fullDay.value) => day.lines.find((line) => line.reason === "payroll")?.amountCents ?? 0;
+    expect(payroll(skippedDay.value)).toBe(-Math.floor(-payroll(fullDay.value) / 2));
+    expect(skippedDay.value.undiscussed).toEqual(["maya"]);
+    expect(fullDay.value.undiscussed).toEqual([]);
   });
 
   it("refuses payroll the server never booked, or for the wrong amount", () => {

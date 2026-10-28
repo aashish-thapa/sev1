@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseLocalDate } from "./calendar.ts";
 import { isPlausibleProgress } from "./audit.ts";
 import { payRef } from "./economy.ts";
-import { earn, emptyProgress, hintsUsedOn, ProgressSchema, recordAssistedRun, spendHint, recordAttempt, recordWarRoomRun, startShift, warRoomPlays, type Attempt } from "./progress.ts";
+import { earn, emptyProgress, hasDiscussedOn, hintsUsedOn, ProgressSchema, recordAssistedRun, spendHint, recordAttempt, recordWarRoomRun, startShift, warRoomPlays, type Attempt } from "./progress.ts";
 
 const DAY = parseLocalDate("2026-10-10");
 const attempt = (incidentId: string, isCorrect: boolean): Attempt => ({ incidentId, topic: "database", difficulty: 1, isCorrect, elapsedMs: 9000 });
@@ -12,6 +12,18 @@ describe("warRoomPlays", () => {
     expect(warRoomPlays(emptyProgress())).toBe(0);
     const played = recordWarRoomRun(recordWarRoomRun(recordWarRoomRun(emptyProgress(), "a", 40, "C"), "a", 80, "A"), "b", 60, "B");
     expect(warRoomPlays(played)).toBe(3);
+  });
+});
+
+describe("hasDiscussedOn", () => {
+  it("needs one answered card that day, in an open or a finished shift", () => {
+    const started = startShift(emptyProgress(), DAY, ["a", "b"]);
+    expect(hasDiscussedOn(started, DAY)).toBe(false);
+    const answered = recordAttempt(started, attempt("a", false));
+    expect(hasDiscussedOn(answered, DAY)).toBe(true);
+    const finished = recordAttempt(answered, attempt("b", true));
+    expect(hasDiscussedOn(finished, DAY)).toBe(true);
+    expect(hasDiscussedOn(finished, "2026-10-11")).toBe(false);
   });
 });
 

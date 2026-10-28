@@ -61,6 +61,14 @@ describe("company rules", () => {
     expect(noServers.lines.some((line) => line.reason === "revenue")).toBe(false);
   });
 
+  it("pays half to a member who skipped the day's discussion", () => {
+    const day = settleWorkDay(shop, { healthyShare: 1, tasksShipped: 0, contractorCents: 0, undiscussedIds: new Set(["maya"]) });
+    const full = settleWorkDay(shop, { healthyShare: 1, tasksShipped: 0, contractorCents: 0 });
+    const payOf = (settled: typeof day, userId: string) => settled.payroll.find((pay) => pay.userId === userId)?.amountCents;
+    expect(payOf(day, "maya")).toBe(Math.floor((payOf(full, "maya") ?? 0) / 2));
+    expect(payOf(day, "founder")).toBe(payOf(full, "founder"));
+  });
+
   it("shares what's left equally when funds can't cover payroll", () => {
     const broke = settleWorkDay({ ...shop, fundsCents: 0, servers: [] }, { healthyShare: 0, tasksShipped: 0, contractorCents: 0 });
     expect(broke.isPayrollShort).toBe(true);
